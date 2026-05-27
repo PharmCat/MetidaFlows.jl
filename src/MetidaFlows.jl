@@ -6,16 +6,26 @@ import NamedGraphs: add_vertex!, add_edge!, is_cyclic
 
 import NamedGraphs.Graphs: topological_sort
 
-import Base.show
+import Base: show, keys, getindex, setindex!
 #
 abstract type AbstractDataNode end
 #
 abstract type AbstractNodeType end
 #
+abstract type AbstractAuditEvent end
+#
 abstract type WorkFlowType end
 #
 struct DAW <: WorkFlowType end # Data Analysis Workflow
 struct ABW <: WorkFlowType end # Agent-Based Workflow
+
+
+struct LogMsg
+    id::UInt64
+    timestamp
+    level::Symbol
+    message::String
+end
 #
 abstract type AbstractNodeFields end
 abstract type AbstractNodeSettings <: AbstractNodeFields end
@@ -23,16 +33,23 @@ abstract type AbstractNodeData  <: AbstractNodeFields end
 abstract type AbstractNodeState  <: AbstractNodeFields end
 abstract type AbstractNodeInputBuffer  <: AbstractNodeFields end
 
+# Обеспечивает Dict совместимое поведение AbstractNodeFields (NodeState)
 Base.getindex(obj::AbstractNodeFields, f::Symbol) = getfield(obj, f)
-Base.setindex!(obj::AbstractNodeFields, val, f::Symbol) = setfield!(obj, f, val)
+function Base.setindex!(obj::T, val, f::Symbol) where T <: AbstractNodeFields
+    ismutabletype(T) || error("immutable")
+    setfield!(obj, f, val)
+end
+Base.keys(obj::AbstractNodeFields) = fieldnames(obj)
 
 # Minimal fields for NodeState
 # Dict compatible struct and minimal methods
 mutable struct NodeState <: AbstractNodeState
     exec_n::Int
     ready_ports::Vector{Symbol}
+    execution_id::UInt64
+    log::Vector{LogMsg}
     function NodeState()
-        new(0, Symbol[])
+        new(0, Symbol[], 0, LogMsg[])
     end
 end 
 #
@@ -65,7 +82,7 @@ end
 #
 mutable struct NodeProperties
     id::Int
-    status::Symbol # => :clean, :dirty, :executing, :failed, :idle, :invalid
+    status::Symbol # => :clean, :dirty, :executing, :failed, :idle, :invalid_*
     position::Tuple{Int, Int}
     function NodeProperties(id, status, position)
         new(id, status, position)
@@ -87,7 +104,7 @@ struct DataNode{T <: AbstractNodeType, SettingsT, DataT, StateT, BufferT} <: Abs
     spec::NodeSpec
     settings::SettingsT   # Dict{Symbol, Any}() by default
     data::DataT           # Dict{Symbol, Any}() by default
-    state::StateT         # Dict{Symbol, Any}() by default
+    state::StateT         # NodeState by default
     input_buffer::BufferT # Dict{Symbol, Any}() by default
     function DataNode(type::Type{T}, properties, spec, settings::SettingsT, data::DataT, state::StateT, input_buffer::BufferT) where T <: AbstractNodeType where SettingsT where DataT  where StateT  where BufferT  
         new{T, SettingsT, DataT, StateT, BufferT}(properties, spec, settings, data, state, input_buffer)
@@ -105,10 +122,7 @@ Cтатусы:
 :idle - just created
 :clean - executed
 :dirty - changes in settings or 
-:queued
-:running
-:waiting
-:finished
+:executing
 :failed
 :invalid_
 =#
@@ -122,13 +136,16 @@ mutable struct Workflow{WorkFlowType}
     connections::Dict{Int, NodeConnection} # {Connection id, Connection}
     incoming::Dict{Int, Vector{Int}} # {Node id, [connection ids]} 
     outgoing::Dict{Int, Vector{Int}} # {Node id, [connection ids]}
+    run_id::UInt64
+    log::Vector{LogMsg}
+    audit_log::Vector{AbstractAuditEvent}
 end
 #
 function Workflow(id::Int; type::Symbol = :DAW)
     if type == :DAW
-        Workflow{DAW}(id, "Default", 0, Dict{Int, DataNode}(), 0, Dict{Int, NodeConnection}(), Dict{Int, Vector{Int}}(), Dict{Int, Vector{Int}}())
+        Workflow{DAW}(id, "Default", 0, Dict{Int, DataNode}(), 0, Dict{Int, NodeConnection}(), Dict{Int, Vector{Int}}(), Dict{Int, Vector{Int}}(), 0, LogMsg[], AbstractAuditEvent[])
     else
-        Workflow{ABW}(id, "Default", 0, Dict{Int, DataNode}(), 0, Dict{Int, NodeConnection}(), Dict{Int, Vector{Int}}(), Dict{Int, Vector{Int}}())
+        Workflow{ABW}(id, "Default", 0, Dict{Int, DataNode}(), 0, Dict{Int, NodeConnection}(), Dict{Int, Vector{Int}}(), Dict{Int, Vector{Int}}(), 0, LogMsg[], AbstractAuditEvent[])
     end
 end
 #
@@ -236,6 +253,15 @@ Store value in node execution state.
 """
 function setstate!(node::AbstractDataNode, s::Symbol, v)
     node.state[s] = v
+    node
+end
+
+function setreadyports!(node::AbstractDataNode, v)
+    portvec = getstate(node, :ready_ports)
+    resize!(portvec, length(v))
+    @inbounds for i in eachindex(v)
+        portvec[i] = v[i]
+    end
     node
 end
 
@@ -473,8 +499,20 @@ end
     add_connection!(model::Workflow, c::NodeConnection)
 
 Add connection to workflow.
+
+Performs:
+- connection validation,
+- connection registration,
+- incoming/outgoing index updates.
+
+If the source node already has status `:clean`,
+its output data is immediately propagated into
+the target node input buffer.
+
+# Returns
+Assigned connection identifier (`Int`).
 """
-function add_connection!(model::Workflow, c::NodeConnection)
+function add_connection!(model::Workflow, c::NodeConnection)::Int
     check_connection_validity(model, c) || return 0
     id = model.c_iter += 1
     model.connections[id] = c
@@ -498,6 +536,15 @@ end
     delete_connection!(model::Workflow, id::Int)
 
 Remove connection from workflow.
+
+Performs:
+- deletion of corresponding child input buffer entry,
+- removal from incoming/outgoing indices,
+- deletion from workflow connection storage.
+
+# Returns
+- `true` if connection existed and was removed.
+- `false` otherwise.
 """
 function delete_connection!(model::Workflow, id::Int)
     if haskey(model.connections, id)
@@ -517,10 +564,13 @@ end
 """
     add_node!(model::Workflow, node::AbstractDataNode)
 
-Add node to workflow and assign new ID.
+Add node to workflow.
+
+Assigns a new unique node identifier
+and registers the node in workflow storage.
 
 # Returns
-Assigned node ID.
+Assigned node identifier (`Int`).
 """
 function add_node!(model::Workflow, node::AbstractDataNode)
     id = model.n_iter += 1
@@ -532,6 +582,15 @@ end
     delete_node!(model::Workflow, id::Int)
 
 Remove node from workflow.
+
+Performs:
+- deletion of all incoming and outgoing connections,
+- cleanup of connection indices,
+- removal of node from workflow storage.
+
+# Returns
+- `true` if node existed and was removed.
+- `false` otherwise.
 """
 function delete_node!(model::Workflow, id::Int)
     if haskey(model.nodes, id)
@@ -615,7 +674,7 @@ function reset_status!(model::Workflow)
     end 
 end
 """
-    mark_dirty!(node)
+    mark_dirty!(node::AbstractDataNode)
 
 Invalidate node execution result.
 
@@ -626,7 +685,9 @@ Performs the following operations:
 
 This function intentionally does **not** clear:
 - node settings,
-- input buffer.
+- input buffer,
+- execution logs,
+- execution counters/state metadata.
 """
 function mark_dirty!(node::AbstractDataNode)
     setstatus!(node, :dirty)
@@ -645,23 +706,34 @@ using [`mark_dirty!`](@ref).
 The traversal follows all outgoing connections recursively.
 """
 function invalidate_downstream!(model::Workflow, id::Int)
-    #if getstatus(model.nodes[id]) == :clean  # safet to remove this and ivalidate all 
-        node = getnode(model, id)
+    node = getnode(model, id)
+    if getstatus(node) != :dirty
         mark_dirty!(node)
         children = get_children(model, id)
         for (op, c, ip) in children
             children_node = getnode(model, c)
-            empty!(children_node.input_buffer)
+            # delete oly port buffer
+            delete!(children_node.input_buffer, ip)
+            # if not, can be multiple ivalidation runs in 2 or more connections 
             invalidate_downstream!(model, c)
         end
-    #end
+    end
+    
 end
 
 """
     setsettings!(model::Workflow, id::Int, settings::Dict{Symbol, <: Any})
 
-Applies new settings using [`setsettings_unsafe!`](@ref)
-and invalidates the node together with all downstream nodes.
+Apply new node settings and invalidate dependent nodes.
+
+Settings are applied using
+[`setsettings_unsafe!`](@ref),
+after which the target node and all downstream nodes
+are invalidated via [`invalidate_downstream!`](@ref).
+
+# Notes
+This function is the safe high-level entry point
+for mutating node configuration inside a workflow.
 """
 function setsettings!(model::Workflow, id::Int, settings::Dict{Symbol, <: Any})
     node = getnode(model, id)
@@ -673,6 +745,13 @@ end
     setsettings_unsafe!(node::AbstractDataNode, settings::Dict{Symbol, <: Any})
 
 Direct mutation of node settings without invalidation. Can be re-implemented for every node type.
+
+Default implementation copies all provided key-value pairs into `node.settings`.
+
+# Warning
+This function does NOT invalidate cached execution results or downstream nodes.
+
+Use [`setsettings!`](@ref) for normal workflow operation
 """
 function setsettings_unsafe!(node::AbstractDataNode, settings::Dict{Symbol, <: Any})
     for (k, v) in settings
@@ -688,8 +767,13 @@ end
 
 Check whether node is ready for execution.
 
-A node is considered ready when all parent nodes connected
-through incoming edges have status `:clean`.
+A node is considered ready when:
+- all parent nodes connected through incoming edges have status `:clean`.
+
+# Notes
+- Current node status itself is not checked.
+- Input buffer completeness is validated separately via
+  [`execution_node_validation`](@ref).
 """
 function isready(model::Workflow, id::Int)
     node = getnode(model, id)
@@ -711,8 +795,16 @@ Validate node structure and configuration.
 
 Default implementation always returns `true`.
 
-This function is intended for specialization
-by concrete node implementations.
+This function is intended for specialization by concrete node implementations.
+
+Typical validation rules may include:
+- internal consistency checks,
+- structural constraints,
+- node-specific invariants.
+
+# Returns
+- `true` if node structure is valid.
+- `false` otherwise.
 """
 function validate_node(node::AbstractDataNode)
     true
@@ -720,6 +812,30 @@ end
 function validate_node(model::Workflow, node_id::Int)
     validate_node(getnode(model, node_id))
 end
+#=
+    execution_node_validation(node::AbstractDataNode)
+
+Validate node readiness before execution.
+
+Checks that:
+- every declared input port has a corresponding value
+  in `node.input_buffer`,
+- [`validate_node`](@ref) succeeds.
+
+This validation is intended for runtime execution safety,
+ensuring that all required inputs are available before
+calling [`execute_unsafe!`](@ref).
+
+# Returns
+- `true` if node is ready for execution.
+- `false` otherwise.
+=#
+function execution_node_validation(node::AbstractDataNode)
+    # All ports must have something in input_buffer
+    return all(x-> x.label in keys(node.input_buffer), node.spec.input_ports) && validate_node(node)
+end
+
+
 """
     validate_settings(node::AbstractDataNode) 
 
@@ -727,8 +843,16 @@ Validate node settings before execution.
 
 Default implementation always returns `true`.
 
-This function is intended for specialization
-by concrete node implementations.
+This function is intended for specialization by concrete node implementations.
+
+Typical validation rules may include:
+- required setting presence,
+- range checks,
+- semantic validation of configuration values.
+
+# Returns
+- `true` if settings are valid.
+- `false` otherwise.
 """
 function validate_settings(node::AbstractDataNode) 
     # not used yet
@@ -746,8 +870,17 @@ Called after node execution completes.
 
 Default implementation always returns `true`.
 
-This function is intended for specialization
-by concrete node implementations.
+This function is intended for specialization by concrete node implementations.
+
+Typical validation rules may include:
+- output datatype verification,
+- required output ports presence,
+- shape or schema validation,
+- domain-specific consistency checks.
+
+# Returns
+- `true` if execution result is valid.
+- `false` otherwise.
 """
 function validate_result(node::AbstractDataNode)
     true
@@ -777,22 +910,39 @@ Execute workflow node.
 Main workflow execution entry point.
 
 # Execution Stages
-1. Optional cycle detection.
-2. Skip execution for `:clean` nodes.
-3. Mark node as `:executing`.
-4. Optionally execute upstream dependencies.
-5. Validate node and settings.
-6. Execute node implementation via [`execute_unsafe!`](@ref).
-7. Store execution state.
-8. Clear input buffer.
-9. Propagate outputs downstream.
-10. Optionally invalidate downstream nodes.
-11. Validate execution result.
-12. Mark node as `:clean`.
+1. Initialize per-run execution state and logs.
+2. Optionally detect recursive cyclic execution.
+3. Skip execution for nodes already marked `:clean`.
+4. Mark node as `:executing`.
+5. Optionally execute upstream dependencies recursively.
+6. Validate node structure and execution readiness.
+7. Validate node settings.
+8. Execute node implementation via [`execute_unsafe!`](@ref).
+9. Store execution state (`ready_ports`).
+10. Propagate outputs downstream through input buffers.
+11. Optionally invalidate downstream nodes.
+12. Validate execution result.
+13. Mark node as `:clean`.
 
+# Arguments
+- `execute_upstream`:
+  recursively execute all parent nodes before executing current node.
+- `invalidate_downstream`:
+  invalidate downstream execution results after successful execution.
+- `check_cyclic`:
+  detect recursive execution loops during direct execution calls.
+
+# Returns
+Vector of output port labels (`Vector{Symbol}`) produced during execution.
 """
 function execute!(model::Workflow, id::Int; execute_upstream::Bool = true, invalidate_downstream::Bool = true, check_cyclic::Bool = true) 
     node =  getnode(model, id)
+
+    if getstate(node, :execution_id) != model.run_id
+        empty!(getstate(node, :log))
+        setstate!(node, :execution_id, model.run_id)
+    end
+
     if check_cyclic
         # Это обнаружит цикл только при повторном заходе в тот же узел в рамках одного вызова. 
         # Не является настоящей защитой от циклов (реализовано в scheduler!)
@@ -804,9 +954,10 @@ function execute!(model::Workflow, id::Int; execute_upstream::Bool = true, inval
     #
     if getstatus(node) == :clean
         # clean node - no need for executing
-        return node.state[:ready_ports]
+        return getstate(node, :ready_ports)
     end
     #
+    # need to catch errors...
     setstatus!(node, :executing)
     # Check and execute parent nodes
     # execute_upstream should bu use carefully
@@ -818,7 +969,7 @@ function execute!(model::Workflow, id::Int; execute_upstream::Bool = true, inval
         end
     end
     # Check is valid 
-    if !validate_node(node)
+    if !execution_node_validation(node)
         setstatus!(node, :invalid_node)
         return Symbol[]
     end
@@ -829,7 +980,7 @@ function execute!(model::Workflow, id::Int; execute_upstream::Bool = true, inval
     # Execute node
     ready_ports = execute_unsafe!(node)
     # Save state ready_ports
-    setstate!(node, :ready_ports, ready_ports)
+    setreadyports!(node, ready_ports)
     # push outputs for each ready port
     push_buffer!(model, id)
     # Invalidate children
@@ -896,13 +1047,25 @@ end
 
 Execute entire data analysis workflow (DAW) using topological ordering.
 
-This scheduler is designed for deterministic acyclic
-data-analysis workflows.
+This scheduler is designed for deterministic acyclic data-analysis workflows.
+
+# Execution Steps
+1. Build workflow graph.
+2. Validate graph acyclicity.
+3. Generate new workflow `run_id`.
+4. Reset node execution states.
+5. Execute nodes in topological order.
+
+# Notes
+- Nodes are executed exactly once per scheduler run.
+- Upstream execution and downstream invalidation are disabled
+  because execution order is already guaranteed by topology.
+- Cyclic workflows are rejected before execution starts.
 """
 function scheduler!(model::Workflow{DAW})
     g = makegraph(model)
     if is_cyclic(g) error("workflow is cyclic") end
-
+    model.run_id = rand(UInt64) # change to thread safe
     reset!(model)
 
     order = topological_sort(g)
@@ -916,11 +1079,15 @@ end
 
 Execute workflow using queue-based agent/event scheduling.
 
-This scheduler is intended for dynamic or agent-based workflows (ABW),
-where execution readiness is determined during runtime.
+This scheduler is intended for dynamic or agent-based workflows (ABW), where execution readiness is determined during runtime.
+
+# Arguments
+- `maxiter`:
+  maximum number of scheduler iterations before aborting execution.
 """
 function scheduler!(model::Workflow{ABW}; maxiter = 1000)
-    
+    # change to thread safe
+    model.run_id = rand(UInt64)
     for (id, node) in model.nodes
         setstatus!(node, :dirty)
     end
@@ -1052,12 +1219,46 @@ end
 Convert connection to dictionary representation.
 """
 function connection_to_dict(nc::NodeConnection)
-    d               = Dict{Symbol, Any}()
+    d               = Dict{Symbol, Union{Int, Symbol}}()
     d[:output_id]   = nc.output_id
     d[:output_port] = nc.output_port
     d[:input_id]    = nc.input_id
     d[:input_port]  = nc.input_port
     d
+end
+
+"""
+    workflow_to_dict(w::Workflow) -> Dict
+
+Convert workflow to dictionary representation.
+"""
+function workflow_to_dict(w::Workflow)
+    d               = Dict{Symbol, Any}()
+    d[:id]          = w.id
+    d[:name]        = w.name
+    d[:n_iter]      = w.n_iter
+    n               = Dict{Symbol, Dict}()
+    for (k,v) in w.nodes
+        n[string(k)] = node_to_dict(v)
+    end
+    d[:nodes]       = n
+    d[:c_iter]      = w.c_iter
+    c               = Dict{Symbol, Dict}()
+    for (k,v) in w.connections
+        c[string(k)] = connection_to_dict(v)
+    end
+    d[:connections] = c
+    i               = Dict{Symbol, Dict}()
+    for (k,v) in w.incoming
+        i[string(k)] = v
+    end
+    d[:incoming]    = i
+    o               = Dict{Symbol, Dict}()
+    for (k, v) in w.outgoing
+        o[string(k)] = v
+    end
+    d[:outgoing]    = o
+    return d
 end
 
 end
