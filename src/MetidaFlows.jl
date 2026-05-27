@@ -812,10 +812,11 @@ end
 function validate_node(model::Workflow, node_id::Int)
     validate_node(getnode(model, node_id))
 end
-#=
+
+"""
     execution_node_validation(node::AbstractDataNode)
 
-Validate node readiness before execution.
+Internal function. Validate node readiness before execution.
 
 Checks that:
 - every declared input port has a corresponding value
@@ -829,7 +830,7 @@ calling [`execute_unsafe!`](@ref).
 # Returns
 - `true` if node is ready for execution.
 - `false` otherwise.
-=#
+"""
 function execution_node_validation(node::AbstractDataNode)
     # All ports must have something in input_buffer
     return all(x-> x.label in keys(node.input_buffer), node.spec.input_ports) && validate_node(node)
