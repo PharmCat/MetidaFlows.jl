@@ -1,7 +1,7 @@
 using MetidaFlows
 using Test, CSV, DataFrames
 
-import MetidaFlows: NodeSpec, PortSpec, AbstractNodeType, Workflow, DataNode, NodeConnection, 
+import MetidaFlows: NodeSpec, PortSpec, AbstractNodeType, Workflow, DataNode, NodeConnection, ExecuteSettings,
 add_node!, add_connection!, setsettings!, execute_unsafe!, setdata!, scheduler!, execute!,
 getinputdata, getdata, getstatus,
 delete_node!, delete_connection!
@@ -384,7 +384,7 @@ end
     @test getstatus(node1) == :dirty
     @test getstatus(node2) == :dirty
 
-    @test isempty(node2.input_buffer)
+    @test isempty(node2.input_buffer[:csv])
 
 end
 
@@ -487,11 +487,11 @@ end
         NodeConnection(id1, :csv, id2, :csv)
     )
 
-    @test haskey(node2.input_buffer, :csv)
+    @test haskey(node2.input_buffer[:csv], cid)
 
     delete_connection!(workflow, cid)
 
-    @test !haskey(node2.input_buffer, :csv)
+    @test !haskey(node2.input_buffer[:csv], cid)
 
 end
 ############################################################
@@ -628,7 +628,7 @@ end
 
     id = add_node!(workflow, node)
 
-    rp = execute!(workflow, id; execute_upstream = false)
+    rp = execute!(workflow, id; settings = ExecuteSettings(;execute_upstream = false))
 
     @test rp == Symbol[]
     @test getstatus(node) == :invalid_node

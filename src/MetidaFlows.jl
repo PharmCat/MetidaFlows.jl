@@ -41,6 +41,25 @@ function Base.setindex!(obj::T, val, f::Symbol) where T <: AbstractNodeFields
 end
 Base.keys(obj::AbstractNodeFields) = fieldnames(obj)
 
+struct ExecuteSettings
+    execute_upstream::Bool
+    invalidate_downstream::Bool 
+    check_cyclic::Bool
+    check_input_buffer::Bool
+    function ExecuteSettings(execute_upstream, invalidate_downstream, check_cyclic, check_input_buffer)
+        new(execute_upstream, invalidate_downstream, check_cyclic, check_input_buffer)
+    end
+    function ExecuteSettings(;
+        execute_upstream::Bool = true,
+        invalidate_downstream::Bool = true,
+        check_cyclic::Bool = true,
+        check_input_buffer::Bool = true)
+        ExecuteSettings(execute_upstream, invalidate_downstream, check_cyclic, check_input_buffer)
+    end
+    function ExecuteSettings(all_flags::Bool)
+         ExecuteSettings(all_flags, all_flags, all_flags, all_flags)
+    end
+end
 # Minimal fields for NodeState
 # Dict compatible struct and minimal methods
 mutable struct NodeState <: AbstractNodeState
@@ -53,10 +72,17 @@ mutable struct NodeState <: AbstractNodeState
     end
 end 
 #
-struct PortSpec
+abstract type AbstractPortType end
+struct MultiPort <: AbstractPortType end
+struct SinglePort <: AbstractPortType end
+#
+struct PortSpec{T <: AbstractPortType}
     name::String
     datatype::Type
     label::Symbol
+    function PortSpec(name, datatype, label, ::T = SinglePort()) where T <: AbstractPortType
+        new{T}(name, datatype, label)
+    end
 end
 #
 struct NodeSpec
@@ -105,14 +131,22 @@ struct DataNode{T <: AbstractNodeType, SettingsT, DataT, StateT, BufferT} <: Abs
     settings::SettingsT   # Dict{Symbol, Any}() by default
     data::DataT           # Dict{Symbol, Any}() by default
     state::StateT         # NodeState by default
-    input_buffer::BufferT # Dict{Symbol, Any}() by default
-    function DataNode(type::Type{T}, properties, spec, settings::SettingsT, data::DataT, state::StateT, input_buffer::BufferT) where T <: AbstractNodeType where SettingsT where DataT  where StateT  where BufferT  
+    input_buffer::Dict{Symbol, Dict{Int, BufferT}} # Dict{Symbol, Any}() by default
+    function DataNode(type::Type{T}, properties, spec, settings::SettingsT, data::DataT, state::StateT, input_buffer::Dict{Symbol, Dict{Int, BufferT}} ) where T <: AbstractNodeType where SettingsT where DataT  where StateT  where BufferT
+        for k in keys(input_buffer)
+            isportinspec(k, spec, :input) || error("Input buffer key $k doesn't match any input port in node specification")
+        end
+        for ip in spec.input_ports
+            if !haskey(input_buffer, ip.label)
+                input_buffer[ip.label] = Dict{Int, BufferT}()
+            end
+        end
         new{T, SettingsT, DataT, StateT, BufferT}(properties, spec, settings, data, state, input_buffer)
     end
-    function DataNode(type::Type, id, status, position, spec; settings = Dict{Symbol, Any}(), data = Dict{Symbol, Any}(), state = NodeState(), input_buffer = Dict{Symbol, Any}())
+    function DataNode(type::Type, id, status, position, spec; settings = Dict{Symbol, Any}(), data = Dict{Symbol, Any}(), state = NodeState(), input_buffer = Dict{Symbol, Dict{Int, Any}}())
         DataNode(type,  NodeProperties(id, status, position), spec, settings, data, state, input_buffer)
     end
-    function DataNode(type::Type, spec; settings = Dict{Symbol, Any}(), data = Dict{Symbol, Any}(), state = NodeState(), input_buffer = Dict{Symbol, Any}())
+    function DataNode(type::Type, spec; settings = Dict{Symbol, Any}(), data = Dict{Symbol, Any}(), state = NodeState(), input_buffer = Dict{Symbol, Dict{Int, Any}}())
         DataNode(type,  NodeProperties(), spec, settings, data, state, input_buffer)
     end
 end
@@ -303,13 +337,22 @@ end
 
 Return Julia datatype of port by label.
 """
-function getporttype(node::T, l::Symbol, direction::Symbol) where T <: DataNode
+function getporttype(node::AbstractDataNode, l::Symbol, direction::Symbol) 
     i = getportnumber(node, l, direction) 
     return getporttype(node, i, direction) 
 end
 
-
-
+"""
+    getportspec(node::AbstractDataNode, l::Symbol, direction::Symbol)
+"""
+function  getportspec(node::AbstractDataNode, l::Symbol, direction::Symbol)
+    i = getportnumber(node, l, direction) 
+    if direction == :input
+        return node.spec.input_ports[i]
+    else
+        return node.spec.output_ports[i]
+    end
+end
 """
     isportexist(node::AbstractDataNode, port::Symbol, direction::Symbol = :any)
 
@@ -334,6 +377,21 @@ function isportexist(node::AbstractDataNode, port::Symbol, direction::Symbol = :
             if port == p.label
                 return true
             end
+        end
+    end
+    return false
+end
+
+
+function isportinspec(p::Symbol, spec::NodeSpec, direction::Symbol)
+    if direction == :input || direction == :both
+        for sp in spec.input_ports
+            if p == sp.label return true end
+        end
+    end
+    if direction == :output || direction == :both
+        for sp in spec.output_ports
+            if p == sp.label return true end
         end
     end
     return false
@@ -394,24 +452,46 @@ Read value from node input buffer.
 Does NOT consume or clear buffer.
 """
 function getinputdata(node::AbstractDataNode, l::Symbol) 
-    if isportexist(node, l, :input) 
-        return get(node.input_buffer, l, nothing)
+    if isportexist(node, l, :input)
+        port = getportspec(node, l, :input)
+        return _getinputdata(node, port)
     end
     error("Wrong port label")
 end
+function getinputdata(node::AbstractDataNode, l::Symbol, con::Int) 
+    if isportexist(node, l, :input)   
+        return get(node.input_buffer[l], con, nothing)
+    end
+    error("Wrong port label")
+end
+function _getinputdata(node::AbstractDataNode, port::PortSpec{SinglePort})
+    len = length(node.input_buffer[port.label])
+    if len == 1
+        return first(node.input_buffer[port.label])[2]
+    elseif len == 0
+        return nothing
+    else
+        error("Multiple connections in single port")
+    end
+end
+function _getinputdata(node::AbstractDataNode, port::PortSpec{MultiPort})
+    return node.input_buffer[port.label]
+end
+
+
 """
-    setinputbuffer!(node, label, value) -> Bool
+    setinputbuffer!(node::AbstractDataNode, label::Symbol, connection_id::Int, value)
 
 Write value into node input buffer.
 
 Used by workflow engine to propagate outputs between nodes.
 """
-function setinputbuffer!(node::AbstractDataNode, l::Symbol, d) 
-    if isportexist(node, l, :input) 
-        node.input_buffer[l] = d
-        return true # unify all get/set
-    end
-    error("Wrong port label")
+function setinputbuffer!(node::AbstractDataNode, l::Symbol, con::Int, d)
+    #if !haskey(node.input_buffer, l) 
+    #    node.input_buffer[l] = Dict{Int, Any}()
+    #end
+    node.input_buffer[l][con] = d
+    node
 end
 
 
@@ -520,7 +600,8 @@ function add_connection!(model::Workflow, c::NodeConnection)::Int
     if getstatus(output_node) == :clean 
         output_data = getdata(output_node, c.output_port)
         input_node  = getnode(model, c.input_id)
-        setinputbuffer!(input_node, c.input_port, output_data)
+        #@port = getportspec(input_node, c.input_port, :input)
+        setinputbuffer!(input_node, c.input_port, id, output_data)
     end
     # Add index
     push!(get!(model.incoming, c.input_id, Int[]), id)
@@ -551,7 +632,7 @@ function delete_connection!(model::Workflow, id::Int)
         c = model.connections[id]
         # Удаляем буфер
         input_node = getnode(model, c.input_id)
-        delete!(input_node.input_buffer, c.input_port)
+        invalidate_buffer!(input_node, c.input_port, id)
         # Удаляем индексы
         filter!(x -> x != id, model.outgoing[c.output_id])
         filter!(x -> x != id, model.incoming[c.input_id])
@@ -713,12 +794,17 @@ function invalidate_downstream!(model::Workflow, id::Int)
         for (op, c, ip) in children
             children_node = getnode(model, c)
             # delete oly port buffer
-            delete!(children_node.input_buffer, ip)
+            invalidate_buffer!(children_node, ip, id)
+            #delete!(children_node.input_buffer, ip)
             # if not, can be multiple ivalidation runs in 2 or more connections 
             invalidate_downstream!(model, c)
         end
     end
     
+end
+function invalidate_buffer!(node::AbstractDataNode, l::Symbol, con::Int)
+    delete!(node.input_buffer[l], con)
+    return node
 end
 
 """
@@ -831,9 +917,13 @@ calling [`execute_unsafe!`](@ref).
 - `true` if node is ready for execution.
 - `false` otherwise.
 """
-function execution_node_validation(node::AbstractDataNode)
+function execution_node_validation(node::AbstractDataNode, check_input_buffer::Bool = true)
     # All ports must have something in input_buffer
-    return all(x-> x.label in keys(node.input_buffer), node.spec.input_ports) && validate_node(node)
+    if check_input_buffer
+        return all(x-> length(node.input_buffer[x.label]) > 0, node.spec.input_ports) && validate_node(node)
+    else
+        return validate_node(node)
+    end
 end
 
 
@@ -890,15 +980,26 @@ function validate_result(model::Workflow, node_id::Int)
     validate_result(getnode(model, node_id))
 end
 
-function push_buffer!(model, id)
+function push_buffer!(model::Workflow, id::Int)
     node = getnode(model, id)
     ready_ports = node.state[:ready_ports]
-
-    for (out_port, child_id, in_port) in get_children(model, id)
-        out_port in ready_ports || continue
-        child = getnode(model, child_id)
-        child.input_buffer[in_port] = getdata(node, out_port)
+    return push_buffer!(model::Workflow, id::Int, ready_ports)
+end
+function push_buffer!(model::Workflow, id::Int, port::Symbol)
+    node = getnode(model, id)
+    ready_ports = Symbol[port]
+    return push_buffer!(model::Workflow, id::Int, ready_ports)
+end
+function push_buffer!(model::Workflow, id::Int, ready_ports::Vector{Symbol})
+    node = getnode(model, id)
+    haskey( model.outgoing, id) || return model
+    for cid in model.outgoing[id]
+        con = model.connections[cid]
+        con.output_port in ready_ports || continue
+        child = getnode(model, con.input_id)
+        child.input_buffer[con.input_port][cid] = getdata(node, con.output_port)
     end
+    return model
 end
 
     # Main executing
@@ -936,7 +1037,7 @@ Main workflow execution entry point.
 # Returns
 Vector of output port labels (`Vector{Symbol}`) produced during execution.
 """
-function execute!(model::Workflow, id::Int; execute_upstream::Bool = true, invalidate_downstream::Bool = true, check_cyclic::Bool = true) 
+function execute!(model::Workflow, id::Int; settings::ExecuteSettings = ExecuteSettings()) 
     node =  getnode(model, id)
 
     if getstate(node, :execution_id) != model.run_id
@@ -944,7 +1045,7 @@ function execute!(model::Workflow, id::Int; execute_upstream::Bool = true, inval
         setstate!(node, :execution_id, model.run_id)
     end
 
-    if check_cyclic
+    if settings.check_cyclic
         # Это обнаружит цикл только при повторном заходе в тот же узел в рамках одного вызова. 
         # Не является настоящей защитой от циклов (реализовано в scheduler!)
         if getstatus(node) == :executing
@@ -962,15 +1063,15 @@ function execute!(model::Workflow, id::Int; execute_upstream::Bool = true, inval
     setstatus!(node, :executing)
     # Check and execute parent nodes
     # execute_upstream should bu use carefully
-    if execute_upstream
+    if settings.execute_upstream
         if length(model.nodes) > 1000 @warn "A large number of nodes (nodes count = $(length(model.nodes))) can cause stack overflow." end
         parents = get_parents(model, id)
         for (k,p) in parents
-            execute!(model, p; execute_upstream = true)
+            execute!(model, p; settings = settings)
         end
     end
     # Check is valid 
-    if !execution_node_validation(node)
+    if !execution_node_validation(node, settings.check_input_buffer)
         setstatus!(node, :invalid_node)
         return Symbol[]
     end
@@ -985,7 +1086,7 @@ function execute!(model::Workflow, id::Int; execute_upstream::Bool = true, inval
     # push outputs for each ready port
     push_buffer!(model, id)
     # Invalidate children
-    if invalidate_downstream
+    if settings.invalidate_downstream
         children = get_children(model, id)
         for (op, c, ip) in children
             invalidate_downstream!(model, c)
@@ -1071,7 +1172,7 @@ function scheduler!(model::Workflow{DAW})
 
     order = topological_sort(g)
     for id in order
-        execute!(model, id; execute_upstream = false, invalidate_downstream = false, check_cyclic = false) 
+        execute!(model, id; settings = ExecuteSettings(;execute_upstream = false, invalidate_downstream = false, check_cyclic = false)) 
     end
     return true
 end
@@ -1110,7 +1211,7 @@ function scheduler!(model::Workflow{ABW}; maxiter = 1000)
         id = popfirst!(queue)
         delete!(queued, id)
         if isready(model, id)
-            ready_ports = execute!(model, id; execute_upstream = false, invalidate_downstream = false, check_cyclic = false)
+            ready_ports = execute!(model, id; settings = ExecuteSettings(false))
             for port in ready_ports
                 cons = getportconnections(model, id, port; direction = :output)
                 for con in cons
