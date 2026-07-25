@@ -76,12 +76,25 @@ abstract type AbstractPortType end
 struct MultiPort <: AbstractPortType end
 struct SinglePort <: AbstractPortType end
 #
+
+"""
+    PortSpec(name, datatype, label, ::T = SinglePort(); required::Bool = true) where T <: AbstractPortType
+
+Specification of a node port.
+
+Fields:
+- `name::String` - human-readable name of the port.
+- `datatype::Type` - Julia type of the port data.
+- `label::Symbol` - unique label used for referencing the port in code.
+- `required::Bool` - whether the port is required for execution.
+"""
 struct PortSpec{T <: AbstractPortType}
     name::String
     datatype::Type
     label::Symbol
-    function PortSpec(name, datatype, label, ::T = SinglePort()) where T <: AbstractPortType
-        new{T}(name, datatype, label)
+    required::Bool
+    function PortSpec(name, datatype, label, ::T = SinglePort(); required::Bool = true) where T <: AbstractPortType
+        new{T}(name, datatype, label, required)
     end
 end
 #
@@ -349,9 +362,10 @@ function  getportspec(node::AbstractDataNode, l::Symbol, direction::Symbol)
     i = getportnumber(node, l, direction) 
     if direction == :input
         return node.spec.input_ports[i]
-    else
+    elseif direction == :output
         return node.spec.output_ports[i]
     end
+    error("Wrong direction")
 end
 """
     isportexist(node::AbstractDataNode, port::Symbol, direction::Symbol = :any)
@@ -396,6 +410,7 @@ function isportinspec(p::Symbol, spec::NodeSpec, direction::Symbol)
     end
     return false
 end
+
 #=
 """
     getdata(node::AbstractDataNode, i::Int) 
@@ -601,7 +616,7 @@ function add_connection!(model::Workflow, c::NodeConnection)::Int
         output_data = getdata(output_node, c.output_port)
         input_node  = getnode(model, c.input_id)
         #@port = getportspec(input_node, c.input_port, :input)
-        setinputbuffer!(input_node, c.input_port, id, output_data)
+        setinputbuffer!(input_node, c.input_port, id, output_data) # id - connection id 
     end
     # Add index
     push!(get!(model.incoming, c.input_id, Int[]), id)
@@ -918,9 +933,9 @@ calling [`execute_unsafe!`](@ref).
 - `false` otherwise.
 """
 function execution_node_validation(node::AbstractDataNode, check_input_buffer::Bool = true)
-    # All ports must have something in input_buffer
+    # All ports must have something in input_buffer if port is required
     if check_input_buffer
-        return all(x-> length(node.input_buffer[x.label]) > 0, node.spec.input_ports) && validate_node(node)
+        return all(x-> length(node.input_buffer[x.label]) > 0 || !x.required, node.spec.input_ports) && validate_node(node)
     else
         return validate_node(node)
     end
@@ -1109,8 +1124,7 @@ Low-level node execution interface.
 
 This function contains node-specific execution logic.
 
-The default implementation throws an error and must be specialized
-for every executable node type.
+The default implementation throws an error and must be specialized for every executable node type.
 """
 function execute_unsafe!(node::AbstractDataNode)
     error("Node type undefined")
@@ -1274,22 +1288,111 @@ function show(io::IO, c::T) where T <: NodeConnection
     print(io, "  Input node ID: ", c.input_id, " (Input port: ", c.input_port, ")")
 end
 
-
-    # --------------------------------------------------------
-    # STRUCT TO DICT FOR JSON
-    # --------------------------------------------------------
+# --------------------------------------------------------
+# STRUCT TO DICT FOR JSON
+# --------------------------------------------------------
 """
-    node_to_dict(node::DataNode) -> Dict
+    settings_schema(node::AbstractDataNode) -> Dict
+
+Default settings schema.
+"""
+function settings_schema(node::AbstractDataNode)
+    d  = Dict{Symbol, Any}()
+    d[:settingslist] = copy(node.spec.settings)
+    settings_schema_usermod!(d, node::AbstractDataNode)
+    return d
+end
+"""
+    settings_schema_usermod!(d, node::AbstractDataNode) -> Dict
+
+Modify settings schema for user-defined node types.
+
+Possible user modifications:
+
+```julia
+settings_schema_usermod!(d, node::DataNode{MyNodeType})
+    settings_dict = Dict{Symbol, Any}()
+    settings_dict[:my_setting1] = Dict(:type => Int, 
+        :default => 0, 
+        :description => "My setting 1", 
+        :required => true, 
+        :pinned => true,
+        :source	=> "upstream",
+        :validator => (x -> x >= 0))
+        
+    settings_dict[:my_setting2] = Dict(:type => Array{Int}, 
+        :default => [0], 
+        :description => "My setting 2", 
+        :required => true, 
+        :pinned => false,
+        :source	=> "none",
+        :validator => (x -> x in [1,2,3]))
+    d[:schema] = settings_dict
+end
+```
+"""
+function settings_schema_usermod!(d, node::AbstractDataNode)
+    return d
+end
+"""
+    node_schema(node::AbstractDataNode) -> Dict
+
+Default node schema.
+"""
+function node_schema(node::AbstractDataNode)
+    d  = Dict{Symbol, Any}()
+    d[:settings_schema] = settings_schema(node)
+    d[:spec]            = spec_to_dict(node.spec)
+    node_schema_usermod!(d, node::AbstractDataNode)
+    return d
+end
+"""
+    node_schema_usermod!(d, node::AbstractDataNode) -> Dict
+
+Modify node schema for user-defined node types.
+
+Possible user modifications:
+
+```julia
+node_schema_usermod!(d, node::AbstractDataNode)
+    d[:section]   = "Section 1"
+    d[:groupname] = "Group 1"
+    d[:color]     = "#8b5cf6"
+end
+```
+"""
+function node_schema_usermod!(d, node::AbstractDataNode)
+    return d
+end
+"""
+    node_to_dict(node::AbstractDataNode; specs::Bool = true) -> Dict
 
 Convert node to JSON-serializable dictionary.
 """
-function node_to_dict(node::AbstractDataNode)
+function node_to_dict(node::AbstractDataNode; specs::Bool = true, settings::Bool = true)
+    d                = Dict{Symbol, Any}()
+    d[:id]           = getid(node)
+    d[:properties]   = node_properties_to_dict(node.properties)
+    if specs
+        d[:spec]     = spec_to_dict(node.spec)
+    end
+    d[:status]       = getstatus(node)
+    if settings
+        d[:settings] = settings_schema(node)
+    end
+    return d
+end
+"""
+    node_properties_to_dict(np::NodeProperties) -> Dict
+
+Convert node properties to JSON-serializable dictionary.
+"""
+function node_properties_to_dict(np::NodeProperties)
     d            = Dict{Symbol, Any}()
-    d[:id]       = getid(node)
-    d[:spec]     = spec_to_dict(node.spec)
-    d[:status]   = getstatus(node)
-    d[:settings] = node.settings
-    d
+    d[:id]       = np.id
+    d[:status]   = np.status
+    d[:position] = np.position
+    return d
 end
 """
     spec_to_dict(spec::NodeSpec) -> Dict
@@ -1301,7 +1404,8 @@ function spec_to_dict(spec::NodeSpec)
     d[:name]         = spec.name
     d[:input_ports]  = [portspec_to_dict(i) for i in spec.input_ports]
     d[:output_ports] = [portspec_to_dict(i) for i in spec.output_ports]
-    d
+    d[:settings]     = copy(spec.settings)
+    return d
 end
 """
     portspec_to_dict(ps::PortSpec) -> Dict
@@ -1313,7 +1417,15 @@ function portspec_to_dict(ps::PortSpec)
     d[:name]     = ps.name
     d[:label]    = ps.label
     d[:datatype] = string(ps.datatype)
-    d
+    d[:required] = ps.required
+    d[:type]     = portspec_to_dict_type(ps)
+    return d
+end
+function portspec_to_dict_type(ps::PortSpec{MultiPort})
+    return "MultiPort"
+end
+function portspec_to_dict_type(ps::PortSpec{SinglePort})
+    return "SinglePort"
 end
 """
     connection_to_dict(conn::NodeConnection) -> Dict
@@ -1326,9 +1438,8 @@ function connection_to_dict(nc::NodeConnection)
     d[:output_port] = nc.output_port
     d[:input_id]    = nc.input_id
     d[:input_port]  = nc.input_port
-    d
+    return d
 end
-
 """
     workflow_to_dict(w::Workflow) -> Dict
 
@@ -1362,5 +1473,5 @@ function workflow_to_dict(w::Workflow)
     d[:outgoing]    = o
     return d
 end
-
+# End Module:
 end

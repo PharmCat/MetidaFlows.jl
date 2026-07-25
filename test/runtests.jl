@@ -613,7 +613,7 @@ end
     spec = NodeSpec(
         "InputNode",
         [PortSpec("x", Int, :x)],
-        [PortSpec("y", Int, :y)]
+        [PortSpec("y", Int, :y)],
     )
 
     function MetidaFlows.execute_unsafe!(node::DataNode{InputNode})
