@@ -1,6 +1,7 @@
 module MetidaFlows
 
 using NamedGraphs
+using Dates
 
 import NamedGraphs: add_vertex!, add_edge!, is_cyclic
 
@@ -25,6 +26,18 @@ struct LogMsg
     timestamp
     level::Symbol
     message::String
+    function LogMsg(id, timestamp, level, message)
+        new(id,
+        timestamp, 
+        level, 
+        message)
+    end
+    function LogMsg(level, message)
+        LogMsg(rand(UInt64), # change to thread safe
+        now(), 
+        level, 
+        message)
+    end
 end
 #
 abstract type AbstractNodeFields end
@@ -203,8 +216,10 @@ end
 function Workflow(id::Int; type::Symbol = :DAW)
     if type == :DAW
         Workflow{DAW}(id, "Default", 0, Dict{Int, DataNode}(), 0, Dict{Int, NodeConnection}(), Dict{Int, Vector{Int}}(), Dict{Int, Vector{Int}}(), 0, LogMsg[], AbstractAuditEvent[])
-    else
+    elseif type == :ABW
         Workflow{ABW}(id, "Default", 0, Dict{Int, DataNode}(), 0, Dict{Int, NodeConnection}(), Dict{Int, Vector{Int}}(), Dict{Int, Vector{Int}}(), 0, LogMsg[], AbstractAuditEvent[])
+    else
+        error("Unknown workflow type: $(type) (expected :DAW or :ABW)")
     end
 end
 #
@@ -638,10 +653,12 @@ function add_connection!(model::Workflow, c::NodeConnection)::Int
     id = model.c_iter += 1
     model.connections[id] = c
     output_node = getnode(model, c.output_id)
+    # Инвалидируем дочерние ноды
+    invalidate_downstream!(model, c.input_id) 
     if getstatus(output_node) == :clean 
         output_data = getdata(output_node, c.output_port)
         input_node  = getnode(model, c.input_id)
-        #@port = getportspec(input_node, c.input_port, :input)
+        # записываем в буде
         setinputbuffer!(input_node, c.input_port, id, output_data) # id - connection id 
     end
     # Add index
@@ -671,7 +688,9 @@ Performs:
 function delete_connection!(model::Workflow, id::Int)
     if haskey(model.connections, id)
         c = model.connections[id]
-        # Удаляем буфер в дочерней ноде, нода не инвалидируется (проработать в дальнейшем)
+        # Инвалидируем дочерние ноды
+        invalidate_downstream!(model, c.input_id) 
+        # invalidate_downstream! инвалидирует буфер, поэтому инвалиджируем только буфер конкретного соединения
         input_node = getnode(model, c.input_id)
         invalidate_buffer!(input_node, c.input_port, id)
         # Удаляем индексы
@@ -695,8 +714,8 @@ and registers the node in workflow storage.
 Assigned node identifier (`Int`).
 """
 function add_node!(model::Workflow, node::AbstractDataNode)
-    # If Node node is in :iddle state, reset it to clear any previous execution state.
-    if getstatus(node) == :iddle reset!(node) end
+    # If Node node is in :idle state, reset it to clear any previous execution state.
+    if getstatus(node) == :idle reset!(node) end
     
     id = model.n_iter += 1
     setid!(node, id)
@@ -793,7 +812,7 @@ end
 Reset node.
 
 Performs the following operations:
-- sets node status to `:iddle`,
+- sets node status to `:idle`,
 - clears `ready_ports`,
 - clears cached output data stored in `node.data`.
 - node settings,
@@ -801,9 +820,9 @@ Performs the following operations:
 - state.
 """
 function reset!(node::AbstractDataNode)
-    setstatus!(node, :iddle)
+    setstatus!(node, :idle)
     empty!(node.settings)
-    empty!(node.input_buffer)
+    for (l, b) in node.input_buffer; empty!(b); end
     empty!(node.state)
     empty!(node.data)
     node
@@ -1096,8 +1115,8 @@ Main workflow execution entry point.
 6. Validate node structure and execution readiness.
 7. Validate node settings.
 8. Execute node implementation via [`execute_unsafe!`](@ref).
-9. Store execution state (`ready_ports`).
-10. Validate execution result.
+9. Validate execution result.
+10. Store execution state (`ready_ports`).
 11. Propagate outputs downstream through input buffers.
 12. Optionally invalidate downstream nodes.
 13. Mark node as `:clean`.
@@ -1156,14 +1175,21 @@ function execute!(model::Workflow, id::Int; settings::ExecuteSettings = ExecuteS
         return Symbol[]
     end
     # Execute node
-    ready_ports = execute_unsafe!(node)
-    # Save state ready_ports
-    setreadyports!(node, ready_ports)
+    ready_ports = try 
+        execute_unsafe!(node)
+    catch e
+        setstatus!(node, :failed)
+        # Log error
+        push!(model.log, LogMsg(:error, "Node (id: $(node.id)) execution failed: $(e)"))
+        return Symbol[]
+    end
     # Post-execution validation
     if !validate_result(node)
         setstatus!(node, :invalid_result)
         return Symbol[]
     end
+    # Save state ready_ports
+    setreadyports!(node, ready_ports)
     # push outputs for each ready port
     push_buffer!(model, id)
     # Invalidate children
@@ -1175,7 +1201,7 @@ function execute!(model::Workflow, id::Int; settings::ExecuteSettings = ExecuteS
     end
     #
     setstatus!(node, :clean)
-    return ready_ports
+    return copy(ready_ports)
 end
 
 """
@@ -1286,7 +1312,10 @@ function scheduler!(model::Workflow{ABW}; maxiter = 1000)
         id = popfirst!(queue)
         delete!(queued, id)
         if isready(model, id)
-            # required ports check inside execute! (in execution_node_validation)
+            #execute_upstream=false
+            #invalidate_downstream=false 
+            #check_cyclic=false
+            #check_input_buffer=false
             ready_ports = execute!(model, id; settings = ExecuteSettings(false))
             for port in ready_ports
                 cons = getportconnections(model, id, port; direction = :output)
@@ -1359,8 +1388,8 @@ end
 Default settings schema.
 """
 function settings_schema(node::AbstractDataNode)
-    d  = Dict{Symbol, Any}()
-    d[:settingslist] = copy(node.spec.settings)
+    d  = Dict{String, Any}()
+    d["settingslist"] = copy(node.spec.settings)
     settings_schema_usermod!(d, node::AbstractDataNode)
     return d
 end
@@ -1373,23 +1402,23 @@ Possible user modifications:
 
 ```julia
 settings_schema_usermod!(d, node::DataNode{MyNodeType})
-    settings_dict = Dict{Symbol, Any}()
-    settings_dict[:my_setting1] = Dict(:type => Int, 
-        :default => 0, 
-        :description => "My setting 1", 
-        :required => true, 
-        :pinned => true,
-        :source	=> "upstream",
-        :validator => (x -> x >= 0))
+    settings_dict = Dict{String, Any}()
+    settings_dict["my_setting1"] = Dict("type" => Int, 
+        "default" => 0, 
+        "description" => "My setting 1", 
+        "required" => true, 
+        "pinned" => true,
+        "source"	=> "upstream",
+        "validator" => (x -> x >= 0))
         
-    settings_dict[:my_setting2] = Dict(:type => Array{Int}, 
-        :default => [0], 
-        :description => "My setting 2", 
-        :required => true, 
-        :pinned => false,
-        :source	=> "none",
-        :validator => (x -> x in [1,2,3]))
-    d[:schema] = settings_dict
+    settings_dict["my_setting2"] = Dict("type" => Array{Int}, 
+        "default" => [0], 
+        "description" => "My setting 2", 
+        "required" => true, 
+        "pinned" => false,
+        "source"	=> "none",
+        "validator" => (x -> x in [1,2,3]))
+    d["schema"] = settings_dict
 end
 ```
 """
@@ -1402,9 +1431,9 @@ end
 Default node schema.
 """
 function node_schema(node::AbstractDataNode)
-    d  = Dict{Symbol, Any}()
-    d[:settings_schema] = settings_schema(node)
-    d[:spec]            = spec_to_dict(node.spec)
+    d  = Dict{String, Any}()
+    d["settings_schema"] = settings_schema(node)
+    d["spec"]            = spec_to_dict(node.spec)
     node_schema_usermod!(d, node::AbstractDataNode)
     return d
 end
@@ -1417,9 +1446,9 @@ Possible user modifications:
 
 ```julia
 node_schema_usermod!(d, node::AbstractDataNode)
-    d[:section]   = "Section 1"
-    d[:groupname] = "Group 1"
-    d[:color]     = "#8b5cf6"
+    d["section"]   = "Section 1"
+    d["groupname"] = "Group 1"
+    d["color"]     = "#8b5cf6"
 end
 ```
 """
@@ -1432,15 +1461,15 @@ end
 Convert node to JSON-serializable dictionary.
 """
 function node_to_dict(node::AbstractDataNode; specs::Bool = true, settings::Bool = true)
-    d                = Dict{Symbol, Any}()
-    d[:id]           = getid(node)
-    d[:properties]   = node_properties_to_dict(node.properties)
+    d                = Dict{String, Any}()
+    d["id"]           = getid(node)
+    d["properties"]   = node_properties_to_dict(node.properties)
     if specs
-        d[:spec]     = spec_to_dict(node.spec)
+        d["spec"]     = spec_to_dict(node.spec)
     end
-    d[:status]       = getstatus(node)
+    d["status"]       = getstatus(node)
     if settings
-        d[:settings] = settings_schema(node)
+        d["settings"] = settings_schema(node)
     end
     return d
 end
@@ -1450,10 +1479,10 @@ end
 Convert node properties to JSON-serializable dictionary.
 """
 function node_properties_to_dict(np::NodeProperties)
-    d            = Dict{Symbol, Any}()
-    d[:id]       = np.id
-    d[:status]   = np.status
-    d[:position] = np.position
+    d            = Dict{String, Any}()
+    d["id"]       = np.id
+    d["status"]   = np.status
+    d["position"] = np.position
     return d
 end
 """
@@ -1462,11 +1491,11 @@ end
 Convert NodeSpec to dictionary representation.
 """
 function spec_to_dict(spec::NodeSpec)
-    d                = Dict{Symbol, Any}()
-    d[:name]         = spec.name
-    d[:input_ports]  = [portspec_to_dict(i) for i in spec.input_ports]
-    d[:output_ports] = [portspec_to_dict(i) for i in spec.output_ports]
-    d[:settings]     = copy(spec.settings)
+    d                = Dict{String, Any}()
+    d["name"]         = spec.name
+    d["input_ports"]  = [portspec_to_dict(i) for i in spec.input_ports]
+    d["output_ports"] = [portspec_to_dict(i) for i in spec.output_ports]
+    d["settings"]     = copy(spec.settings)
     return d
 end
 """
@@ -1475,12 +1504,12 @@ end
 Convert PortSpec to dictionary representation.
 """
 function portspec_to_dict(ps::PortSpec)
-    d            = Dict{Symbol, Any}()
-    d[:name]     = ps.name
-    d[:label]    = ps.label
-    d[:datatype] = string(ps.datatype)
-    d[:required] = ps.required
-    d[:type]     = portspec_to_dict_type(ps)
+    d            = Dict{String, Any}()
+    d["name"]     = ps.name
+    d["label"]    = ps.label
+    d["datatype"] = string(ps.datatype)
+    d["required"] = ps.required
+    d["type"]     = portspec_to_dict_type(ps)
     return d
 end
 function portspec_to_dict_type(ps::PortSpec{MultiPort})
@@ -1495,11 +1524,11 @@ end
 Convert connection to dictionary representation.
 """
 function connection_to_dict(nc::NodeConnection)
-    d               = Dict{Symbol, Union{Int, Symbol}}()
-    d[:output_id]   = nc.output_id
-    d[:output_port] = nc.output_port
-    d[:input_id]    = nc.input_id
-    d[:input_port]  = nc.input_port
+    d               = Dict{String, Union{Int, Symbol}}()
+    d["output_id"]   = nc.output_id
+    d["output_port"] = nc.output_port
+    d["input_id"]    = nc.input_id
+    d["input_port"]  = nc.input_port
     return d
 end
 """
@@ -1525,12 +1554,12 @@ function workflow_to_dict(w::Workflow)
     d["connections"] = c
     i               = Dict{Int, Vector}()
     for (k,v) in w.incoming
-        i[k] = v
+        i[k] = copy(v)
     end
     d["incoming"]    = i
     o               = Dict{Int, Vector}()
     for (k, v) in w.outgoing
-        o[k] = v
+        o[k] = copy(v)
     end
     d["outgoing"]    = o
     return d
