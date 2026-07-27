@@ -4,7 +4,7 @@ CurrentModule = MetidaFlows
 
 # MetidaFlows
 
-A lightweight experimental workflow engine for Julia
+A lightweight, node-based workflow engine for scientific and analytical pipelines in Julia.
 
 ---
 
@@ -28,14 +28,27 @@ You should expect breaking changes while the architecture stabilizes.
 
 ---
 
+## Installation
+
+```julia
+using Pkg
+Pkg.add(url = "https://github.com/PharmCat/MetidaFlows.jl")
+```
+
+---
+
 ## Core idea
 
 A workflow in MetidaFlows consists of:
 
-* **Nodes** — units of computation
-* **Ports** — typed inputs and outputs
-* **Connections** — edges between ports
-* **Schedulers** — execution strategies
+| Concept | Type | Role |
+|---|---|---|
+| Workflow | [`Workflow`](@ref) | owns nodes, connections and the dependency indices |
+| Node | [`DataNode`](@ref) | a unit of computation plus its cached results |
+| Behaviour | [`AbstractNodeType`](@ref) | tag the execution logic dispatches on |
+| Interface | [`NodeSpec`](@ref), [`PortSpec`](@ref) | declared ports and settings keys |
+| Edge | [`NodeConnection`](@ref) | typed link between an output and an input port |
+| Scheduler | [`scheduler!`](@ref) | executes the whole graph, [`DAW`](@ref) or [`ABW`](@ref) |
 
 Instead of hidden execution magic, everything is explicit:
 
@@ -45,20 +58,17 @@ Instead of hidden execution magic, everything is explicit:
 
 ---
 
-## Key features (current)
+## Current features
 
-* Typed node system via Julia multiple dispatch
-* Directed graph workflow model
-* Strict connection validation (including type checking)
-* Two execution modes:
-
-  * **DAW** (deterministic DAG execution)
-  * **ABW** (queue-based / agent-style execution, experimental)
-* Incremental execution and invalidation propagation
-* Node state tracking (`:idle`, `:dirty`, `:clean`, etc.)
-* Input buffering system
-* Hooks for validation and execution lifecycle
-* Basic serialization utilities
+* typed node system built on multiple dispatch
+* directed graph model with strict connection validation, including type checking
+* two execution models: [`DAW`](@ref) (topological) and [`ABW`](@ref) (queue based, experimental)
+* incremental execution: a `:clean` node is never recomputed
+* invalidation propagated downstream on every settings or topology change
+* node status tracking (`:idle`, `:dirty`, `:clean`, `:executing`, `:failed`, `:invalid_*`)
+* per-connection input buffering, including many-to-one [`MultiPort`](@ref) inputs
+* validation hooks: [`validate_node`](@ref), [`validate_settings`](@ref), [`validate_result`](@ref)
+* dictionary serialization of workflows, nodes and schemas
 
 ---
 
@@ -66,47 +76,57 @@ Instead of hidden execution magic, everything is explicit:
 
 ```julia
 using MetidaFlows
+
+import MetidaFlows: Workflow, NodeSpec, PortSpec, DataNode, AbstractNodeType,
+                   add_node!, add_connection!, setsettings!, scheduler!,
+                   getdata, setdata!, getinputdata
+
 using CSV, DataFrames
 
+# CSV node type
 struct CSVNode <: AbstractNodeType end
+# DataFrame node type
 struct DataFrameNode <: AbstractNodeType end
 
+# Make node specification for CSV node
 csv_spec = NodeSpec(
     "Load CSV",
     PortSpec[],
     [PortSpec("CSV File", CSV.File, :csv)],
     [:file]
 )
-
+# Make node specification for DataFrame node
 df_spec = NodeSpec(
     "DataFrame",
     [PortSpec("CSV File", CSV.File, :csv)],
     [PortSpec("DataFrame", DataFrame, :dataframe)]
 )
-
+# What CSV node do: load CSV File
 function MetidaFlows.execute_unsafe!(node::DataNode{CSVNode})
     csv = CSV.File(node.settings[:file])
     setdata!(node, :csv, csv)
     return [:csv]
 end
-
+# What DataFrame node do: make DataFrame from CSV
 function MetidaFlows.execute_unsafe!(node::DataNode{DataFrameNode})
     csv = getinputdata(node, :csv)
     setdata!(node, :dataframe, DataFrame(csv))
     return [:dataframe]
 end
-
+# Make Workflow
 workflow = Workflow(0)
 
+# Make and add CSV node
 id1 = add_node!(workflow, DataNode(CSVNode, csv_spec))
+# Make and add DataFrame node
 id2 = add_node!(workflow, DataNode(DataFrameNode, df_spec))
-
+# Add connection 
 add_connection!(workflow, id1, :csv, id2, :csv)
-
+# Set settinf for CSV node (file path)
 setsettings!(workflow, id1, Dict(:file => "data.csv"))
-
+# Run workflow
 scheduler!(workflow)
-
+# Get result from DataFrame (from output port :dataframe)
 df = getdata(workflow, id2, :dataframe)
 ```
 
@@ -148,13 +168,3 @@ Feedback is especially welcome on:
 * real-world workflow use cases
 
 The project is intentionally in an exploratory phase, so design discussions are highly valuable at this stage.
-
-
-Documentation for [MetidaFlows](https://github.com/PharmCat/MetidaFlows.jl).
-
-```@index
-```
-
-```@autodocs
-Modules = [MetidaFlows]
-```

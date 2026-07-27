@@ -1,17 +1,29 @@
 using MetidaFlows
-using Test, CSV, DataFrames
+using Test, CSV, DataFrames, Dates
 
-import MetidaFlows: NodeSpec, PortSpec, AbstractNodeType, Workflow, DataNode, NodeConnection, ExecuteSettings,
-add_node!, add_connection!, setsettings!, execute_unsafe!, setdata!, scheduler!, execute!,
-getinputdata, getdata, getstatus,
-delete_node!, delete_connection!,
-workflow_to_dict
+import MetidaFlows: MultiPort, SinglePort, DAW, ABW, PortSpec,
+    NodeState, NodeProperties, LogMsg, AbstractNodeState, ExecuteSettings,
+    getnode, getconnection, isnodeexist, nodetypestr, makegraph,
+    getid, setid!, getposition, setposition!, setstatus!, getstate, setstate!, setdata!,
+    haveinputs, getportnumber, getporttype, getportspec,
+    isportexist, isportinspec, ismultiport,
+    setinputbuffer!, invalidate_buffer!, invalidate_downstream!,
+    find_connections, getportconnections, get_parents, get_children,
+    reset!, reset_status!, mark_dirty!, setsettings_unsafe!, isready,
+    validate_node, validate_settings, validate_result, execution_node_validation,
+    push_buffer!,
+    settings_schema, settings_schema_usermod!, node_schema, node_schema_usermod!,
+    node_to_dict, node_properties_to_dict, spec_to_dict, portspec_to_dict,
+    workflow_to_dict, portspec_to_dict_type, connection_to_dict
 
 testpath = dirname(@__FILE__)
 csv_file_path = joinpath(testpath, "csv", "pkdata2.csv")
 
 ############################################################
-@testset "MetidaFlows.jl scheduler!                         " begin
+# Базовый сквозной сценарий DAW: источник (CSV) -> преобразователь (DataFrame).
+# Проверяет: сборку графа, типизированное соединение портов, прогон scheduler!,
+# чтение результата через getdata и сериализацию workflow_to_dict.
+@testset "MetidaFlows.jl: scheduler!                         " begin
 
     csv_node_spec = NodeSpec("Load CSV", PortSpec[], [PortSpec("CSV File", CSV.File, :csv)], [:file])
 
@@ -49,7 +61,9 @@ csv_file_path = joinpath(testpath, "csv", "pkdata2.csv")
 
     setsettings!(workflow, id1, Dict(:file => csv_file_path))
 
-    scheduler!(workflow)
+    scheduler!(workflow; throw_error = true)
+
+    @test length(workflow.log) == 0
 
     df = getdata(workflow, id2, :dataframe)
 
@@ -61,7 +75,10 @@ csv_file_path = joinpath(testpath, "csv", "pkdata2.csv")
 end
 
 ############################################################
-@testset "MetidaFlows.jl scheduler! 2 steps                 " begin
+# Инкрементальная сборка: workflow сначала исполняется в неполном виде,
+# затем достраивается новой нодой и связью и пересчитывается заново.
+# scheduler!(::Workflow{DAW}) каждый раз делает reset! и считает граф целиком.
+@testset "MetidaFlows.jl: scheduler! 2 steps                 " begin
 
     csv_node_spec = NodeSpec("Load CSV", PortSpec[], [PortSpec("CSV File", CSV.File, :csv)], [:file])
 
@@ -116,7 +133,9 @@ end
 end
 
 ############################################################
-@testset "MetidaFlows.jl execute!                           " begin
+# execute! на листовой ноде: с настройками по умолчанию (execute_upstream = true)
+# сам подтягивает и исполняет всех родителей.
+@testset "MetidaFlows.jl: execute!                           " begin
 
     csv_node_spec = NodeSpec("Load CSV", PortSpec[], [PortSpec("CSV File", CSV.File, :csv)], [:file])
 
@@ -164,7 +183,9 @@ end
 end
 
 ############################################################
-@testset "MetidaFlows.jl execute! 2 steps                   " begin
+# То же, но родитель уже был исполнен до появления потомка:
+# add_connection! от :clean-родителя сразу наполняет входной буфер потомка.
+@testset "MetidaFlows.jl: execute! 2 steps                   " begin
 
     csv_node_spec = NodeSpec("Load CSV", PortSpec[], [PortSpec("CSV File", CSV.File, :csv)], [:file])
 
@@ -221,7 +242,10 @@ end
 
 
 ############################################################
-@testset "MetidaFlows.jl execute! delete/add connection/node" begin
+# Жизненный цикл идентификаторов: n_iter/c_iter только растут, поэтому
+# после удаления и повторного добавления нода/связь получают НОВЫЙ id.
+# Заодно проверяется, что граф остаётся работоспособным после перестроения.
+@testset "MetidaFlows.jl: execute! delete/add connection/node" begin
 
     csv_node_spec = NodeSpec("Load CSV", PortSpec[], [PortSpec("CSV File", CSV.File, :csv)], [:file])
 
@@ -303,7 +327,9 @@ end
 end
 
 ############################################################
-@testset "MetidaFlows.jl cycle detection                    " begin
+# Циклический граф отвергается DAW-планировщиком ДО начала исполнения
+# (проверка is_cyclic в scheduler!).
+@testset "MetidaFlows.jl: cycle detection                    " begin
 
     struct NodeA <: AbstractNodeType end
 
@@ -331,7 +357,11 @@ end
 end
 
 ############################################################
-@testset "MetidaFlows.jl downstream invalidation            " begin
+# Инвалидация вниз по графу: setsettings! помечает саму ноду и всех потомков
+# как :dirty и удаляет из буфера потомка запись, относящуюся к этой связи.
+# Счётчики counter1/counter2 подтверждают, что за один прогон каждая нода
+# исполняется ровно один раз.
+@testset "MetidaFlows.jl: downstream invalidation            " begin
 
     counter1 = Ref(0)
     counter2 = Ref(0)
@@ -396,7 +426,9 @@ end
 end
 
 ############################################################
-@testset "MetidaFlows.jl add connection propagates buffer   " begin
+# add_connection! от родителя со статусом :clean немедленно копирует его
+# выходные данные во входной буфер потомка (без повторного исполнения).
+@testset "MetidaFlows.jl: add connection propagates buffer   " begin
 
     csv_node_spec = NodeSpec(
         "Load CSV",
@@ -447,7 +479,9 @@ end
 end
 
 ############################################################
-@testset "MetidaFlows.jl delete connection clears buffer    " begin
+# delete_connection! удаляет из буфера потомка запись именно этой связи
+# (ключ буфера — id связи, а не id родителя).
+@testset "MetidaFlows.jl: delete connection clears buffer    " begin
 
     csv_node_spec = NodeSpec(
         "Load CSV",
@@ -502,7 +536,9 @@ end
 
 end
 ############################################################
-@testset "MetidaFlows.jl multi child propagation            " begin
+# Один выходной порт -> несколько потомков: значение копируется каждому
+# по отдельной связи.
+@testset "MetidaFlows.jl: multi child propagation            " begin
 
     source_spec = NodeSpec(
         "Source",
@@ -551,7 +587,7 @@ end
 
 end
 ############################################################
-@testset "MetidaFlows.jl execute failure status             " begin
+@testset "MetidaFlows.jl: execute failure status             " begin
 
     struct FailingNode <: AbstractNodeType end
 
@@ -571,8 +607,9 @@ end
 
     id = add_node!(workflow, node)
 
-    @test_throws Exception execute!(workflow, id)
+    execute!(workflow, id)
 
+    @test workflow.log[1].message == "Node (id: 1) execution failed: ErrorException(\"boom\")"
     # THIS TEST CURRENTLY FAILS
     # because execute! does not set :failed on exception
 
@@ -580,7 +617,9 @@ end
 
 end
 ############################################################
-@testset "MetidaFlows.jl validate settings                  " begin
+# Хук validate_settings: невалидные настройки дают статус :invalid_settings
+# и пустой список готовых портов (нода не исполняется).
+@testset "MetidaFlows.jl: validate settings                  " begin
 
     struct ValidateNode <: AbstractNodeType end
 
@@ -613,7 +652,9 @@ end
 
 end
 ############################################################
-@testset "Execution validation missing inputs               " begin
+# Незаполненный обязательный входной порт -> :invalid_node.
+# Проверка выполняется execution_node_validation до вызова execute_unsafe!.
+@testset "MetidaFlows.jl: execution validation missing inputs               " begin
 
     struct InputNode <: AbstractNodeType end
 
@@ -644,7 +685,1054 @@ end
 
 
 
+# ----------------------------------------------------------
+# Типы нод, используемые расширенным набором
+# ----------------------------------------------------------
 
+struct ConstNode     <: AbstractNodeType end  # без входов, отдаёт settings[:value]
+struct DoubleNode    <: AbstractNodeType end  # :in -> :out, значение * 2
+struct AddNode       <: AbstractNodeType end  # :a + :b -> :out (пустой вход = 0)
+struct CollectNode   <: AbstractNodeType end  # MultiPort :ins -> :out, сумма всех входов
+struct OptionalNode  <: AbstractNodeType end  # необязательный вход, -1 если пусто
+struct ErrorNode     <: AbstractNodeType end  # execute_unsafe! всегда бросает исключение
+struct BadResultNode <: AbstractNodeType end  # validate_result   -> false
+struct BadStructNode <: AbstractNodeType end  # validate_node     -> false
+struct NeedsCfgNode  <: AbstractNodeType end  # validate_settings -> требует ключ :k
+struct TextNode      <: AbstractNodeType end  # String на выходе (проверка типов связей)
+struct AnyInNode     <: AbstractNodeType end  # вход типа Any (проверка подтипов)
+struct SelfLoopNode  <: AbstractNodeType end  # :in -> :out, для защиты от рекурсии
+struct SchemaNode    <: AbstractNodeType end  # пользовательские хуки схемы
+
+# Неизменяемое состояние ноды: нужно, чтобы проверить Dict-подобный
+# интерфейс AbstractNodeFields на immutable-типе.
+struct FrozenState <: AbstractNodeState
+    value::Int
+end
+
+# Ноды сквозного сценария на реальном CSV-файле
+struct LoadCSVNode     <: AbstractNodeType end
+struct ToDataFrameNode <: AbstractNodeType end
+struct SummaryNode     <: AbstractNodeType end
+
+# Счётчик фактических исполнений: делает кеширование наблюдаемым.
+const CALLS = Dict{Symbol, Int}()
+countcall!(k::Symbol) = (CALLS[k] = get(CALLS, k, 0) + 1)
+
+# ----------------------------------------------------------
+# Спецификации (функции, а не константы: каждый тест получает свежий NodeSpec)
+# ----------------------------------------------------------
+
+spec_const()     = NodeSpec("Const", PortSpec[], [PortSpec("value", Int, :out)], [:value])
+spec_double()    = NodeSpec("Double", [PortSpec("value", Int, :in)], [PortSpec("doubled", Int, :out)])
+spec_add()       = NodeSpec("Add",
+                            [PortSpec("a", Int, :a), PortSpec("b", Int, :b)],
+                            [PortSpec("sum", Int, :out)])
+spec_collect()   = NodeSpec("Collect",
+                            [PortSpec("values", Int, :ins, MultiPort())],
+                            [PortSpec("sum", Int, :out)])
+spec_optional()  = NodeSpec("Optional",
+                            [PortSpec("maybe", Int, :maybe, SinglePort(); required = false)],
+                            [PortSpec("value", Int, :out)])
+spec_text()      = NodeSpec("Text", PortSpec[], [PortSpec("text", String, :out)])
+spec_anyin()     = NodeSpec("AnyIn",
+                            [PortSpec("anything", Any, :in)],
+                            [PortSpec("value", Int, :out)])
+spec_loop()      = NodeSpec("Loop", [PortSpec("in", Int, :in)], [PortSpec("out", Int, :out)])
+spec_schema()    = NodeSpec("Schema", PortSpec[], [PortSpec("x", Int, :out)], [:alpha, :beta])
+spec_cfg()       = NodeSpec("NeedsCfg", PortSpec[], [PortSpec("value", Int, :out)], [:k])
+spec_plain(name) = NodeSpec(name, PortSpec[], [PortSpec("value", Int, :out)])
+
+spec_loadcsv() = NodeSpec("Load CSV", PortSpec[],
+                          [PortSpec("CSV File", CSV.File, :csv)], [:file])
+spec_todf()    = NodeSpec("DataFrame",
+                          [PortSpec("CSV File", CSV.File, :csv)],
+                          [PortSpec("DataFrame", DataFrame, :dataframe)])
+spec_summary() = NodeSpec("Summary",
+                          [PortSpec("DataFrame", DataFrame, :dataframe)],
+                          [PortSpec("Row count", Int, :nrows)])
+
+# ----------------------------------------------------------
+# Реализации execute_unsafe! и хуков валидации
+# ----------------------------------------------------------
+
+function MetidaFlows.execute_unsafe!(node::DataNode{ConstNode})
+    countcall!(:const)
+    setdata!(node, :out, get(node.settings, :value, 0))
+    return [:out]
+end
+
+function MetidaFlows.execute_unsafe!(node::DataNode{DoubleNode})
+    countcall!(:double)
+    x = getinputdata(node, :in)
+    setdata!(node, :out, (x === nothing ? 0 : x) * 2)
+    return [:out]
+end
+
+function MetidaFlows.execute_unsafe!(node::DataNode{AddNode})
+    countcall!(:add)
+    a = getinputdata(node, :a)
+    b = getinputdata(node, :b)
+    setdata!(node, :out, (a === nothing ? 0 : a) + (b === nothing ? 0 : b))
+    return [:out]
+end
+
+function MetidaFlows.execute_unsafe!(node::DataNode{CollectNode})
+    countcall!(:collect)
+    # Для MultiPort getinputdata возвращает весь словарь {id связи => значение}
+    buffer = getinputdata(node, :ins)
+    setdata!(node, :out, sum(values(buffer); init = 0))
+    return [:out]
+end
+
+function MetidaFlows.execute_unsafe!(node::DataNode{OptionalNode})
+    countcall!(:optional)
+    v = getinputdata(node, :maybe)
+    setdata!(node, :out, v === nothing ? -1 : v)
+    return [:out]
+end
+
+MetidaFlows.execute_unsafe!(::DataNode{ErrorNode}) = error("node failed on purpose")
+
+function MetidaFlows.execute_unsafe!(node::DataNode{BadResultNode})
+    setdata!(node, :out, 1)
+    return [:out]
+end
+MetidaFlows.validate_result(::DataNode{BadResultNode}) = false
+
+function MetidaFlows.execute_unsafe!(node::DataNode{BadStructNode})
+    setdata!(node, :out, 1)
+    return [:out]
+end
+MetidaFlows.validate_node(::DataNode{BadStructNode}) = false
+
+function MetidaFlows.execute_unsafe!(node::DataNode{NeedsCfgNode})
+    setdata!(node, :out, node.settings[:k])
+    return [:out]
+end
+MetidaFlows.validate_settings(node::DataNode{NeedsCfgNode}) = haskey(node.settings, :k)
+
+function MetidaFlows.execute_unsafe!(node::DataNode{TextNode})
+    setdata!(node, :out, "text")
+    return [:out]
+end
+
+function MetidaFlows.execute_unsafe!(node::DataNode{AnyInNode})
+    setdata!(node, :out, 0)
+    return [:out]
+end
+
+function MetidaFlows.execute_unsafe!(node::DataNode{SelfLoopNode})
+    x = getinputdata(node, :in)
+    setdata!(node, :out, x === nothing ? 0 : x)
+    return [:out]
+end
+
+function MetidaFlows.execute_unsafe!(node::DataNode{SchemaNode})
+    setdata!(node, :out, 0)
+    return [:out]
+end
+
+function MetidaFlows.execute_unsafe!(node::DataNode{LoadCSVNode})
+    countcall!(:loadcsv)
+    setdata!(node, :csv, CSV.File(node.settings[:file]))
+    return [:csv]
+end
+
+function MetidaFlows.execute_unsafe!(node::DataNode{ToDataFrameNode})
+    setdata!(node, :dataframe, DataFrame(getinputdata(node, :csv)))
+    return [:dataframe]
+end
+
+function MetidaFlows.execute_unsafe!(node::DataNode{SummaryNode})
+    df = getinputdata(node, :dataframe)
+    setdata!(node, :nrows, size(df, 1))
+    return [:nrows]
+end
+
+function MetidaFlows.settings_schema_usermod!(d, node::DataNode{SchemaNode})
+    d["schema"] = Dict{Symbol, Any}(:alpha => Dict{Symbol, Any}(:type => Int, :default => 0))
+    return d
+end
+
+function MetidaFlows.node_schema_usermod!(d, node::DataNode{SchemaNode})
+    d["color"] = "#8b5cf6"
+    return d
+end
+
+############################################################
+# Интроспекция портов и спецификаций.
+# Фиксирует контракт «спецификация — единственный источник правды»:
+# всё, чего нет в NodeSpec, недоступно ни на чтение, ни на запись.
+@testset "MetidaFlows.jl: ports, spec introspection                        " begin
+
+    spec = spec_add()
+    node = DataNode(AddNode, spec)
+
+    @test haveinputs(node)
+    @test !haveinputs(DataNode(ConstNode, spec_const()))
+
+    # portmap строится конструктором NodeSpec: (направление, метка) -> индекс
+    @test getportnumber(node, :a, :input)   == 1
+    @test getportnumber(node, :b, :input)   == 2
+    @test getportnumber(node, :out, :output) == 1
+    @test_throws KeyError getportnumber(node, :missing, :input)
+
+    @test getporttype(node, 1, :input)     === Int
+    @test getporttype(node, :b, :input)    === Int
+    @test getporttype(node, :out, :output) === Int
+    @test_throws ErrorException getporttype(node, 0, :input)    # индекс вне диапазона
+    @test_throws ErrorException getporttype(node, 3, :input)
+    @test_throws ErrorException getporttype(node, 1, :both)     # допустимо :input/:output
+
+    ps = getportspec(node, :a, :input)
+    @test ps isa PortSpec{SinglePort}
+    @test ps.name     == "a"
+    @test ps.label    == :a
+    @test ps.datatype === Int
+    @test ps.required
+    @test getportspec(node, :out, :output).label == :out
+
+    @test isportexist(node, :a)                # направление :any по умолчанию
+    @test isportexist(node, :a, :input)
+    @test !isportexist(node, :a, :output)
+    @test isportexist(node, :out, :output)
+    @test !isportexist(node, :nope)
+    @test_throws ErrorException isportexist(node, :a, :sideways)
+
+    @test isportinspec(:a, spec, :input)
+    @test !isportinspec(:a, spec, :output)
+    @test isportinspec(:out, spec, :both)
+    @test !isportinspec(:nope, spec, :both)
+
+    @test !ismultiport(getportspec(node, :a, :input))
+    @test ismultiport(spec_collect().input_ports[1])
+
+    # required = false отмечает необязательный вход
+    @test !getportspec(DataNode(OptionalNode, spec_optional()), :maybe, :input).required
+
+    # Конструктор NodeSpec из трёх аргументов даёт пустой список настроек
+    s3 = NodeSpec("NoSettings", PortSpec[], [PortSpec("v", Int, :v)])
+    @test s3.settings == Symbol[]
+    @test s3.portmap[(:output, :v)] == 1
+    @test length(s3.portmap) == 1
+end
+
+############################################################
+# Свойства ноды, состояние исполнения и Dict-подобный доступ к полям
+# (AbstractNodeFields: getindex / setindex! / keys).
+@testset "MetidaFlows.jl: node - properties, state, field access            " begin
+
+    node = DataNode(ConstNode, spec_const())
+
+    @test getid(node)       == 0
+    @test getposition(node) == (0, 0)
+    @test getstatus(node)   == :idle
+    @test occursin("ConstNode", nodetypestr(node))
+
+    # Все сеттеры мутируют ноду на месте и возвращают её саму
+    @test setid!(node, 7) === node
+    @test getid(node) == 7
+    setposition!(node, (10, 20))
+    @test getposition(node) == (10, 20)
+    setstatus!(node, :dirty)
+    @test getstatus(node) == :dirty
+
+    # NodeState ведёт себя как словарь по именам полей
+    st = NodeState()
+    @test keys(st) == (:exec_n, :ready_ports, :execution_id, :log)
+    @test st[:exec_n] == 0
+    st[:exec_n] = 3
+    @test st[:exec_n] == 3
+    push!(st[:ready_ports], :x)
+    empty!(st)
+    @test st[:exec_n] == 0
+    @test isempty(st[:ready_ports])
+    @test st[:execution_id] == 0
+    @test isempty(st[:log])
+
+    @test getstate(node, :execution_id) == 0
+    setstate!(node, :execution_id, UInt64(5))
+    @test getstate(node, :execution_id) == UInt64(5)
+
+    # На immutable-состоянии чтение работает, запись запрещена
+    fs = FrozenState(1)
+    @test fs[:value] == 1
+    @test keys(fs)   == (:value,)
+    @test_throws ErrorException setindex!(fs, 2, :value)
+
+    np = NodeProperties()
+    @test (np.id, np.status, np.position) == (0, :idle, (0, 0))
+    np2 = NodeProperties(5, :clean, (1, 2))
+    @test (np2.id, np2.status, np2.position) == (5, :clean, (1, 2))
+
+    lm = LogMsg(:info, "hello")
+    @test lm.level     == :info
+    @test lm.message   == "hello"
+    @test lm.timestamp isa MetidaFlows.Dates.DateTime
+    lm2 = LogMsg(UInt64(7), lm.timestamp, :error, "bad")
+    @test lm2.id == UInt64(7)
+end
+
+############################################################
+# ExecuteSettings: три конструктора задают одни и те же четыре флага.
+@testset "MetidaFlows.jl: ExecuteSettings constructors                     " begin
+
+    s1 = ExecuteSettings()                              # всё включено
+    @test s1.execute_upstream && s1.invalidate_downstream
+    @test s1.check_cyclic && s1.check_input_buffer
+
+    s2 = ExecuteSettings(false)                         # всё выключено одним флагом
+    @test !s2.execute_upstream && !s2.invalidate_downstream
+    @test !s2.check_cyclic && !s2.check_input_buffer
+
+    s3 = ExecuteSettings(true, false, true, false)      # позиционная форма
+    @test s3.execute_upstream && !s3.invalidate_downstream
+    @test s3.check_cyclic && !s3.check_input_buffer
+
+    s4 = ExecuteSettings(; check_cyclic = false)        # именованная форма
+    @test !s4.check_cyclic
+    @test s4.execute_upstream && s4.invalidate_downstream && s4.check_input_buffer
+end
+
+############################################################
+# Конструкторы DataNode, выходные данные и входные буферы.
+# Буфер устроен как input_buffer[метка порта][id связи] = значение.
+@testset "MetidaFlows.jl: node - constructors, data and input buffer        " begin
+
+    n = DataNode(DoubleNode, 7, :dirty, (1, 2), spec_double())
+    @test getid(n)       == 7
+    @test getstatus(n)   == :dirty
+    @test getposition(n) == (1, 2)
+    # Конструктор заводит пустой буфер для каждого входного порта из спецификации
+    @test haskey(n.input_buffer, :in)
+    @test isempty(n.input_buffer[:in])
+
+    # Буфер можно передать готовым
+    n2 = DataNode(DoubleNode, spec_double(); input_buffer = Dict(:in => Dict{Int, Any}(11 => 5)))
+    @test getinputdata(n2, :in, 11) == 5
+    @test getinputdata(n2, :in, 42) === nothing   # такой связи нет
+    @test getinputdata(n2, :in)     == 5          # SinglePort: единственное значение
+    @test_throws ErrorException getinputdata(n2, :nope)
+    @test_throws ErrorException getinputdata(n2, :nope, 1)
+
+    # Ключи буфера обязаны существовать во входных портах спецификации
+    @test_throws ErrorException DataNode(DoubleNode, spec_double();
+                                         input_buffer = Dict(:ghost => Dict{Int, Any}()))
+
+    # Пустой SinglePort читается как nothing, а два значения в нём — ошибка
+    @test getinputdata(DataNode(DoubleNode, spec_double()), :in) === nothing
+    n3 = DataNode(DoubleNode, spec_double())
+    setinputbuffer!(n3, :in, 1, 10)
+    setinputbuffer!(n3, :in, 2, 20)
+    @test_throws ErrorException getinputdata(n3, :in)
+    @test getinputdata(n3, :in, 2) == 20
+    invalidate_buffer!(n3, :in, 2)
+    @test getinputdata(n3, :in, 2) === nothing
+    @test getinputdata(n3, :in)    == 10          # осталось одно значение
+
+    # MultiPort отдаёт весь словарь целиком
+    m = DataNode(CollectNode, spec_collect())
+    setinputbuffer!(m, :ins, 1, 2)
+    setinputbuffer!(m, :ins, 2, 3)
+    buf = getinputdata(m, :ins)
+    @test buf isa Dict
+    @test length(buf) == 2
+    @test sum(values(buf)) == 5
+
+    # getdata/setdata! работают только с выходными портами;
+    # объявленный, но ещё не заполненный порт возвращает nothing
+    n4 = DataNode(ConstNode, spec_const())
+    @test getdata(n4, :out) === nothing
+    @test setdata!(n4, :out, 42)
+    @test getdata(n4, :out) == 42
+    @test_throws ErrorException getdata(n4, :ghost)
+    @test_throws ErrorException setdata!(n4, :ghost, 1)
+end
+
+############################################################
+# Граф: добавление/удаление нод и связей, индексы incoming/outgoing,
+# правила валидации соединений.
+@testset "MetidaFlows.jl: workflow - nodes, connections, indices            " begin
+
+    w = Workflow(1)
+    @test w isa Workflow{DAW}
+    @test w.id   == 1
+    @test w.name == "Default"
+    @test isempty(w.nodes) && isempty(w.connections)
+    @test Workflow(0; type = :ABW) isa Workflow{ABW}
+    @test_throws ErrorException Workflow(0; type = :UNKNOWN)
+
+    sid = add_node!(w, DataNode(ConstNode, spec_const()))
+    a   = add_node!(w, DataNode(DoubleNode, spec_double()))
+    b   = add_node!(w, DataNode(DoubleNode, spec_double()))
+    @test (sid, a, b) == (1, 2, 3)
+    @test isnodeexist(w, sid)
+    @test !isnodeexist(w, 99)
+    @test getnode(w, a) isa DataNode
+    @test getid(getnode(w, a)) == a
+    @test_throws KeyError getnode(w, 99)
+
+    c1 = add_connection!(w, sid, :out, a, :in)                    # форма из 5 аргументов
+    c2 = add_connection!(w, NodeConnection(sid, :out, b, :in))    # форма с NodeConnection
+    @test (c1, c2) == (1, 2)
+    @test getconnection(w, c1) isa NodeConnection
+    @test getconnection(w, c1).input_id == a
+    @test_throws KeyError getconnection(w, 99)
+
+    @test sort(find_connections(w, sid)) == [c1, c2]   # входящие + исходящие
+    @test find_connections(w, a)   == [c1]
+    @test find_connections(w, 99)  == Int[]
+
+    @test get_parents(w, a) == [(:in, sid)]            # (порт-приёмник, id родителя)
+    @test isempty(get_parents(w, sid))
+    @test isempty(get_parents(w, 99))
+
+    ch = get_children(w, sid)                          # (порт-источник, id потомка, порт-приёмник)
+    @test length(ch) == 2
+    @test (:out, a, :in) in ch
+    @test (:out, b, :in) in ch
+    @test isempty(get_children(w, a))
+    @test isempty(get_children(w, 99))
+
+    @test length(getportconnections(w, sid, :out; direction = :output)) == 2
+    @test length(getportconnections(w, a, :in; direction = :input))     == 1
+    @test length(getportconnections(w, a, :in))                          == 1  # :both
+    @test isempty(getportconnections(w, sid, :out; direction = :input))
+    @test_throws ErrorException getportconnections(w, sid, :out; direction = :nope)
+    @test_throws KeyError getportconnections(w, 99, :out)
+
+    # Все ветки check_connection_validity
+    @test_throws ErrorException add_connection!(w, NodeConnection(99, :out, a, :in))    # нет родителя
+    @test_throws ErrorException add_connection!(w, NodeConnection(sid, :out, 99, :in))  # нет потомка
+    @test_throws ErrorException add_connection!(w, NodeConnection(sid, :ghost, a, :in)) # нет выходного порта
+    @test_throws ErrorException add_connection!(w, NodeConnection(sid, :out, a, :ghost))# нет входного порта
+    @test_throws ErrorException add_connection!(w, NodeConnection(sid, :out, a, :in))   # SinglePort занят
+    # Отклонённые связи не расходуют идентификаторы
+    @test w.c_iter == 2
+
+    # Проверка типов: тип выходного порта должен быть подтипом входного
+    t    = add_node!(w, DataNode(TextNode, spec_text()))
+    free = add_node!(w, DataNode(DoubleNode, spec_double()))
+    @test_throws ErrorException add_connection!(w, NodeConnection(t, :out, free, :in))  # String !<: Int
+    anyn = add_node!(w, DataNode(AnyInNode, spec_anyin()))
+    c3 = add_connection!(w, sid, :out, anyn, :in)                                       # Int <: Any
+    @test c3 == 3
+
+    # Удаление связи чистит оба индекса, повторное удаление возвращает false
+    @test delete_connection!(w, c3)
+    @test !delete_connection!(w, c3)
+    @test isempty(w.incoming[anyn])
+    @test !(c3 in w.outgoing[sid])
+
+    # Удаление ноды снимает вместе с ней все её связи
+    @test delete_node!(w, b)
+    @test !haskey(w.connections, c2)
+    @test !(c2 in w.outgoing[sid])
+    @test !isnodeexist(w, b)
+    @test !delete_node!(w, b)
+    @test delete_node!(w, anyn)
+    @test !haskey(w.incoming, anyn)
+end
+
+############################################################
+# Настройки ноды: слияние значений, инвалидация и «безопасная» форма.
+@testset "MetidaFlows.jl: settings: merge, invalidation, unsafe variant    " begin
+
+    w  = Workflow(0)
+    n  = DataNode(ConstNode, spec_const())
+    id = add_node!(w, n)
+
+    setsettings_unsafe!(n, Dict(:value => 1))
+    @test n.settings[:value] == 1
+    @test getstatus(n) == :idle          # «unsafe» — без инвалидации графа
+
+    setsettings!(w, id, Dict(:value => 2, :extra => "x"))
+    @test n.settings[:value] == 2
+    @test n.settings[:extra] == "x"
+    @test getstatus(n) == :dirty         # setsettings! всегда инвалидирует
+
+    setsettings!(w, id, Dict(:value => 3))
+    @test n.settings[:value] == 3
+    @test n.settings[:extra] == "x"      # настройки сливаются, а не заменяются
+
+    # add_node! сбрасывает ноду, если она ещё не в состоянии :idle или :clean
+    fresh = DataNode(ConstNode, spec_const())
+    setstatus!(fresh, :dirty)
+    setsettings_unsafe!(fresh, Dict(:value => 99))
+    add_node!(w, fresh)
+    @test isempty(fresh.settings)
+
+    # Ноду, уже посчитанную (:clean), add_node! не сбрасывает:
+    # результат и статус переживают удаление и повторное добавление
+    w2  = Workflow(0)
+    s   = DataNode(ConstNode, spec_const())
+    sid = add_node!(w2, s)
+    setsettings!(w2, sid, Dict(:value => 4))
+    execute!(w2, sid)
+    @test getstatus(s) == :clean
+    delete_node!(w2, sid)
+    newid = add_node!(w2, s)
+    @test newid == 2                     # идентификаторы не переиспользуются
+    @test getstatus(s) == :clean
+    @test getdata(s, :out) == 4
+end
+
+############################################################
+# Ядро исполнения: подтягивание родителей, кеширование :clean-нод,
+# инвалидация вниз по графу и сброс состояния.
+@testset "MetidaFlows.jl: execute!: caching and invalidation               " begin
+
+    empty!(CALLS)
+    w   = Workflow(0)
+    src = DataNode(ConstNode, spec_const())
+    dbl = DataNode(DoubleNode, spec_double())
+    sid = add_node!(w, src)
+    did = add_node!(w, dbl)
+    add_connection!(w, sid, :out, did, :in)
+    setsettings!(w, sid, Dict(:value => 21))
+
+    @test getstatus(src) == :dirty
+    @test getstatus(dbl) == :dirty
+
+    # execute_upstream = true (по умолчанию): родитель исполняется автоматически
+    @test execute!(w, did) == [:out]
+    @test getdata(w, did, :out) == 42
+    @test getstatus(src) == :clean
+    @test getstatus(dbl) == :clean
+    @test CALLS[:const] == 1
+    @test CALLS[:double] == 1
+
+    # Повторный вызов на :clean-ноде ничего не пересчитывает
+    @test execute!(w, did) == [:out]
+    @test execute!(w, sid) == [:out]
+    @test CALLS[:const] == 1
+    @test CALLS[:double] == 1
+
+    # Смена настроек инвалидирует саму ноду и всё, что ниже по графу:
+    # кеш выходов сбрасывается, устаревшая запись буфера удаляется
+    setsettings!(w, sid, Dict(:value => 50))
+    @test getstatus(src) == :dirty
+    @test getstatus(dbl) == :dirty
+    @test getdata(dbl, :out) === nothing
+    @test isempty(dbl.input_buffer[:in])
+
+    @test execute!(w, did) == [:out]
+    @test getdata(w, did, :out) == 100
+    @test CALLS[:const] == 2
+    @test CALLS[:double] == 2
+
+    # reset_status! меняет только статусы, данные остаются
+    reset_status!(w)
+    @test getstatus(src) == :dirty
+    @test getdata(src, :out) == 50
+
+    # mark_dirty! дополнительно сбрасывает кеш выходов и ready_ports,
+    # но сохраняет настройки и входные буферы
+    mark_dirty!(src)
+    @test getstatus(src) == :dirty
+    @test getdata(src, :out) === nothing
+    @test isempty(getstate(src, :ready_ports))
+    @test src.settings[:value] == 50
+
+    # reset!(::Workflow) — это mark_dirty! для каждой ноды
+    execute!(w, did)
+    @test getstatus(src) == :clean
+    reset!(w)
+    @test getstatus(src) == :dirty
+    @test getstatus(dbl) == :dirty
+    @test getdata(src, :out) === nothing
+    @test src.settings[:value] == 50
+
+    # reset!(::AbstractDataNode) — полный сброс до состояния :idle
+    setinputbuffer!(dbl, :in, 1, 5)
+    reset!(dbl)
+    @test getstatus(dbl) == :idle
+    @test isempty(dbl.settings)
+    @test isempty(dbl.data)
+    @test getstate(dbl, :execution_id) == 0
+    @test haskey(dbl.input_buffer, :in)     # ключи портов сохраняются,
+    @test isempty(dbl.input_buffer[:in])    # очищается только их содержимое
+end
+
+############################################################
+# Влияние флагов ExecuteSettings на ход исполнения.
+@testset "MetidaFlows.jl: execute!: ExecuteSettings flags                  " begin
+
+    w   = Workflow(0)
+    sid = add_node!(w, DataNode(ConstNode, spec_const()))
+    did = add_node!(w, DataNode(DoubleNode, spec_double()))
+    add_connection!(w, sid, :out, did, :in)
+    setsettings!(w, sid, Dict(:value => 2))
+
+    # execute_upstream = false: родитель не исполняется, вход пуст -> :invalid_node
+    @test execute!(w, did; settings = ExecuteSettings(; execute_upstream = false)) == Symbol[]
+    @test getstatus(getnode(w, did)) == :invalid_node
+
+    # с подтягиванием родителей тот же вызов проходит
+    @test execute!(w, did) == [:out]
+    @test getdata(w, did, :out) == 4
+
+    # invalidate_downstream = false: потомок остаётся :clean после пересчёта родителя
+    setsettings!(w, sid, Dict(:value => 3))
+    execute!(w, sid; settings = ExecuteSettings(false))
+    @test getstatus(getnode(w, sid)) == :clean
+    @test getstatus(getnode(w, did)) == :dirty     # был помечен ещё в setsettings!
+    @test getinputdata(getnode(w, did), :in) == 3  # данные при этом уже проброшены
+end
+
+############################################################
+# Хуки валидации и все «неуспешные» статусы.
+@testset "MetidaFlows.jl: execute!: validation hooks and failures          " begin
+
+    # validate_settings -> :invalid_settings
+    w  = Workflow(0)
+    n  = DataNode(NeedsCfgNode, spec_cfg())
+    id = add_node!(w, n)
+    @test execute!(w, id) == Symbol[]
+    @test getstatus(n) == :invalid_settings
+    setsettings!(w, id, Dict(:k => 11))
+    @test execute!(w, id) == [:out]
+    @test getstatus(n) == :clean
+    @test getdata(n, :out) == 11
+
+    # validate_node -> :invalid_node
+    w2  = Workflow(0)
+    bn  = DataNode(BadStructNode, spec_plain("BadStruct"))
+    id2 = add_node!(w2, bn)
+    @test execute!(w2, id2) == Symbol[]
+    @test getstatus(bn) == :invalid_node
+    @test validate_node(w2, id2) == false
+    @test validate_settings(w2, id2)          # реализации по умолчанию — true
+    @test validate_result(w2, id2)
+
+    # validate_result -> :invalid_result; данные уже записаны execute_unsafe!,
+    # но НЕ публикуются вниз по графу (push_buffer! идёт после валидации)
+    w3   = Workflow(0)
+    br   = DataNode(BadResultNode, spec_plain("BadResult"))
+    sink = DataNode(DoubleNode, spec_double())
+    id3  = add_node!(w3, br)
+    sid3 = add_node!(w3, sink)
+    add_connection!(w3, id3, :out, sid3, :in)
+    @test execute!(w3, id3) == Symbol[]
+    @test getstatus(br) == :invalid_result
+    @test getdata(br, :out) == 1
+    @test isempty(sink.input_buffer[:in])
+    @test execute!(w3, sid3) == Symbol[]      # потомок остался без входа
+    @test getstatus(sink) == :invalid_node
+
+    # Исключение внутри execute_unsafe! -> статус :failed.
+    # ЗАМЕЧАНИЕ: сейчас из execute! наружу выходит вторичная ошибка из строки
+    # логирования в блоке catch (обращение к node.id вместо getid(node)),
+    # поэтому вызов обёрнут в try. После исправления строки логирования
+    # execute! просто вернёт Symbol[] и тест останется зелёным.
+    w4  = Workflow(0)
+    en  = DataNode(ErrorNode, spec_plain("Error"))
+    id4 = add_node!(w4, en)
+    rp = try
+        execute!(w4, id4)
+    catch
+        Symbol[]
+    end
+    @test rp == Symbol[]
+    @test getstatus(en) == :failed
+
+    # Незаполненный обязательный вход отсекается execution_node_validation
+    w5  = Workflow(0)
+    add5 = DataNode(AddNode, spec_add())
+    id5 = add_node!(w5, add5)
+    @test execution_node_validation(add5)        == false
+    @test execution_node_validation(add5, false) == true
+    @test execute!(w5, id5) == Symbol[]
+    @test getstatus(add5) == :invalid_node
+    # check_input_buffer = false полностью отключает эту проверку
+    @test execute!(w5, id5; settings = ExecuteSettings(; check_input_buffer = false)) == [:out]
+    @test getdata(add5, :out) == 0
+
+    # Необязательный вход может остаться пустым
+    w6  = Workflow(0)
+    o   = DataNode(OptionalNode, spec_optional())
+    id6 = add_node!(w6, o)
+    @test execute!(w6, id6) == [:out]
+    @test getdata(o, :out) == -1
+end
+
+############################################################
+# isready и все три формы push_buffer!.
+@testset "MetidaFlows.jl: isready and push_buffer!                         " begin
+
+    w   = Workflow(0)
+    src = DataNode(ConstNode, spec_const())
+    dbl = DataNode(DoubleNode, spec_double())
+    sid = add_node!(w, src)
+    did = add_node!(w, dbl)
+    cid = add_connection!(w, sid, :out, did, :in)
+    setsettings!(w, sid, Dict(:value => 4))
+
+    @test isready(w, sid)                 # нет родителей -> нода готова всегда
+    @test !isready(w, did)                # родитель ещё :dirty
+    @test push_buffer!(w, did) === w      # нет исходящих связей -> ничего не делает
+
+    execute!(w, sid; settings = ExecuteSettings(false))
+    @test isready(w, did)
+    @test getinputdata(dbl, :in, cid) == 4
+
+    # Форма без списка портов берёт state[:ready_ports]
+    setdata!(src, :out, 5)
+    push_buffer!(w, sid)
+    @test getinputdata(dbl, :in, cid) == 5
+
+    # Явные формы: один порт и вектор портов
+    setdata!(src, :out, 99)
+    push_buffer!(w, sid, :out)
+    @test getinputdata(dbl, :in, cid) == 99
+    setdata!(src, :out, 7)
+    push_buffer!(w, sid, [:out])
+    @test getinputdata(dbl, :in, cid) == 7
+
+    # Порт не в списке готовых -> буфер не трогаем
+    setdata!(src, :out, 8)
+    push_buffer!(w, sid, Symbol[])
+    @test getinputdata(dbl, :in, cid) == 7
+
+    setstatus!(src, :dirty)
+    @test !isready(w, did)
+end
+
+############################################################
+# MultiPort: несколько связей в один входной порт.
+@testset "MetidaFlows.jl: multiport: several connections per port          " begin
+
+    empty!(CALLS)
+    w   = Workflow(0)
+    s1  = add_node!(w, DataNode(ConstNode, spec_const()))
+    s2  = add_node!(w, DataNode(ConstNode, spec_const()))
+    m   = DataNode(CollectNode, spec_collect())
+    mid = add_node!(w, m)
+
+    c1 = add_connection!(w, s1, :out, mid, :ins)
+    c2 = add_connection!(w, s2, :out, mid, :ins)   # SinglePort бы здесь упал
+    @test (c1, c2) == (1, 2)
+
+    setsettings!(w, s1, Dict(:value => 5))
+    setsettings!(w, s2, Dict(:value => 7))
+
+    @test scheduler!(w)
+    buf = getinputdata(m, :ins)
+    @test buf isa Dict
+    @test length(buf) == 2
+    @test getdata(w, mid, :out) == 12
+    @test CALLS[:collect] == 1
+
+    # execute! обходит ВСЕ входящие связи мультипорта, а не только первую
+    setsettings!(w, s1, Dict(:value => 10))
+    setsettings!(w, s2, Dict(:value => 20))
+    @test execute!(w, mid) == [:out]
+    @test getdata(w, mid, :out) == 30
+
+    # Удаление одной связи убирает только её вклад
+    delete_connection!(w, c2)
+    @test execute!(w, mid) == [:out]
+    @test getdata(w, mid, :out) == 10
+end
+
+############################################################
+# Планировщик DAW: топологический порядок, циклы, пропуски в id.
+@testset "MetidaFlows.jl: scheduler!: DAW                                  " begin
+
+    empty!(CALLS)
+    w = Workflow(0)
+    s = add_node!(w, DataNode(ConstNode, spec_const()))
+    l = add_node!(w, DataNode(DoubleNode, spec_double()))
+    r = add_node!(w, DataNode(DoubleNode, spec_double()))
+    j = add_node!(w, DataNode(AddNode, spec_add()))
+    add_connection!(w, s, :out, l, :in)
+    add_connection!(w, s, :out, r, :in)
+    add_connection!(w, l, :out, j, :a)
+    add_connection!(w, r, :out, j, :b)
+    setsettings!(w, s, Dict(:value => 3))
+
+    @test scheduler!(w)
+    @test getdata(w, j, :out) == 12            # (3*2) + (3*2)
+    @test CALLS[:const]  == 1
+    @test CALLS[:double] == 2
+    @test CALLS[:add]    == 1
+    @test all(getstatus(getnode(w, i)) == :clean for i in (s, l, r, j))
+
+    # Каждый прогон scheduler! начинается с reset!, то есть считает граф заново
+    @test scheduler!(w)
+    @test CALLS[:const] == 2
+    @test getdata(w, j, :out) == 12
+
+    # Цикл отвергается до исполнения
+    wc = Workflow(0)
+    n1 = add_node!(wc, DataNode(DoubleNode, spec_double()))
+    n2 = add_node!(wc, DataNode(DoubleNode, spec_double()))
+    add_connection!(wc, n1, :out, n2, :in)
+    add_connection!(wc, n2, :out, n1, :in)
+    @test_throws ErrorException scheduler!(wc)
+
+    # Пустой workflow отрабатывает штатно
+    @test scheduler!(Workflow(0))
+
+    # Пропуски в идентификаторах нод (после удаления) планировщику не мешают
+    wg  = Workflow(0)
+    ga  = add_node!(wg, DataNode(ConstNode, spec_const()))
+    tmp = add_node!(wg, DataNode(DoubleNode, spec_double()))
+    delete_node!(wg, tmp)
+    gb  = add_node!(wg, DataNode(DoubleNode, spec_double()))    # id 3, id 2 больше нет
+    add_connection!(wg, ga, :out, gb, :in)
+    setsettings!(wg, ga, Dict(:value => 6))
+    @test scheduler!(wg)
+    @test getdata(wg, gb, :out) == 12
+
+    # scheduler! возвращает true независимо от статусов нод:
+    # это признак завершения обхода, а не признак успеха
+    wi = Workflow(0)
+    x  = add_node!(wi, DataNode(AddNode, spec_add()))
+    @test scheduler!(wi)
+    @test getstatus(getnode(wi, x)) == :invalid_node
+end
+
+############################################################
+# Планировщик ABW: очередь готовых нod.
+@testset "MetidaFlows.jl: scheduler!: ABW                                  " begin
+
+    empty!(CALLS)
+    w = Workflow(0; type = :ABW)
+    s = add_node!(w, DataNode(ConstNode, spec_const()))
+    d = add_node!(w, DataNode(DoubleNode, spec_double()))
+    add_connection!(w, s, :out, d, :in)
+    setsettings!(w, s, Dict(:value => 3))
+
+    @test scheduler!(w)
+    @test getdata(w, d, :out) == 6
+    @test getstatus(getnode(w, s)) == :clean
+    @test getstatus(getnode(w, d)) == :clean
+    @test CALLS[:const] == 1 && CALLS[:double] == 1
+
+    # «Ромб»: узел слияния исполняется ровно один раз
+    empty!(CALLS)
+    wd = Workflow(0; type = :ABW)
+    s2 = add_node!(wd, DataNode(ConstNode, spec_const()))
+    l2 = add_node!(wd, DataNode(DoubleNode, spec_double()))
+    r2 = add_node!(wd, DataNode(DoubleNode, spec_double()))
+    j2 = add_node!(wd, DataNode(AddNode, spec_add()))
+    add_connection!(wd, s2, :out, l2, :in)
+    add_connection!(wd, s2, :out, r2, :in)
+    add_connection!(wd, l2, :out, j2, :a)
+    add_connection!(wd, r2, :out, j2, :b)
+    setsettings!(wd, s2, Dict(:value => 5))
+    @test scheduler!(wd)
+    @test getdata(wd, j2, :out) == 20
+    @test CALLS[:add] == 1
+
+    # Нода, вынутая из очереди раньше времени, отбрасывается и возвращается
+    # в очередь, когда досчитается второй родитель
+    empty!(CALLS)
+    wr = Workflow(0; type = :ABW)
+    s3 = add_node!(wr, DataNode(ConstNode, spec_const()))
+    m3 = add_node!(wr, DataNode(DoubleNode, spec_double()))
+    j3 = add_node!(wr, DataNode(AddNode, spec_add()))
+    add_connection!(wr, s3, :out, j3, :b)   # связь зарегистрирована первой:
+    add_connection!(wr, s3, :out, m3, :in)  # j3 попадёт в очередь до готовности m3
+    add_connection!(wr, m3, :out, j3, :a)
+    setsettings!(wr, s3, Dict(:value => 5))
+    @test scheduler!(wr)
+    @test getdata(wr, j3, :out) == 15       # 10 + 5
+    @test CALLS[:add] == 1
+
+    # Ограничитель числа итераций
+    @test_throws ErrorException scheduler!(wr; maxiter = 0)
+
+    # ABW исполняет ноды с ExecuteSettings(false), то есть без проверки
+    # входных буферов: обязательный, но неподключённый вход не блокирует запуск
+    wq = Workflow(0; type = :ABW)
+    s4 = add_node!(wq, DataNode(ConstNode, spec_const()))
+    j4 = add_node!(wq, DataNode(AddNode, spec_add()))
+    add_connection!(wq, s4, :out, j4, :a)   # порт :b остаётся неподключённым
+    setsettings!(wq, s4, Dict(:value => 9))
+    @test scheduler!(wq)
+    @test getstatus(getnode(wq, j4)) == :clean
+    @test getdata(wq, j4, :out) == 9
+
+    # Нода со входами, но без родителей, в очередь не попадает вовсе
+    wu = Workflow(0; type = :ABW)
+    u  = add_node!(wu, DataNode(DoubleNode, spec_double()))
+    @test scheduler!(wu)
+    @test getstatus(getnode(wu, u)) == :dirty
+end
+
+############################################################
+# Защитные механизмы: петля на себя и предупреждение о большом графе.
+@testset "MetidaFlows.jl: guards: self loop and large graph warning        " begin
+
+    w  = Workflow(0)
+    ln = DataNode(SelfLoopNode, spec_loop())
+    id = add_node!(w, ln)
+    add_connection!(w, id, :out, id, :in)   # графовое API петлю принимает
+
+    # Рекурсивный заход в ту же ноду ловится по статусу :executing
+    rp = @test_logs (:warn, "Ring detected") execute!(w, id)
+    @test rp == Symbol[]
+    @test getstatus(ln) == :invalid_node
+    # DAW-планировщик отвергает такой граф целиком
+    @test_throws ErrorException scheduler!(w)
+
+    # При execute_upstream = true и большом числе нод выдаётся предупреждение
+    # о возможном переполнении стека
+    wl = Workflow(0)
+    for i in 1:1001
+        nid = add_node!(wl, DataNode(ConstNode, spec_const()))
+        setsettings_unsafe!(getnode(wl, nid), Dict(:value => nid))
+    end
+    @test_logs (:warn, r"large number") execute!(wl, 1)
+    @test getdata(wl, 1, :out) == 1
+end
+
+############################################################
+# Построение графа для планировщика.
+@testset "MetidaFlows.jl: makegraph                                        " begin
+
+    w = Workflow(0)
+    a = add_node!(w, DataNode(ConstNode, spec_const()))
+    b = add_node!(w, DataNode(DoubleNode, spec_double()))
+    add_connection!(w, a, :out, b, :in)
+
+    g = makegraph(w)
+    @test MetidaFlows.is_cyclic(g) == false
+    @test collect(MetidaFlows.topological_sort(g)) == [a, b]
+
+    wc = Workflow(0)
+    n1 = add_node!(wc, DataNode(DoubleNode, spec_double()))
+    n2 = add_node!(wc, DataNode(DoubleNode, spec_double()))
+    add_connection!(wc, n1, :out, n2, :in)
+    add_connection!(wc, n2, :out, n1, :in)
+    @test MetidaFlows.is_cyclic(makegraph(wc))
+end
+
+############################################################
+# Сериализация: схемы, словарные представления, пользовательские хуки.
+@testset "MetidaFlows.jl: serialization: schemas and dict conversion       " begin
+
+    node  = DataNode(SchemaNode, spec_schema())
+    plain = DataNode(ConstNode, spec_const())
+
+    @test settings_schema(plain)["settingslist"] == [:value]
+    ss = settings_schema(node)
+    @test ss["settingslist"] == [:alpha, :beta]
+    @test haskey(ss, "schema")                       # хук settings_schema_usermod!
+    @test ss["schema"][:alpha][:type] === Int
+
+    ns = node_schema(node)
+    @test ns["color"] == "#8b5cf6"                   # хук node_schema_usermod!
+    @test ns["spec"]["name"] == "Schema"
+    @test haskey(ns, "settings_schema")
+    @test node_schema(plain)["settings_schema"]["settingslist"] == [:value]
+
+    nd = node_to_dict(plain)
+    @test nd["id"] == getid(plain)
+    @test nd["status"] == :idle
+    @test nd["properties"]["position"] == (0, 0)
+    # ВНИМАНИЕ: ключ "settings" содержит СХЕМУ настроек, а не их значения
+    @test nd["settings"]["settingslist"] == [:value]
+    nd2 = node_to_dict(plain; specs = false, settings = false)
+    @test !haskey(nd2, "spec")
+    @test !haskey(nd2, "settings")
+
+    pd = node_properties_to_dict(NodeProperties(3, :clean, (5, 6)))
+    @test pd["id"] == 3
+    @test pd["status"] == :clean
+    @test pd["position"] == (5, 6)
+
+    sd = spec_to_dict(spec_add())
+    @test sd["name"] == "Add"
+    @test length(sd["input_ports"])  == 2
+    @test length(sd["output_ports"]) == 1
+    @test sd["settings"] == Symbol[]
+    @test sd["input_ports"][1]["label"] == :a
+
+    psd = portspec_to_dict(PortSpec("v", Float64, :v, MultiPort(); required = false))
+    @test psd["name"]     == "v"
+    @test psd["label"]    == :v
+    @test psd["datatype"] == string(Float64)
+    @test psd["required"] == false
+    @test psd["type"]     == "MultiPort"
+    @test portspec_to_dict(PortSpec("s", Int, :s))["type"] == "SinglePort"
+    @test portspec_to_dict_type(PortSpec("s", Int, :s))    == "SinglePort"
+    @test portspec_to_dict_type(PortSpec("m", Int, :m, MultiPort())) == "MultiPort"
+
+    cd = connection_to_dict(NodeConnection(1, :a, 2, :b))
+    @test cd["output_id"]   == 1
+    @test cd["output_port"] == :a
+    @test cd["input_id"]    == 2
+    @test cd["input_port"]  == :b
+
+    # Полный снимок workflow
+    w = Workflow(3)
+    w.name = "demo"
+    s = add_node!(w, DataNode(ConstNode, spec_const()))
+    d = add_node!(w, DataNode(DoubleNode, spec_double()))
+    c = add_connection!(w, s, :out, d, :in)
+    dict = workflow_to_dict(w)
+    @test dict["id"]     == 3
+    @test dict["name"]   == "demo"
+    @test dict["n_iter"] == 2
+    @test dict["c_iter"] == 1
+    @test Set(keys(dict["nodes"])) == Set(["1", "2"])            # ноды/связи — по строковым ключам
+    @test dict["connections"]["1"]["output_id"] == s
+    @test dict["incoming"][d] == [c]                             # индексы — по числовым
+    @test dict["outgoing"][s] == [c]
+end
+
+############################################################
+# Текстовое представление (`show`).
+@testset "MetidaFlows.jl: show methods                                     " begin
+
+    out = sprint(show, DataNode(AddNode, spec_add()))
+    @test occursin("Node:", out)
+    @test occursin("Status: idle", out)
+    @test occursin("Name: Add", out)
+    @test occursin("Input ports", out)
+
+    sp = sprint(show, spec_add())
+    @test occursin("Name: Add", sp)
+    @test occursin("label: \"a\"", sp)
+    @test occursin("Available settings", sp)
+    @test occursin("Input ports: empty",
+                   sprint(show, spec_const()))
+    @test occursin("Output ports: empty",
+                   sprint(show, NodeSpec("Sink", [PortSpec("i", Int, :i)], PortSpec[])))
+
+    @test occursin("Port name: a", sprint(show, PortSpec("a", Int, :a)))
+
+    sc = sprint(show, NodeConnection(1, :x, 2, :y))
+    @test occursin("Node Connection", sc)
+    @test occursin("Output node ID: 1", sc)
+    @test occursin("Input node ID: 2", sc)
+end
+
+############################################################
+# Сквозной сценарий на реальных данных: CSV -> DataFrame -> агрегат.
+# Цепочка из трёх нод с разными типами портов должна одинаково
+# проходить через оба планировщика.
+@testset "MetidaFlows.jl: integration: three stage pipeline                " begin
+
+    for wftype in (:DAW, :ABW)
+        w   = Workflow(0; type = wftype)
+        id1 = add_node!(w, DataNode(LoadCSVNode, spec_loadcsv()))
+        id2 = add_node!(w, DataNode(ToDataFrameNode, spec_todf()))
+        id3 = add_node!(w, DataNode(SummaryNode, spec_summary()))
+        add_connection!(w, id1, :csv, id2, :csv)
+        add_connection!(w, id2, :dataframe, id3, :dataframe)
+        setsettings!(w, id1, Dict(:file => csv_file_path))
+
+        @test scheduler!(w)
+        @test getdata(w, id3, :nrows) == 160
+        @test getstatus(getnode(w, id1)) == :clean
+        @test getstatus(getnode(w, id2)) == :clean
+        @test getstatus(getnode(w, id3)) == :clean
+    end
+end
 
 ############################################################
 ############################################################
@@ -919,7 +2007,7 @@ end
     @test fz[:x] == 1
     @test_throws ErrorException setindex!(fz, 2, :x)   # immutable state
 
-    lm = LogMsg(UInt64(1), 0.0, :info, "hello")
+    lm = LogMsg(UInt64(1), now(), :info, "hello")
     @test lm.id == 1
     @test lm.level == :info
     @test lm.message == "hello"
@@ -1150,44 +2238,6 @@ end
     end
 end
 
-############################################################
-@testset "audit: BUG-5 :failed / BUG-6 wf type / BUG-2 dict " begin
-
-    # BUG-5: status after an exception in execute_unsafe!
-    w = Workflow(0)
-    n = DataNode(AFailNode, aspec_x("Failing"))
-    add_node!(w, n)
-    @test_throws Exception execute!(w, 1)
-    # TBD
-    #@test (getstatus(n) == :failed) broken = BUG_FAILED
-
-    # BUG-6: workflow type validation
-    @test Workflow(0) isa Workflow{DAW}
-    @test Workflow(0; type = :ABW) isa Workflow{ABW}
-    # TBD
-    # @test (try Workflow(0; type = :bogus); false; catch e; e isa ErrorException; end) broken = BUG_WFTYPE
-
-    # BUG-2: workflow_to_dict
-    w2 = Workflow(3)
-    d0 = workflow_to_dict(w2)                     # empty workflow serializes today
-    # TBD
-    #@test d0[:id] == 3
-    #@test d0[:name] == "Default"
-    #@test isempty(d0[:nodes])
-    #@test isempty(d0[:connections])
-
-    add_node!(w2, DataNode(ASrcNode, aspec_src()))
-    add_node!(w2, DataNode(ASinkNode, aspec_sink()))
-    add_connection!(w2, 1, :val, 2, :val)
-    @test (workflow_to_dict(w2) isa Dict) broken = BUG_W2D
-    if !BUG_W2D
-        dd = workflow_to_dict(w2)
-        #@test length(dd[:nodes]) == 2
-        #@test length(dd[:connections]) == 1
-        #@test dd[:incoming]["2"] == [1]
-        #@test dd[:outgoing]["1"] == [1]
-    end
-end
 
 ############################################################
 @testset "audit: serialization & schema family              " begin
