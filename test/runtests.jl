@@ -1,6 +1,10 @@
 ############################################################################
 #
 #  MetidaFlows.jl — набор тестов
+#
+#  Тесты разбиты на категории, каждая в своём файле. Категория отвечает
+#  на один вопрос о пакете:
+#
 #    api           — что делает каждая функция (контракт вызова);
 #    scenarios     — работает ли пакет целиком на реальных данных;
 #    semantics     — верна ли модель состояний и инвалидации;
@@ -8,6 +12,9 @@
 #    edge          — не разваливается ли он на вырожденных данных;
 #    serialization — корректно ли выгружается структура workflow;
 #    display       — видно ли пользователю содержимое объектов.
+#
+#  Общие фикстуры (типы нод, спецификации, реализации execute_unsafe!)
+#  объявлены один раз в fixtures.jl и переиспользуются всеми категориями.
 #
 ############################################################################
 
@@ -31,11 +38,13 @@ import MetidaFlows: PortSpec, MultiPort, SinglePort, DAW, ABW,
     node_to_dict, node_properties_to_dict, spec_to_dict,
     portspec_to_dict, portspec_to_dict_type, connection_to_dict, workflow_to_dict
 
-const TEST_DIR = dirname(@__FILE__)
+# Здесь и ниже намеренно без `const`: при повторном include в одной сессии
+# переопределение const печатает WARNING: redefinition of constant.
+TEST_DIR = dirname(@__FILE__)
 
 include(joinpath(TEST_DIR, "fixtures.jl"))
 
-const TEST_GROUPS = (
+TEST_GROUPS = (
     (id = "api",           file = "test_api.jl",
      descr = "контракт каждой публичной функции"),
     (id = "scenarios",     file = "test_scenarios.jl",
@@ -44,6 +53,8 @@ const TEST_GROUPS = (
      descr = "статусы, инвалидация, кеширование"),
     (id = "errors",        file = "test_errors.jl",
      descr = "исключения, статусы отказа, предупреждения"),
+    (id = "cycles",        file = "test_cycles.jl",
+     descr = "циклические графы ABW, петли и ромб внутри цикла"),
     (id = "edge",          file = "test_edge.jl",
      descr = "нулевые, единичные и вырожденные случаи"),
     (id = "serialization", file = "test_serialization.jl",
@@ -52,7 +63,7 @@ const TEST_GROUPS = (
      descr = "методы show"),
 )
 
-const SELECTED = isempty(ARGS) ? [g.id for g in TEST_GROUPS] : ARGS
+SELECTED = isempty(ARGS) ? [g.id for g in TEST_GROUPS] : ARGS
 
 for g in TEST_GROUPS
     mark = g.id in SELECTED ? "+" : " "

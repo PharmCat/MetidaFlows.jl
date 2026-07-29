@@ -9,22 +9,18 @@
 #    * счётчик фактических исполнений CALLS;
 #    * вспомогательные конструкторы графов.
 #
-#  Файл подключается один раз из runtests.jl ДО категорий тестов.
-#  Ничего не выполняет и не содержит @testset.
-#
-#  Данные: test/csv/pkdata2.csv — 160 строк, 4 колонки (TSV):
-#    Subject::Int (10 уникальных), Formulation::String ("T"/"R"),
-#    Time::Float64, Concentration::Float64 (8 значений > 200).
-#
 ############################################################################
 
-const CSV_PATH = joinpath(TEST_DIR, "csv", "pkdata2.csv")
+# Без `const`: тестовые файлы часто включают повторно в одной сессии
+# (include("test/runtests.jl") из REPL, Revise, повторный прогон), а повторное
+# определение const печатает WARNING: redefinition of constant.
+CSV_PATH = joinpath(TEST_DIR, "csv", "pkdata2.csv")
 
 # --------------------------------------------------------------------------
 # Счётчик исполнений: делает кеширование и инвалидацию наблюдаемыми.
 # --------------------------------------------------------------------------
 
-const CALLS = Dict{Symbol, Int}()
+CALLS = Dict{Symbol, Int}()
 
 countcall!(k::Symbol) = (CALLS[k] = get(CALLS, k, 0) + 1)
 calls(k::Symbol)      = get(CALLS, k, 0)
@@ -324,4 +320,124 @@ function build_pipeline(; type::Symbol = :DAW, file = CSV_PATH)
     add_connection!(w, todf, :dataframe, summ, :dataframe)
     setsettings!(w, load, Dict(:file => file))
     return (w = w, load = load, todf = todf, summ = summ)
+end
+
+# ==========================================================================
+#  Фикстуры для циклических графов (ABW)
+#
+#  Обратное ребро всегда входит в порт с kind = :feedback: только такие
+#  связи пропускает isready, поэтому только они могут замыкать цикл.
+#  Значение по обратной связи приходит с ПРОШЛОГО витка, поэтому на первом
+#  проходе буфер пуст и getinputdata возвращает nothing.
+# ==========================================================================
+
+struct CounterLoop      <: AbstractNodeType end  # петля на себя: счётчик витков
+struct StepNode         <: AbstractNodeType end  # исполнитель в петле из двух узлов
+struct CtrlNode         <: AbstractNodeType end  # контроллер останова
+struct LoopHead         <: AbstractNodeType end  # вход в петлю с ромбом внутри
+struct ScaleNode        <: AbstractNodeType end  # ветвь ромба: 2n
+struct ShiftNode        <: AbstractNodeType end  # ветвь ромба: n + 10
+struct JoinNode         <: AbstractNodeType end  # узел слияния ромба
+struct FeedbackOnlyNode <: AbstractNodeType end  # все входы обратные: не засевается
+
+spec_counterloop() = NodeSpec("Counter loop",
+    [PortSpec("Start",    Int, :start),
+     PortSpec("Previous", Int, :previous; kind = :feedback)],
+    [PortSpec("Next",  Int, :next),
+     PortSpec("Total", Int, :total; kind = :terminal)],
+    [:limit])
+
+spec_step() = NodeSpec("Step",
+    [PortSpec("Start",    Int, :start),
+     PortSpec("Previous", Int, :previous; kind = :feedback)],
+    [PortSpec("State", Int, :state)])
+
+spec_loophead() = spec_step()
+
+spec_ctrl() = NodeSpec("Control",
+    [PortSpec("State", Int, :state)],
+    [PortSpec("Next",  Int, :next),
+     PortSpec("Total", Int, :total; kind = :terminal)],
+    [:limit])
+
+spec_scale() = NodeSpec("Scale", [PortSpec("In", Int, :in)], [PortSpec("Out", Int, :out)])
+spec_shift() = NodeSpec("Shift", [PortSpec("In", Int, :in)], [PortSpec("Out", Int, :out)])
+
+spec_join() = NodeSpec("Join",
+    [PortSpec("A", Int, :a), PortSpec("B", Int, :b)],
+    [PortSpec("Sum", Int, :out)])
+
+spec_fbonly() = NodeSpec("Feedback only",
+    [PortSpec("Previous", Int, :previous; kind = :feedback)],
+    [PortSpec("Out", Int, :out)])
+
+# --- реализации -----------------------------------------------------------
+
+function MetidaFlows.execute_unsafe!(node::DataNode{CounterLoop})
+    countcall!(:counterloop)
+    previous = getinputdata(node, :previous)
+    n = previous === nothing ? getinputdata(node, :start) : previous
+    if n >= node.settings[:limit]
+        setdata!(node, :total, n)
+        return [:total]                    # в петлю ничего не публикуем -> останов
+    end
+    setdata!(node, :next, n + 1)
+    return [:next]                         # ещё один виток
+end
+
+function MetidaFlows.execute_unsafe!(node::DataNode{StepNode})
+    countcall!(:step)
+    previous = getinputdata(node, :previous)
+    n = previous === nothing ? getinputdata(node, :start) : previous
+    setdata!(node, :state, n + 1)
+    return [:state]
+end
+
+function MetidaFlows.execute_unsafe!(node::DataNode{CtrlNode})
+    countcall!(:ctrl)
+    n = getinputdata(node, :state)
+    if n >= node.settings[:limit]
+        setdata!(node, :total, n)
+        return [:total]
+    end
+    setdata!(node, :next, n)
+    return [:next]
+end
+
+function MetidaFlows.execute_unsafe!(node::DataNode{LoopHead})
+    countcall!(:loophead)
+    previous = getinputdata(node, :previous)
+    setdata!(node, :state, previous === nothing ? getinputdata(node, :start) : previous)
+    return [:state]
+end
+
+function MetidaFlows.execute_unsafe!(node::DataNode{ScaleNode})
+    countcall!(:scale)
+    setdata!(node, :out, 2 * getinputdata(node, :in))
+    return [:out]
+end
+
+function MetidaFlows.execute_unsafe!(node::DataNode{ShiftNode})
+    countcall!(:shift)
+    setdata!(node, :out, getinputdata(node, :in) + 10)
+    return [:out]
+end
+
+function MetidaFlows.execute_unsafe!(node::DataNode{JoinNode})
+    countcall!(:join)
+    a = getinputdata(node, :a)
+    b = getinputdata(node, :b)
+    # Обе ветви обязаны нести значение ОДНОГО витка: a = 2n, b = n + 10.
+    # Рассинхронизация означала бы, что узел слияния запустился до того,
+    # как досчитала вторая ветвь.
+    a == 2 * (b - 10) || countcall!(:join_mismatch)
+    setdata!(node, :out, a + b)
+    return [:out]
+end
+
+function MetidaFlows.execute_unsafe!(node::DataNode{FeedbackOnlyNode})
+    countcall!(:fbonly)
+    previous = getinputdata(node, :previous)
+    setdata!(node, :out, previous === nothing ? 0 : previous + 1)
+    return [:out]
 end

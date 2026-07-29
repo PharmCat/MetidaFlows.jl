@@ -230,7 +230,6 @@ end
     @test setdata!(n, :out, 42)
     @test getdata(n, :out)  == 42
 
-
     # Форма с workflow.
     w  = Workflow(0)
     id = add_node!(w, n)

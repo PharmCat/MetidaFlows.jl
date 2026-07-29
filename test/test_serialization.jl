@@ -41,7 +41,7 @@ end
     @test length(d["input_ports"])  == 2
     @test length(d["output_ports"]) == 1
     @test d["settings"] == Symbol[]
-    @test d["input_ports"][1]["label"]  == "a"
+    @test d["input_ports"][1]["label"]  == "a"     # метки сериализуются строками
     @test d["input_ports"][2]["label"]  == "b"
     @test d["output_ports"][1]["label"] == "out"
 

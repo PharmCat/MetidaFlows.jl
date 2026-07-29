@@ -173,7 +173,7 @@ Nodes outside the loop are unaffected: `LoadData` is nobody's child, stays
 ### Why the forward edge stays `:normal`
 
 It is tempting to mark both edges of the loop as `:feedback`. Do not.
-[`isready`](@ref) checks only `:normal` edges, and that check is what makes a
+`isready` checks only `:normal` edges, and that check is what makes a
 node with several producers wait for all of them. Mark `Trim → Control` as
 feedback and `Control` becomes eligible to run before `Trim` has produced
 anything — harmless in this two-node chain, wrong as soon as a third node

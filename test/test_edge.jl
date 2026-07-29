@@ -23,7 +23,8 @@
 @testset "B1. пустой workflow                              " begin
     # Ноль нод — законное состояние: планировщики отрабатывают вхолостую.
     @test scheduler!(Workflow(0)) === true
-    @test scheduler!(Workflow(0; type = :ABW)) === true
+    # у пустого графа стартовая очередь пуста, поэтому ABW предупреждает
+    @test scheduler!(Workflow(0; type = :ABW); throw_warn = false) === true
 
     w = Workflow(0)
     g = makegraph(w)
@@ -176,7 +177,7 @@ end
     # :dirty — прогон при этом считается завершённым.
     w  = Workflow(0; type = :ABW)
     u  = add_node!(w, DataNode(DoubleNode, spec_double()))
-    @test scheduler!(w) === true
+    @test_logs (:warn, "No nodes in queue...") scheduler!(w)
     @test getstatus(getnode(w, u)) == :dirty
     @test getdata(w, u, :out) === nothing
 

@@ -195,14 +195,24 @@ end
 # Dict compatible struct and minimal methods
 """
     NodeState()
-
+ 
 Per-node execution state with dict-like field access:
-
-- `exec_n::Int` - execution counter (reserved, not incremented yet);
+ 
+- `exec_n::Int` - number of times [`execute_unsafe!`](@ref) was entered since
+  the last full reset. Incremented by [`execute!`](@ref) right before the node
+  body runs, so a node rejected by validation leaves it unchanged while a
+  failed node does not.
+ 
+  Zeroed by `reset!(model)` in every reset mode, by `reset!(node)` and by
+  `empty!(state)` — but **not** by [`mark_dirty!`](@ref), so invalidating a
+  subtree does not lose the count. In a cyclic [`ABW`](@ref) run the counter
+  therefore holds the number of loop turns, and a node may read its own
+  `node.state[:exec_n]` inside [`execute_unsafe!`](@ref) as the current turn
+  number;
 - `ready_ports::Vector{Symbol}` - output ports produced by the last successful execution (used by [`push_buffer!`](@ref));
 - `execution_id::UInt64` - id of the run that last touched the node;
 - `log::Vector{LogMsg}` - per-run node log (cleared at the start of a run).
-
+ 
 Reset in place with `empty!(state)`.
 """
 mutable struct NodeState <: AbstractNodeState
@@ -248,25 +258,43 @@ Port type that accepts at most one connection (the default);
 struct SinglePort <: AbstractPortType end
 #
 """
-    PortSpec(name, datatype, label, ::T = SinglePort(); required::Bool = true) where T <: AbstractPortType
-
+    PortSpec(name, datatype, label, ::T = SinglePort(); required::Bool = true,
+             kind::Symbol = :normal) where T <: AbstractPortType
+ 
 Specification of a node port.
-
+ 
 Fields:
 - `name::String` - human-readable name of the port.
 - `datatype::Type` - Julia type of the port data (connection type checking).
 - `label::Symbol` - unique label used for referencing the port in code.
 - `required::Bool` - whether the port must have buffered data for execution.
-- `kind::Symbol` - the kind of the port (e.g., :normal, :terminal, :error).
-
+- `kind::Symbol` - how the schedulers treat connections attached to the port.
+ 
 The optional positional argument selects the port arity:
 [`SinglePort`](@ref) (default) or [`MultiPort`](@ref).
-
+ 
+# Port kinds
+| `kind` | Meaning |
+|---|---|
+| `:normal` | an ordinary data connection: [`isready`](@ref) waits for its producer and [`execution_node_validation`](@ref) requires a value when `required` |
+| `:feedback` | **input ports only**: closes a cycle and carries the value of the previous iteration. Not waited for, not required |
+| `:terminal` | a slot for a result that is not meant to be connected |
+| `:error` | reserved for error routing; must be `required = false` and its `datatype` must be a subtype of `Exception` |
+ 
+Constraints are checked at construction time. `kind = :feedback` on an
+**output** port is rejected by the [`NodeSpec`](@ref) constructor: a delay is a
+property of the consumer, not of the producer.
+ 
+Only [`isready`](@ref) and [`execution_node_validation`](@ref) read the kind.
+Buffering, invalidation and serialization are identical for all kinds.
+ 
 # Example
 ```julia
-PortSpec("value", Int, :val)                          # required single port
-PortSpec("items", Int, :vals, MultiPort())            # multi-connection port
-PortSpec("hint",  Int, :in; required = false)         # optional port
+PortSpec("value", Int, :val)                                  # required single port
+PortSpec("items", Int, :vals, MultiPort())                    # multi-connection port
+PortSpec("hint",  Int, :in; required = false)                 # optional port
+PortSpec("state", Int, :prev; kind = :feedback)                # closes a cycle
+PortSpec("report", DataFrame, :out; kind = :terminal)          # result slot
 ```
 """
 struct PortSpec{T <: AbstractPortType}
@@ -619,8 +647,15 @@ end
 
 """
     haveinputs(node::AbstractDataNode)
-
+ 
 Returns `true` if node has at least one input port defined in its spec.
+ 
+# Notes
+A `:feedback` port is still an input port, so a node whose only inputs are
+feedback ports also returns `true`. The [`ABW`](@ref) scheduler seeds its
+queue with nodes for which this function returns `false`, which is why every
+cyclic workflow needs at least one node with no input ports at all - see
+[`scheduler!`](@ref).
 """
 function haveinputs(node::AbstractDataNode)
     return !isempty(node.spec.input_ports)
@@ -1103,21 +1138,30 @@ function get_children(model::Workflow, id::Int)
 end
 
 """
-    reset!(model::Workflow)
+    reset!(model::Workflow; soft::Bool = false)
  
 Invalidate the whole workflow.
  
-Applies [`mark_dirty!`](@ref) to every node: statuses become `:dirty`, cached
-output data and `ready_ports` are dropped.
+Zeroes the execution counter `exec_n` of every node, then applies
+[`mark_dirty!`](@ref) to each of them, forwarding `soft`:
  
-Node settings, input buffers, execution logs and state metadata are kept -
-use `reset!(node)` for a full per-node reset.
+- `soft = false` (default): statuses become `:dirty`, cached output data and
+  `ready_ports` are dropped;
+- `soft = true`: only statuses are reset, cached output data survives.
+ 
+This is the only place where `exec_n` is zeroed for the whole workflow, so the
+counter measures work done since the last `reset!` rather than since the last
+invalidation.
+ 
+Node settings, input buffers and execution logs are kept in both cases - use
+`reset!(node)` for a full per-node reset.
  
 # Returns
 The workflow.
 """
 function reset!(model::Workflow; soft::Bool = false)
     for (k, node) in model.nodes
+        node.state.exec_n = 0
         mark_dirty!(node, soft = soft)
     end
     model
@@ -1160,28 +1204,34 @@ function reset_status!(model::Workflow)
         setstatus!(v, :dirty)
     end 
 end
+
+
 """
     mark_dirty!(node::AbstractDataNode; soft::Bool = false)
-
+ 
 Invalidate node execution result.
-
+ 
 Performs the following operations:
 - sets node status to `:dirty`,
-- set exec number state to 0,
 - clears `ready_ports`,
 - clears cached output data stored in `node.data`.
-
-Is `soft == true` - don't empty `ready_ports` and `node.data`.
-
+ 
+With `soft = true` the last two steps are skipped: the status and the counter
+are reset, but `ready_ports` and `node.data` are left in place. That is what
+`reset_mode = :soft` of [`scheduler!`](@ref) uses to keep results between
+runs.
+ 
 This function intentionally does **not** clear:
 - node settings,
 - input buffer,
-- execution logs,
+- execution logs.
 - execution counters/state metadata.
+ 
+# Returns
+The node.
 """
 function mark_dirty!(node::AbstractDataNode; soft::Bool = false)
     setstatus!(node, :dirty)
-    node.state.exec_n = 0
     if soft return node end
     empty!(node.state[:ready_ports])
     empty!(node.data)
@@ -1270,16 +1320,23 @@ function setsettings_unsafe!(node::AbstractDataNode, settings::Dict{Symbol, <: A
 end
 """
     isready(model::Workflow, id::Int)
-
-Check whether node is ready for execution in AWB.
-
-A node is considered ready when:
-- all parent nodes connected through incoming edges have status `:clean`.
-
+ 
+Check whether node is ready for execution in ABW.
+ 
+A node is ready when every producer connected to it through a **`:normal`**
+input port has status `:clean`. Connections entering ports of any other kind
+are not waited for.
+ 
+This asymmetry is what makes cycles possible: a `:feedback` edge carries the
+value of the previous iteration, so requiring its producer to be `:clean`
+would deadlock - the node would wait for a producer that waits for the node.
+ 
 # Notes
 - Current node status itself is not checked.
 - Input buffer completeness is validated separately via
   [`execution_node_validation`](@ref).
+- A node with `:normal` input ports but no incoming connection is ready
+  immediately; it just never gets enqueued unless something feeds it.
 """
 function isready(model::Workflow, id::Int)
     node = getnode(model, id)
@@ -1318,19 +1375,21 @@ function validate_node(model::Workflow, node_id::Int)
     validate_node(getnode(model, node_id))
 end
 """
-    execution_node_validation(node::AbstractDataNode)
-
+    execution_node_validation(node::AbstractDataNode, check_input_buffer::Bool = true)
+ 
 Internal function. Validate node readiness before execution.
-
-Checks that:
-- every declared input port has a corresponding value
-  in `node.input_buffer`,
+ 
+With `check_input_buffer` enabled, checks that:
+- every input port that is `required` **and** of kind `:normal` has a value in
+  `node.input_buffer`,
 - [`validate_node`](@ref) succeeds.
-
-This validation is intended for runtime execution safety,
-ensuring that all required inputs are available before
-calling [`execute_unsafe!`](@ref).
-
+ 
+Optional ports and ports of kind `:feedback` or `:error` may be empty: a
+feedback buffer is empty on the first pass of a loop by definition.
+ 
+With `check_input_buffer` disabled only [`validate_node`](@ref) is consulted.
+The [`ABW`](@ref) scheduler runs nodes that way.
+ 
 # Returns
 - `true` if node is ready for execution.
 - `false` otherwise.
@@ -1444,7 +1503,7 @@ Main workflow execution entry point.
 5. Optionally execute upstream dependencies recursively.
 6. Validate node structure and execution readiness.
 7. Validate node settings.
-8. Execute node implementation via [`execute_unsafe!`](@ref).
+8. Increment `exec_n` and execute node implementation via [`execute_unsafe!`](@ref).
 9. Validate execution result.
 10. Store execution state (`ready_ports`).
 11. Propagate outputs downstream through input buffers.
@@ -1462,8 +1521,9 @@ Main workflow execution entry point.
 Vector of output port labels (`Vector{Symbol}`) produced during execution, or
 an empty vector when the node was skipped, rejected by validation or failed.
  
-A node that is already `:clean` returns its stored `ready_ports` vector
-itself, not a copy - treat that result as read-only.
+The vector is not copied: for a `:clean` node it is the stored `ready_ports`
+state, and otherwise it is whatever [`execute_unsafe!`](@ref) returned. Treat
+the result as read-only.
  
 # Status after the call
 `:clean` on success, otherwise `:invalid_node`, `:invalid_settings`,
@@ -1598,8 +1658,15 @@ end
 # --------------------------------------------------------
 """
     makegraph(model::Workflow)
-
-Build directed graph representation of workflow.
+ 
+Build directed graph representation of workflow: node identifiers become
+vertex names and every connection becomes an edge.
+ 
+# Notes
+All connections are included regardless of the `kind` of the ports they
+attach to. A `:feedback` edge is therefore an ordinary edge here, so a graph
+with a feedback loop is cyclic and [`scheduler!`](@ref) for a [`DAW`](@ref)
+workflow rejects it. That is by design: cycles are an [`ABW`](@ref) feature.
 """
 function makegraph(model::Workflow)
     g = NamedDiGraph{Int}()
@@ -1614,8 +1681,10 @@ end
 # --------------------------------------------------------
 # Scheduler functions
 # --------------------------------------------------------
+
 """
-    scheduler!(model::Workflow{DAW}; throw_error::Bool = false)
+    scheduler!(model::Workflow{DAW}; reset_mode::Symbol = :full,
+               throw_error::Bool = false)
  
 Execute entire data analysis workflow (DAW) using topological ordering.
  
@@ -1625,20 +1694,26 @@ This scheduler is designed for deterministic acyclic data-analysis workflows.
 1. Build workflow graph.
 2. Validate graph acyclicity.
 3. Generate new workflow `run_id`.
-4. Invalidate every node via [`reset!`](@ref): statuses become `:dirty` and
-   cached output data is dropped, while settings and input buffers are kept.
+4. Apply `reset_mode`.
 5. Execute nodes in topological order.
  
 # Arguments
+- `reset_mode`: `:full` (default) invalidates every node via [`reset!`](@ref)
+  and drops cached output data; `:soft` only marks nodes `:dirty` and keeps
+  the cache; `:none` leaves statuses untouched, so nodes that are already
+  `:clean` are not recomputed. Any other value raises an error.
 - `throw_error`: forwarded to [`execute!`](@ref); aborts the run on the first
   node that raises instead of recording the failure.
  
 # Notes
-- Nodes are executed exactly once per scheduler run.
+- Nodes are executed at most once per scheduler run.
 - Upstream execution and downstream invalidation are disabled
   because execution order is already guaranteed by topology.
 - Required input ports are enforced (`check_input_buffer` stays on).
-- Cyclic workflows are rejected before execution starts.
+- Cyclic workflows are rejected before execution starts, including cycles
+  closed by a `:feedback` port - see [`makegraph`](@ref). In a `DAW` workflow
+  the only effect of `kind = :feedback` is that the port is exempt from the
+  required-buffer check; there is no delay and no second pass.
  
 # Returns
 `true` when the traversal completed. This is not a success flag: individual
@@ -1668,35 +1743,71 @@ function scheduler!(model::Workflow{DAW}; reset_mode::Symbol = :full, throw_erro
     return true
 end
 """
-    scheduler!(model::Workflow{ABW}; maxiter = 1000, throw_error::Bool = false)
+    scheduler!(model::Workflow{ABW}; reset_mode::Symbol = :full, maxiter = 1000,
+               throw_error::Bool = false, throw_warn::Bool = true)
  
 Execute workflow using queue-based agent/event scheduling.
  
-This scheduler is intended for dynamic or agent-based workflows (ABW), where
-execution readiness is determined during runtime.
+Intended for dynamic, agent-based and **iterative** workflows. Unlike
+[`DAW`](@ref), this scheduler accepts cyclic graphs, and a node may execute
+several times during one call.
  
 # Execution Steps
-1. Generate a new workflow `run_id` and mark every node `:dirty`.
+1. Generate a new workflow `run_id` and apply `reset_mode`.
 2. Seed the queue with every node that has no input ports.
-3. Pop a node and execute it when [`isready`](@ref) reports all parents
-   `:clean`; otherwise drop it - a parent finishing later re-queues it.
-4. Enqueue the children attached to the ports produced by the execution.
+3. Pop a node and execute it when [`isready`](@ref) reports that every
+   producer connected through a `:normal` port is `:clean`; otherwise drop it -
+   a producer finishing later re-queues it.
+4. For every port the execution produced, mark each child `:dirty` and enqueue
+   it.
  
 # Arguments
+- `reset_mode`: `:full` (default) invalidates every node via [`reset!`](@ref)
+  and drops cached output data; `:soft` only marks nodes `:dirty` and keeps
+  the cache, which is how state is carried between runs; `:none` leaves
+  statuses untouched, so `:clean` nodes are not recomputed. Any other value
+  raises an error.
 - `maxiter`: maximum number of scheduler iterations before aborting execution.
+  For a cyclic workflow this is the backstop against a loop that never
+  converges.
 - `throw_error`: forwarded to [`execute!`](@ref).
+- `throw_warn`: warn when the seed queue is empty. Nothing is executed in that
+  case and the nodes stay `:dirty`, which is otherwise silent.
+ 
+# Cycles
+A cycle must be closed by a connection entering a port declared with
+`kind = :feedback`; see [`PortSpec`](@ref). Two properties make the loop run:
+ 
+- [`isready`](@ref) does not wait for the producer of a feedback edge, so the
+  cycle has a defined entry point;
+- step 4 marks children `:dirty` **unconditionally**, so a node that already
+  ran during this call runs again instead of short-circuiting on `:clean`
+  inside [`execute!`](@ref).
+ 
+The loop ends when a node publishes nothing that has a consumer - by returning
+an empty vector of ready ports, or by publishing only unconnected or
+`:terminal` ports. The queue then drains.
+ 
+Every cyclic workflow needs at least one node with **no input ports**: a
+`:feedback` port is still an input port, so a loop on its own is never seeded
+and never starts. See [`haveinputs`](@ref).
  
 # Notes
 - Nodes are executed with `ExecuteSettings(false)`, so required input ports
   are **not** enforced here, unlike the [`DAW`](@ref) path.
-- Only statuses are reset between runs; cached output data is kept.
 - A node with input ports but without incoming connections never becomes
   ready and stays `:dirty`.
-- Cycles are not detected: they simply prevent the involved nodes from ever
-  becoming ready.
  
 # Returns
 `true` when the queue is drained.
+ 
+# Example
+```julia
+scheduler!(w)                             # full reset, one pass or one loop
+scheduler!(w; reset_mode = :soft)         # keep cached results between runs
+scheduler!(w; maxiter = 10_000)           # long-running iteration
+scheduler!(w; throw_warn = false)         # a deliberately unseeded graph
+```
 """
 function scheduler!(model::Workflow{ABW}; reset_mode::Symbol = :full, maxiter = 1000, throw_error::Bool = false, throw_warn::Bool = true)
     if reset_mode ∉ (:full, :soft, :none) error("Wrong reset mode: $reset_mode , only :full, :soft, :none availabel.") end
@@ -1919,9 +2030,14 @@ function spec_to_dict(spec::NodeSpec)
     return d
 end
 """
-    portspec_to_dict(ps::PortSpec) -> Dict
-
-Convert PortSpec to dictionary representation.
+    portspec_to_dict(ps::PortSpec)
+ 
+Convert port specification to JSON-serializable dictionary.
+ 
+Keys: `"name"`, `"label"`, `"datatype"`, `"required"`, `"kind"`, `"type"`.
+ 
+`"label"`, `"datatype"` and `"kind"` are stringified; `"type"` holds the port
+arity as `"SinglePort"` or `"MultiPort"`.
 """
 function portspec_to_dict(ps::PortSpec)
     d            = Dict{String, Any}()
