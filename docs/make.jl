@@ -15,6 +15,10 @@ makedocs(;
     pages=[
         "Home" => "index.md",
         "Guide" => "guide.md",
+        "Examples" => [
+            "AWB cycle" => "examples_abw_cycle.md",
+            "AWB two node cycle" => "examples_abw_two_node.md",
+        ],
         "API" => "api.md",
     ],
 )

@@ -1283,22 +1283,9 @@ function isready(model::Workflow, id::Int)
         con = getconnection(model, con_id)
         parent_node = getnode(model, con.output_id)
         ps = getportspec(node, con.input_port, :input)
-        if ps.kind == :normal && getstatus(parent_node) != :clean return false end 
+        if ps.kind == :normal && getstatus(parent_node) != :clean return false end # ps.kind == :normal - crytical for cycling
     end
-    # проверить статус самого узла?
     return true
-
-    #=
-    node = getnode(model, id)
-    connections = get(model.incoming, id, Int[])
-    for con_id in connections
-        con = getconnection(model, con_id)
-        parent_node = getnode(model, con.output_id)
-        ps = getportspec(node, con.input_port, :input)
-        if ps.required 
-            if ps.kind == :normal && getstatus(parent_node) != :clean return false end
-        end
-    =#
 end
 """
     validate_node(node::AbstractDataNode)
@@ -1734,9 +1721,8 @@ function scheduler!(model::Workflow{ABW}; maxiter = 1000, throw_error::Bool = fa
                 cons = getportconnections(model, id, port; direction = :output)
                 for con in cons
                     child = getnode(model, con.input_id)
-                    if getportspec(child, con.input_port, :input).kind != :normal # если потомок в петле (feedback / error), то отмечаем его dirty, чтобы он был выполнен в следующей итерации
-                        setstatus!(child, :dirty)                                # новое значение по задержке = новая итерация
-                    end
+                    #  отмечаем потомки  dirty, чтобы он был выполнен далее (данные в буфере не удаляем)
+                    setstatus!(child, :dirty) # !!! crytical - otherwise child will not be executed if it was already clean                             
                     # добавляем только если нет в очереди
                     if !(con.input_id in queued)
                         push!(queue, con.input_id)
