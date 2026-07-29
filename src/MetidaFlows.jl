@@ -276,8 +276,14 @@ struct PortSpec{T <: AbstractPortType}
     required::Bool
     kind::Symbol
     function PortSpec(name, datatype, label, ::T = SinglePort(); required::Bool = true, kind::Symbol = :normal) where T <: AbstractPortType
-        if kind ∉ (:normal, :terminal, :error)
-            error("Invalid port kind: $kind (use unly :normal, :terminal, :error)")
+        if kind ∉ (:normal, :terminal, :feedback, :error)
+            error("Invalid port kind: $kind (use only :normal, :terminal, :feedback, :error)")
+        end
+        if kind == :error && required
+            error("Error ports cannot be required")
+        end
+        if kind == :error && !(datatype <: Exception)
+            error("Error ports must have a supertype of Exception")
         end
         new{T}(name, datatype, label, required, kind)
     end
@@ -318,6 +324,9 @@ struct NodeSpec
             portmap[(:input, v.label)] = i
         end
         for (i, v) in enumerate(output_ports)
+            if v.kind == :feedback
+                error("Output port $(v.label) cannot be of kind :feedback")
+            end
             portmap[(:output, v.label)] = i
         end
         new(name, input_ports, output_ports, settings, portmap)
@@ -907,6 +916,8 @@ function check_connection_validity(model, c::NodeConnection)
     isportexist(parent_node, output_port, :output) || error("Output node port $output_port doesn't exist")
     isportexist(child_node, input_port, :input) || error("Input node port $input_port doesn't exist")
 
+    getportspec(parent_node, output_port, :output).kind == :terminal && @warn "Output port $output_port is terminal and should not be connected" # Warn, but allow connection 
+
     if haskey(model.incoming, input_id) # check if child node has incoming connections
         if length(model.incoming[input_id]) > 0
             for cid in model.incoming[input_id] # for all incoming connections of child node
@@ -1255,7 +1266,7 @@ end
 """
     isready(model::Workflow, id::Int)
 
-Check whether node is ready for execution.
+Check whether node is ready for execution in AWB.
 
 A node is considered ready when:
 - all parent nodes connected through incoming edges have status `:clean`.
@@ -1271,10 +1282,23 @@ function isready(model::Workflow, id::Int)
     for con_id in connections
         con = getconnection(model, con_id)
         parent_node = getnode(model, con.output_id)
-        if getstatus(parent_node) != :clean return false end  
+        ps = getportspec(node, con.input_port, :input)
+        if ps.kind == :normal && getstatus(parent_node) != :clean return false end 
     end
     # проверить статус самого узла?
     return true
+
+    #=
+    node = getnode(model, id)
+    connections = get(model.incoming, id, Int[])
+    for con_id in connections
+        con = getconnection(model, con_id)
+        parent_node = getnode(model, con.output_id)
+        ps = getportspec(node, con.input_port, :input)
+        if ps.required 
+            if ps.kind == :normal && getstatus(parent_node) != :clean return false end
+        end
+    =#
 end
 """
     validate_node(node::AbstractDataNode)
@@ -1322,7 +1346,7 @@ calling [`execute_unsafe!`](@ref).
 function execution_node_validation(node::AbstractDataNode, check_input_buffer::Bool = true)
     # All ports must have something in input_buffer if port is required
     if check_input_buffer
-        return all(x-> length(node.input_buffer[x.label]) > 0 || !x.required, node.spec.input_ports) && validate_node(node)
+        return all(x-> length(node.input_buffer[x.label]) > 0 || !x.required || x.kind != :normal, node.spec.input_ports) && validate_node(node)
     else
         return validate_node(node)
     end
@@ -1709,6 +1733,10 @@ function scheduler!(model::Workflow{ABW}; maxiter = 1000, throw_error::Bool = fa
             for port in ready_ports
                 cons = getportconnections(model, id, port; direction = :output)
                 for con in cons
+                    child = getnode(model, con.input_id)
+                    if getportspec(child, con.input_port, :input).kind != :normal # если потомок в петле (feedback / error), то отмечаем его dirty, чтобы он был выполнен в следующей итерации
+                        setstatus!(child, :dirty)                                # новое значение по задержке = новая итерация
+                    end
                     # добавляем только если нет в очереди
                     if !(con.input_id in queued)
                         push!(queue, con.input_id)
