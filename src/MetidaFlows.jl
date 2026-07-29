@@ -1116,9 +1116,9 @@ use `reset!(node)` for a full per-node reset.
 # Returns
 The workflow.
 """
-function reset!(model::Workflow)
+function reset!(model::Workflow; soft::Bool = false)
     for (k, node) in model.nodes
-        mark_dirty!(node)
+        mark_dirty!(node, soft = soft)
     end
     model
 end
@@ -1161,14 +1161,17 @@ function reset_status!(model::Workflow)
     end 
 end
 """
-    mark_dirty!(node::AbstractDataNode)
+    mark_dirty!(node::AbstractDataNode; soft::Bool = false)
 
 Invalidate node execution result.
 
 Performs the following operations:
 - sets node status to `:dirty`,
+- set exec number state to 0,
 - clears `ready_ports`,
 - clears cached output data stored in `node.data`.
+
+Is `soft == true` - don't empty `ready_ports` and `node.data`.
 
 This function intentionally does **not** clear:
 - node settings,
@@ -1176,8 +1179,10 @@ This function intentionally does **not** clear:
 - execution logs,
 - execution counters/state metadata.
 """
-function mark_dirty!(node::AbstractDataNode)
+function mark_dirty!(node::AbstractDataNode; soft::Bool = false)
     setstatus!(node, :dirty)
+    node.state.exec_n = 0
+    if soft return node end
     empty!(node.state[:ready_ports])
     empty!(node.data)
     node
@@ -1515,6 +1520,7 @@ function execute!(model::Workflow, id::Int; settings::ExecuteSettings = ExecuteS
     end
     # Execute node
     ready_ports = try 
+        node.state.exec_n += 1
         execute_unsafe!(node)
     catch e
         setstatus!(node, :failed)
@@ -1543,7 +1549,7 @@ function execute!(model::Workflow, id::Int; settings::ExecuteSettings = ExecuteS
     end
     #
     setstatus!(node, :clean)
-    return copy(ready_ports)
+    return ready_ports # no probleb wit state because setstatus! copy ready_ports to state
 end
 """
     execute_unsafe!(node::AbstractDataNode)
@@ -1645,11 +1651,15 @@ scheduler!(workflow)
 result = getdata(workflow, output_id, :result)
 ```
 """
-function scheduler!(model::Workflow{DAW}; throw_error::Bool = false)
+function scheduler!(model::Workflow{DAW}; reset_mode::Symbol = :full, throw_error::Bool = false)
     g = makegraph(model)
     if is_cyclic(g) error("workflow is cyclic") end
-    model.run_id = rand(UInt64) # change to thread safe
-    reset!(model)
+    if reset_mode ∉ (:full, :soft, :none) error("Wrong reset mode: $reset_mode , only :full, :soft, :none availabel.") end
+    soft_reset = false
+    # change to thread safe
+    model.run_id = rand(UInt64)
+    if reset_mode == :soft soft_reset = true end
+    if reset_mode != :none reset!(model; soft = soft_reset) end
 
     order = topological_sort(g)
     for id in order
@@ -1688,12 +1698,14 @@ execution readiness is determined during runtime.
 # Returns
 `true` when the queue is drained.
 """
-function scheduler!(model::Workflow{ABW}; maxiter = 1000, throw_error::Bool = false)
+function scheduler!(model::Workflow{ABW}; reset_mode::Symbol = :full, maxiter = 1000, throw_error::Bool = false, throw_warn::Bool = true)
+    if reset_mode ∉ (:full, :soft, :none) error("Wrong reset mode: $reset_mode , only :full, :soft, :none availabel.") end
+    soft_reset = false
     # change to thread safe
     model.run_id = rand(UInt64)
-    for (id, node) in model.nodes
-        setstatus!(node, :dirty)
-    end
+    if reset_mode == :soft soft_reset = true end
+    if reset_mode != :none reset!(model; soft = soft_reset) end
+
     queued = Set{Int}() # Ноды которые уже добавлены - не реализовано
     queue = Int[]
     #
@@ -1703,6 +1715,7 @@ function scheduler!(model::Workflow{ABW}; maxiter = 1000, throw_error::Bool = fa
             push!(queued, id)
         end
     end
+    if throw_warn && length(queue) == 0 @warn "No nodes in queue..." end
     # execute
     iter = 0
     while length(queue) > 0

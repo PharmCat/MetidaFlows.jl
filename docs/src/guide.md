@@ -332,3 +332,108 @@ nothing.
 * Manual `execute!` with `execute_upstream = false` will not refresh stale
   parents; the node is simply rejected with `:invalid_node` if a required
   input is missing.
+
+## Port kinds
+
+Every [`PortSpec`](@ref) carries a `kind`, defaulting to `:normal`. The kind
+does not change how data is stored or read — it changes how the schedulers
+treat the connections attached to the port.
+
+| `kind` | Applies to | Effect |
+|---|---|---|
+| `:normal` | input, output | the default: an ordinary data connection |
+| `:feedback` | **input only** | closes a cycle; carries the value of the previous iteration |
+| `:terminal` | output (by intent) | a slot for a result that is not meant to be connected |
+| `:error` | input, output | reserved for error routing; must be `required = false` and its datatype must be a subtype of `Exception` |
+
+Declaring `kind = :feedback` on an output port is rejected by the
+[`NodeSpec`](@ref) constructor: a delay is a property of the consumer, not of
+the producer.
+
+Two engine functions read the kind:
+
+* [`isready`](@ref) waits only for producers connected through `:normal`
+  ports. Anything else is not waited for.
+* [`execution_node_validation`](@ref) requires a filled input buffer only for
+  `:normal` ports, so a feedback port may be empty on the first pass.
+
+Everything else — buffering, invalidation, serialization — is identical for
+all kinds.
+
+---
+
+## Rule 1. Cycles are an `ABW` feature
+
+[`makegraph`](@ref) builds the graph from **all** connections, whatever the
+kind of the ports they attach to. [`scheduler!`](@ref) for a
+[`DAW`](@ref) workflow rejects the result if it is cyclic:
+
+```julia
+scheduler!(w)   # ERROR: workflow is cyclic
+```
+
+This is deliberate. `DAW` guarantees that every node executes exactly once per
+run in dependency order, and that guarantee has no meaning in a graph with a
+cycle. A feedback edge does not change it: in a `DAW` workflow a
+`:feedback` port is simply an input that is exempt from the required-buffer
+check, and nothing more — there is no delay, no iteration, no second pass.
+
+Use [`ABW`](@ref) for anything that has to iterate.
+
+---
+
+## Rule 2. A cyclic `ABW` workflow needs a seed node
+
+The `ABW` scheduler starts from nodes that have **no input ports at all**:
+
+```julia
+for (id, node) in model.nodes
+    if !haveinputs(node)
+        push!(queue, id)
+    end
+end
+```
+
+A `:feedback` port is still an input port. A node whose only inputs are
+feedback (or `:error`) ports is therefore *not* a starting point, and a loop
+made only of such nodes never begins.
+
+**Every cyclic workflow must contain at least one node with no input ports,
+and the loop must be reachable from it through `:normal` connections.**
+
+This is not merely a scheduling detail. A loop needs two things to be
+well-defined: a delay, so that the cycle has a direction in time, and an
+initial value, so that the first pass has something to compute with. The
+`:feedback` port provides the first; the seed node provides the second. A
+graph consisting only of a loop has neither a beginning nor initial data, and
+there is nothing sensible for the scheduler to do with it.
+
+In practice the seed node is the one that loads or generates the data — as
+`LoadData` in the examples — and the loop body starts from its normal input on
+the first pass:
+
+```julia
+previous = getinputdata(node, :previous)      # empty on the first pass
+state = previous === nothing ?
+    initial_state(getinputdata(node, :table)) :
+    previous
+```
+
+### Diagnosing a loop that never started
+
+A workflow that cannot be seeded is not an error: the queue is empty, the loop
+body is never reached, and [`scheduler!`](@ref) returns `true` having executed
+nothing. The symptom is that the nodes stay `:dirty`:
+
+```julia
+scheduler!(w)
+
+stalled = [id for (id, node) in w.nodes if getstatus(node) != :clean]
+```
+
+If `stalled` contains the whole loop, check that some node upstream of it has
+no input ports.
+
+The same check is worth running after any `ABW` run for another reason: a node
+that has normal inputs but no incoming connection never becomes ready either,
+and stays `:dirty` in exactly the same way.
