@@ -1649,11 +1649,11 @@ end
     @test length(sd["input_ports"])  == 2
     @test length(sd["output_ports"]) == 1
     @test sd["settings"] == Symbol[]
-    @test sd["input_ports"][1]["label"] == :a
+    @test sd["input_ports"][1]["label"] == "a"
 
     psd = portspec_to_dict(PortSpec("v", Float64, :v, MultiPort(); required = false))
     @test psd["name"]     == "v"
-    @test psd["label"]    == :v
+    @test psd["label"]    == "v"
     @test psd["datatype"] == string(Float64)
     @test psd["required"] == false
     @test psd["type"]     == "MultiPort"
@@ -2273,7 +2273,7 @@ end
     @test length(sd["output_ports"]) == 1
 
     psd = portspec_to_dict(PortSpec("v", Int, :v, MultiPort(); required = false))
-    @test psd["label"] == :v
+    @test psd["label"] == "v"
     @test psd["datatype"] == string(Int)
     @test psd["required"] == false
     @test psd["type"] == "MultiPort"

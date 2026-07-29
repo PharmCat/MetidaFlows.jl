@@ -26,7 +26,8 @@ import NamedGraphs.Graphs: topological_sort
 import Base: show, keys, getindex, setindex!, empty!
 
 export AbstractNodeType, 
-NodeSpec, 
+NodeSpec,
+PortSpec,
 DataNode, 
 NodeConnection, 
 Workflow, 
@@ -35,6 +36,7 @@ delete_node!,
 add_connection!, 
 delete_connection!,
 setsettings!,
+setdata!,
 scheduler!,
 execute!,
 getstatus,
@@ -95,11 +97,14 @@ executed node enqueues the children attached to its ready output ports.
 struct ABW <: WorkFlowType end # Agent-Based Workflow
 
 """
-    LogMsg(id, timestamp, level, message)
-    LogMsg(level, message)
-
+    LogMsg(id::UInt64, timestamp::DateTime, level::Symbol, message::String)
+    LogMsg(level::Symbol, message::String)
+ 
 Log record kept in `Workflow.log` and in the node execution state.
+ 
 The two-argument form generates a random `id` and stamps the current time.
+Records are currently produced in one place only: [`execute!`](@ref) appends
+an `:error` record to `workflow.log` when [`execute_unsafe!`](@ref) raises.
 """
 struct LogMsg
     id::UInt64
@@ -120,6 +125,24 @@ struct LogMsg
     end
 end
 #
+"""
+    AbstractNodeFields
+ 
+Supertype of the node field containers: [`NodeState`](@ref) and the reserved
+`AbstractNodeSettings`, `AbstractNodeData`, `AbstractNodeInputBuffer`.
+ 
+Subtypes get a `Dict`-like interface over their fields, so a node can be
+backed either by plain `Dict`s (the default) or by purpose-built structs:
+ 
+```julia
+state = NodeState()
+state[:exec_n]         # getindex  -> getfield
+state[:exec_n] = 1     # setindex! -> setfield! (mutable subtypes only)
+keys(state)            # (:exec_n, :ready_ports, :execution_id, :log)
+```
+ 
+`setindex!` raises an error for immutable subtypes.
+"""
 abstract type AbstractNodeFields end
 abstract type AbstractNodeSettings <: AbstractNodeFields end
 abstract type AbstractNodeData  <: AbstractNodeFields end
@@ -234,6 +257,7 @@ Fields:
 - `datatype::Type` - Julia type of the port data (connection type checking).
 - `label::Symbol` - unique label used for referencing the port in code.
 - `required::Bool` - whether the port must have buffered data for execution.
+- `kind::Symbol` - the kind of the port (e.g., :normal, :terminal, :error).
 
 The optional positional argument selects the port arity:
 [`SinglePort`](@ref) (default) or [`MultiPort`](@ref).
@@ -250,8 +274,12 @@ struct PortSpec{T <: AbstractPortType}
     datatype::Type
     label::Symbol
     required::Bool
-    function PortSpec(name, datatype, label, ::T = SinglePort(); required::Bool = true) where T <: AbstractPortType
-        new{T}(name, datatype, label, required)
+    kind::Symbol
+    function PortSpec(name, datatype, label, ::T = SinglePort(); required::Bool = true, kind::Symbol = :normal) where T <: AbstractPortType
+        if kind ∉ (:normal, :terminal, :error)
+            error("Invalid port kind: $kind (use unly :normal, :terminal, :error)")
+        end
+        new{T}(name, datatype, label, required, kind)
     end
 end
 #
@@ -699,23 +727,15 @@ function ismultiport(ps::PortSpec{SinglePort})
     return false
 end
 
-#=
-"""
-    getdata(node::AbstractDataNode, i::Int) 
-
-Return output data by output port index.
-"""
-function getdata(node::AbstractDataNode, i::Int) 
-    if i < 1 || i > length(node.spec.output_ports) error("Wrong port number") end
-    l = node.spec.output_ports[i].label
-    return node.data[l]
-end
-=#
 
 """
     getdata(node::AbstractDataNode, l::Symbol)
-
-Return output data stored under output port label.
+ 
+Return the output data stored under output port label `l`.
+ 
+Returns `nothing` when the port is declared but holds no value yet - for
+instance after [`mark_dirty!`](@ref). Raises an error when `l` is not an
+output port of the node specification.
 """
 function getdata(node::AbstractDataNode, l::Symbol)
     if isportexist(node, l, :output) 
@@ -725,8 +745,11 @@ function getdata(node::AbstractDataNode, l::Symbol)
 end
 """
     getdata(model::Workflow, id::Int, l::Symbol)
-
-Return output data stored under output port label.
+ 
+Return the output data stored under output port label `l` of node `id`.
+ 
+Raises a `KeyError` for an unknown node id; see the two-argument method for
+the port lookup rules.
 """
 function getdata(model::Workflow, id::Int, l::Symbol)
     node = getnode(model, id)
@@ -748,13 +771,24 @@ function setdata!(node::AbstractDataNode, l::Symbol, d)
     end
     error("Wrong port label")
 end
+
 """
     getinputdata(node::AbstractDataNode, l::Symbol)
-    getinputdata(node::AbstractDataNode, l::Symbol, con::Int) 
-
+    getinputdata(node::AbstractDataNode, l::Symbol, con::Int)
+ 
 Read value from node input buffer.
-
-Does NOT consume or clear buffer.
+ 
+The two-argument form depends on the port arity:
+ 
+- [`SinglePort`](@ref): returns the buffered value, or `nothing` when the
+  buffer is empty; more than one buffered value is an error.
+- [`MultiPort`](@ref): returns the whole `Dict{connection id, value}` buffer.
+ 
+The three-argument form returns the value written by connection `con`, or
+`nothing` when that connection has nothing buffered.
+ 
+Both forms raise an error when `l` is not an input port of the node
+specification, and neither consumes or clears the buffer.
 """
 function getinputdata(node::AbstractDataNode, l::Symbol) 
     if isportexist(node, l, :input)
@@ -961,13 +995,22 @@ function delete_connection!(model::Workflow, id::Int)
     end
     return false
 end
+
 """
     add_node!(model::Workflow, node::AbstractDataNode)
-
+ 
 Add node to workflow.
-
-Assigns a new unique node identifier and registers the node in workflow storage.
-
+ 
+Assigns a new unique node identifier and registers the node in workflow
+storage. Identifiers come from a monotonically increasing counter and are
+never reused.
+ 
+# Notes
+A node whose status is neither `:idle` nor `:clean` is reset on insertion,
+which clears its settings, input buffers and execution state. A freshly
+created node and an already computed node are inserted unchanged, so a node
+may be configured before or after it joins the workflow.
+ 
 # Returns
 Assigned node identifier (`Int`).
 """
@@ -1050,11 +1093,17 @@ end
 
 """
     reset!(model::Workflow)
-
-Reset workflow execution state.
-
-Marks every node in the workflow as `:dirty` using [`mark_dirty!`](@ref),
-clears node execution state, and removes all cached output data.
+ 
+Invalidate the whole workflow.
+ 
+Applies [`mark_dirty!`](@ref) to every node: statuses become `:dirty`, cached
+output data and `ready_ports` are dropped.
+ 
+Node settings, input buffers, execution logs and state metadata are kept -
+use `reset!(node)` for a full per-node reset.
+ 
+# Returns
+The workflow.
 """
 function reset!(model::Workflow)
     for (k, node) in model.nodes
@@ -1064,16 +1113,21 @@ function reset!(model::Workflow)
 end
 """
     reset!(node::AbstractDataNode)
-
-Reset node.
-
+ 
+Reset node to its initial state.
+ 
 Performs the following operations:
 - sets node status to `:idle`,
-- clears `ready_ports`,
+- clears node settings,
+- clears the contents of every input buffer, keeping the port keys,
+- resets execution state (`exec_n`, `ready_ports`, `execution_id`, node log),
 - clears cached output data stored in `node.data`.
-- node settings,
-- input buffer,
-- state.
+ 
+Unlike [`mark_dirty!`](@ref), this drops the node configuration as well, so it
+is meant for reusing a node object rather than for invalidation.
+ 
+# Returns
+The node.
 """
 function reset!(node::AbstractDataNode)
     setstatus!(node, :idle)
@@ -1158,17 +1212,21 @@ function invalidate_buffer!(node::AbstractDataNode, l::Symbol, con::Int)
 end
 """
     setsettings!(model::Workflow, id::Int, settings::Dict{Symbol, <: Any})
-
+ 
 Apply new node settings and invalidate dependent nodes.
-
-Settings are applied using
-[`setsettings_unsafe!`](@ref),
-after which the target node and all downstream nodes
-are invalidated via [`invalidate_downstream!`](@ref).
-
+ 
+Settings are applied using [`setsettings_unsafe!`](@ref), after which the
+target node and all downstream nodes are invalidated via
+[`invalidate_downstream!`](@ref).
+ 
 # Notes
-This function is the safe high-level entry point
-for mutating node configuration inside a workflow.
+- This function is the safe high-level entry point for mutating node
+  configuration inside a workflow.
+- Settings are **merged**: only the keys present in `settings` are
+  overwritten, the rest are kept.
+ 
+# Returns
+The node.
 """
 function setsettings!(model::Workflow, id::Int, settings::Dict{Symbol, <: Any})
     node = getnode(model, id)
@@ -1355,12 +1413,13 @@ end
 # Main executing
 # :clean, :dirty, :executing, :failed
 """
-    execute!(model::Workflow, id::Int; settings::ExecuteSettings = ExecuteSettings()) 
-
+    execute!(model::Workflow, id::Int; settings::ExecuteSettings = ExecuteSettings(),
+             throw_error::Bool = false)
+ 
 Execute workflow node.
-
+ 
 Main workflow execution entry point.
-
+ 
 # Execution Stages
 1. Initialize per-run execution state and logs.
 2. Optionally detect recursive cyclic execution.
@@ -1375,9 +1434,31 @@ Main workflow execution entry point.
 11. Propagate outputs downstream through input buffers.
 12. Optionally invalidate downstream nodes.
 13. Mark node as `:clean`.
-
+ 
+# Arguments
+- `settings`: per-call execution flags, see [`ExecuteSettings`](@ref).
+- `throw_error`: rethrow an exception raised by [`execute_unsafe!`](@ref)
+  after the node status and the log record have been written. With the
+  default `false` the error is swallowed and reported through the status and
+  `model.log`.
+ 
 # Returns
-Vector of output port labels (`Vector{Symbol}`) produced during execution.
+Vector of output port labels (`Vector{Symbol}`) produced during execution, or
+an empty vector when the node was skipped, rejected by validation or failed.
+ 
+A node that is already `:clean` returns its stored `ready_ports` vector
+itself, not a copy - treat that result as read-only.
+ 
+# Status after the call
+`:clean` on success, otherwise `:invalid_node`, `:invalid_settings`,
+`:invalid_result` or `:failed`.
+ 
+# Example
+```julia
+execute!(w, id)                                                    # parents pulled in
+execute!(w, id; settings = ExecuteSettings(; execute_upstream = false))
+execute!(w, id; throw_error = true)
+```
 """
 function execute!(model::Workflow, id::Int; settings::ExecuteSettings = ExecuteSettings(), throw_error::Bool = false) 
     node =  getnode(model, id)
@@ -1455,12 +1536,33 @@ function execute!(model::Workflow, id::Int; settings::ExecuteSettings = ExecuteS
 end
 """
     execute_unsafe!(node::AbstractDataNode)
-
+ 
 Low-level node execution interface.
-
-This function contains node-specific execution logic.
-
-The default implementation throws an error and must be specialized for every executable node type.
+ 
+This function contains node-specific execution logic. The default
+implementation throws an error and must be specialized for every executable
+node type.
+ 
+Read inputs with [`getinputdata`](@ref), write results with
+[`setdata!`](@ref) and return the vector of output port labels that were
+produced. That vector is the contract with the engine: it is stored as the
+`ready_ports` state and only connections leaving these ports are refreshed by
+[`push_buffer!`](@ref). Returning a subset of the output ports is allowed.
+ 
+# Example
+```julia
+struct Doubler <: AbstractNodeType end
+ 
+function MetidaFlows.execute_unsafe!(node::DataNode{Doubler})
+    x = getinputdata(node, :in)
+    setdata!(node, :out, 2x)
+    return [:out]
+end
+```
+ 
+# Notes
+Errors raised here are caught by [`execute!`](@ref), which marks the node
+`:failed` and appends an `:error` record to `workflow.log`.
 """
 function execute_unsafe!(node::AbstractDataNode)
     error("Node type undefined")
@@ -1496,24 +1598,41 @@ end
 # Scheduler functions
 # --------------------------------------------------------
 """
-    scheduler!(model::Workflow{DAW})
-
+    scheduler!(model::Workflow{DAW}; throw_error::Bool = false)
+ 
 Execute entire data analysis workflow (DAW) using topological ordering.
-
+ 
 This scheduler is designed for deterministic acyclic data-analysis workflows.
-
+ 
 # Execution Steps
 1. Build workflow graph.
 2. Validate graph acyclicity.
 3. Generate new workflow `run_id`.
-4. Reset node execution states.
+4. Invalidate every node via [`reset!`](@ref): statuses become `:dirty` and
+   cached output data is dropped, while settings and input buffers are kept.
 5. Execute nodes in topological order.
-
+ 
+# Arguments
+- `throw_error`: forwarded to [`execute!`](@ref); aborts the run on the first
+  node that raises instead of recording the failure.
+ 
 # Notes
 - Nodes are executed exactly once per scheduler run.
 - Upstream execution and downstream invalidation are disabled
   because execution order is already guaranteed by topology.
+- Required input ports are enforced (`check_input_buffer` stays on).
 - Cyclic workflows are rejected before execution starts.
+ 
+# Returns
+`true` when the traversal completed. This is not a success flag: individual
+nodes may still end up `:failed` or `:invalid_*`, so check [`getstatus`](@ref)
+when it matters.
+ 
+# Example
+```julia
+scheduler!(workflow)
+result = getdata(workflow, output_id, :result)
+```
 """
 function scheduler!(model::Workflow{DAW}; throw_error::Bool = false)
     g = makegraph(model)
@@ -1528,15 +1647,35 @@ function scheduler!(model::Workflow{DAW}; throw_error::Bool = false)
     return true
 end
 """
-    scheduler!(model::Workflow{ABW}; maxiter = 1000)
-
+    scheduler!(model::Workflow{ABW}; maxiter = 1000, throw_error::Bool = false)
+ 
 Execute workflow using queue-based agent/event scheduling.
-
-This scheduler is intended for dynamic or agent-based workflows (ABW), where execution readiness is determined during runtime.
-
+ 
+This scheduler is intended for dynamic or agent-based workflows (ABW), where
+execution readiness is determined during runtime.
+ 
+# Execution Steps
+1. Generate a new workflow `run_id` and mark every node `:dirty`.
+2. Seed the queue with every node that has no input ports.
+3. Pop a node and execute it when [`isready`](@ref) reports all parents
+   `:clean`; otherwise drop it - a parent finishing later re-queues it.
+4. Enqueue the children attached to the ports produced by the execution.
+ 
 # Arguments
-- `maxiter`:
-  maximum number of scheduler iterations before aborting execution.
+- `maxiter`: maximum number of scheduler iterations before aborting execution.
+- `throw_error`: forwarded to [`execute!`](@ref).
+ 
+# Notes
+- Nodes are executed with `ExecuteSettings(false)`, so required input ports
+  are **not** enforced here, unlike the [`DAW`](@ref) path.
+- Only statuses are reset between runs; cached output data is kept.
+- A node with input ports but without incoming connections never becomes
+  ready and stays `:dirty`.
+- Cycles are not detected: they simply prevent the involved nodes from ever
+  becoming ready.
+ 
+# Returns
+`true` when the queue is drained.
 """
 function scheduler!(model::Workflow{ABW}; maxiter = 1000, throw_error::Bool = false)
     # change to thread safe
@@ -1618,7 +1757,7 @@ function show(io::IO, n::NodeSpec)
 end
 #
 function show(io::IO, n::PortSpec)
-    println(io, "Port name: $(n.name); label: \"$(n.label)\"; datatype: $(n.datatype).")
+    println(io, "Port name: $(n.name); label: \"$(n.label)\"; datatype: $(n.datatype) ($(n.required ? "required" : "optional"), $(n.kind)).")
 end
 #
 function show(io::IO, c::T) where T <: NodeConnection
@@ -1703,9 +1842,16 @@ function node_schema_usermod!(d, node::AbstractDataNode)
     return d
 end
 """
-    node_to_dict(node::AbstractDataNode; specs::Bool = true) -> Dict
-
+    node_to_dict(node::AbstractDataNode; specs::Bool = true, settings::Bool = true) -> Dict
+ 
 Convert node to JSON-serializable dictionary.
+ 
+Keys: `"id"`, `"properties"`, `"status"`, plus `"spec"` when `specs` is set
+and `"settings"` when `settings` is set.
+ 
+# Notes
+The `"settings"` entry holds the settings *schema* produced by
+[`settings_schema`](@ref), not the current setting values.
 """
 function node_to_dict(node::AbstractDataNode; specs::Bool = true, settings::Bool = true)
     d                = Dict{String, Any}()
@@ -1753,9 +1899,10 @@ Convert PortSpec to dictionary representation.
 function portspec_to_dict(ps::PortSpec)
     d            = Dict{String, Any}()
     d["name"]     = ps.name
-    d["label"]    = ps.label
+    d["label"]    = string(ps.label)
     d["datatype"] = string(ps.datatype)
     d["required"] = ps.required
+    d["kind"]     = string(ps.kind)
     d["type"]     = portspec_to_dict_type(ps)
     return d
 end
@@ -1780,8 +1927,17 @@ function connection_to_dict(nc::NodeConnection)
 end
 """
     workflow_to_dict(w::Workflow) -> Dict
-
-Convert workflow to dictionary representation.
+ 
+Convert workflow to dictionary representation, ready to be serialized to JSON.
+ 
+Keys: `"id"`, `"name"`, `"n_iter"`, `"c_iter"`, `"nodes"`, `"connections"`,
+`"incoming"`, `"outgoing"`.
+ 
+# Notes
+- `"nodes"` and `"connections"` are keyed by *stringified* identifiers, while
+  `"incoming"` and `"outgoing"` keep integer node ids.
+- Execution state - `run_id`, logs, cached output data and settings values -
+  is not included, so the result describes structure only.
 """
 function workflow_to_dict(w::Workflow)
     d               = Dict{String, Any}()
