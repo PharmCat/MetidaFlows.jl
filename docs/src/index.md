@@ -3,8 +3,8 @@ CurrentModule = MetidaFlows
 ```
 ```@setup mfexample
 using MetidaFlows, CSV, DataFrames
-const CSV_PATH = joinpath(pwd(), "src", "data.csv")
-const PKCSV_PATH = joinpath(pwd(), "src", "conc.csv")
+CSV_PATH = joinpath(pwd(), "src", "data.csv")
+PKCSV_PATH = joinpath(pwd(), "src", "conc.csv")
 ```
 
 # MetidaFlows
