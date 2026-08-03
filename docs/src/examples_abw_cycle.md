@@ -1,3 +1,7 @@
+```@setup mfexample
+const PKCSV_PATH = joinpath(dirname(@__FILE__), "conc.csv")
+```
+
 ## ABW — a cyclic graph with a feedback port
 
 `DAW` rejects cycles: it needs a topological order. `ABW` executes a cycle if

@@ -1,3 +1,7 @@
+```@setup mfexample
+const PKCSV_PATH = joinpath(dirname(@__FILE__), "conc.csv")
+```
+
 ## ABW — a two-node loop: worker and controller
 
 Example 3 kept the whole loop inside one node. That is compact, but the
