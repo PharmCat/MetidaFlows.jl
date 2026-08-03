@@ -1,5 +1,5 @@
 ```@setup mfexample
-PKCSV_PATH = joinpath(pwd(), "src", "conc.csv")
+PKCSV_PATH = joinpath(pwd(), "conc.csv")
 ```
 
 ## ABW — a cyclic graph with a feedback port
@@ -111,7 +111,7 @@ add_connection!(w, trim, :state, trim, :previous)     # the cycle
 setsettings!(w, load, Dict(:file => PKCSV_PATH))      # asume you have file PKCSV_PATH 
 setsettings!(w, trim, Dict(:z => 1.6, :maxiter => 10))
 
-scheduler!(w)
+scheduler!(w, throw_error = true)
 
 getdata(w, trim, :iterations)      # how many observations were removed
 getdata(w, trim, :result)          # the trimmed dataset

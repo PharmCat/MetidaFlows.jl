@@ -4,7 +4,7 @@ CurrentModule = MetidaFlows
 
 ```@setup mfexample
 using MetidaFlows, CSV, DataFrames
-CSV_PATH = joinpath(pwd(), "src", "data.csv")
+CSV_PATH = joinpath(pwd(), "data.csv")
 ```
 
 # User guide
@@ -320,7 +320,7 @@ add_connection!(w, id2, :dataframe, id3, :dataframe)
 
 setsettings!(w, id1, Dict(:file => CSV_PATH))
 
-scheduler!(w)
+scheduler!(w, throw_error = true)
 getdata(w, id3, :nrows) # 3
 ```
 

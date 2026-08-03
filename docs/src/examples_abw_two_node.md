@@ -1,5 +1,5 @@
 ```@setup mfexample
-PKCSV_PATH = joinpath(pwd(), "src", "conc.csv")
+PKCSV_PATH = joinpath(pwd(), "conc.csv")
 ```
 
 ## ABW — a two-node loop: worker and controller
@@ -123,7 +123,7 @@ add_connection!(w, control, :next,  trim,    :previous)    # the cycle
 setsettings!(w, load,    Dict(:file => PKCSV_PATH))
 setsettings!(w, control, Dict(:z => 1.6, :maxiter => 10))
 
-scheduler!(w)
+scheduler!(w, throw_error = true)
 
 getdata(w, control, :iterations)
 getdata(w, control, :result)

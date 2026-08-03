@@ -3,8 +3,8 @@ CurrentModule = MetidaFlows
 ```
 ```@setup mfexample
 using MetidaFlows, CSV, DataFrames
-CSV_PATH = joinpath(pwd(), "src", "data.csv")
-PKCSV_PATH = joinpath(pwd(), "src", "conc.csv")
+CSV_PATH = joinpath(pwd(), "data.csv")
+PKCSV_PATH = joinpath(pwd(), "conc.csv")
 ```
 
 # MetidaFlows
@@ -135,9 +135,12 @@ add_connection!(workflow, id1, :csv, id2, :csv)
 # Set settinf for CSV node (file path), asume file `CSV_PATH` exists
 setsettings!(workflow, id1, Dict(:file => CSV_PATH))
 # Run workflow
-scheduler!(workflow)
+scheduler!(workflow, throw_error = true)
 # Get result from DataFrame (from output port :dataframe)
 df = getdata(workflow, id2, :dataframe)
+# 
+println("CSV: ", getdata(workflow, id1, :csv))
+println("DataFrame: ", df)
 ```
 
 ---
