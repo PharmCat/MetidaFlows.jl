@@ -1,9 +1,6 @@
 using MetidaFlows
 using Documenter
 
-const DOCROOT = @__DIR__
-Main.DOCROOT = DOCROOT
-
 DocMeta.setdocmeta!(MetidaFlows, :DocTestSetup, :(using MetidaFlows); recursive=true)
 
 makedocs(;
