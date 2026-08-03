@@ -2,6 +2,11 @@
 CurrentModule = MetidaFlows
 ```
 
+```@setup mfexample
+using MetidaFlows, CSV, DataFrames
+CSV_PATH = joinpath(pwd(), "src", "data.csv")
+```
+
 # User guide
 
 This page describes the execution model in detail. It assumes you have read the quick start example on the home page.
