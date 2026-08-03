@@ -28,6 +28,11 @@ using Pkg
 Pkg.add(url="https://github.com/PharmCat/MetidaFlows.jl")
 ```
 
+```julia
+using Pkg
+Pkg.add("MetidaFlows")
+```
+
 ---
 
 # Core Concepts

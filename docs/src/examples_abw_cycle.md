@@ -1,4 +1,4 @@
-## 3. ABW — a cyclic graph with a feedback port
+## ABW — a cyclic graph with a feedback port
 
 `DAW` rejects cycles: it needs a topological order. `ABW` executes a cycle if
 the edge that closes it enters a port declared with `kind = :feedback`. Such a
@@ -21,7 +21,7 @@ control flow: publishing `:state` keeps the loop running, publishing
 
 ### State carried by the loop
 
-```julia
+```@example mfexample
 using MetidaFlows
 using CSV, DataFrames, Statistics
 
@@ -40,7 +40,7 @@ zscores(c) = abs.(c .- mean(c)) ./ std(c)
 
 ### Interfaces
 
-```julia
+```@example mfexample
 load_spec = NodeSpec("Load data",
     PortSpec[],
     [PortSpec("Table", DataFrame, :table)],
@@ -60,7 +60,7 @@ terminal: they hold the answer and are not meant to be connected.
 
 ### Behaviour
 
-```julia
+```@example mfexample
 function MetidaFlows.execute_unsafe!(node::DataNode{LoadData})
     setdata!(node, :table, DataFrame(CSV.File(node.settings[:file])))
     return [:table]
@@ -94,7 +94,7 @@ end
 
 ### Assembling and running
 
-```julia
+```@example mfexample
 w = Workflow(3; type = :ABW)
 w.name = "Iterative trimming"
 
@@ -104,8 +104,8 @@ trim = add_node!(w, DataNode(TrimLoop, trim_spec))
 add_connection!(w, load, :table, trim, :table)
 add_connection!(w, trim, :state, trim, :previous)     # the cycle
 
-setsettings!(w, load, Dict(:file => "pkdata2.csv"))
-setsettings!(w, trim, Dict(:z => 3.0, :maxiter => 25))
+setsettings!(w, load, Dict(:file => PKCSV_PATH))      # asume you have file PKCSV_PATH 
+setsettings!(w, trim, Dict(:z => 1.6, :maxiter => 10))
 
 scheduler!(w)
 

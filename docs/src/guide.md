@@ -269,7 +269,7 @@ mind that the `"settings"` key of [`node_to_dict`](@ref) holds the settings
 
 Loading a CSV file, converting it and summarising it:
 
-```julia
+```@example mfexample
 using MetidaFlows, CSV, DataFrames
 using MetidaFlows: Workflow, NodeSpec, PortSpec, DataNode, AbstractNodeType,
                    add_node!, add_connection!, setsettings!, scheduler!,
@@ -313,10 +313,10 @@ id3 = add_node!(w, DataNode(Summarise, sum_spec))
 add_connection!(w, id1, :csv, id2, :csv)
 add_connection!(w, id2, :dataframe, id3, :dataframe)
 
-setsettings!(w, id1, Dict(:file => "data.csv"))
+setsettings!(w, id1, Dict(:file => CSV_PATH))
 
 scheduler!(w)
-getdata(w, id3, :nrows)
+getdata(w, id3, :nrows) # 3
 ```
 
 Changing the file path invalidates the whole chain; executing `id3` again

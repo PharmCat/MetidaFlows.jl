@@ -1,4 +1,4 @@
-## 4. ABW — a two-node loop: worker and controller
+## ABW — a two-node loop: worker and controller
 
 Example 3 kept the whole loop inside one node. That is compact, but the
 stopping policy is hard-wired into the algorithm. Splitting the loop in two
@@ -18,7 +18,7 @@ forward edge: `Control` must wait for `Trim`, and it does.
 
 ### State carried by the loop
 
-```julia
+```@example mfexample
 using MetidaFlows
 using CSV, DataFrames, Statistics
 
@@ -26,7 +26,7 @@ struct LoadData <: AbstractNodeType end
 struct Trim     <: AbstractNodeType end
 struct Control  <: AbstractNodeType end
 
-struct TrimState
+struct TrimState2
     table::DataFrame
     iter::Int
 end
@@ -36,7 +36,7 @@ zscores(c) = abs.(c .- mean(c)) ./ std(c)
 
 ### Interfaces
 
-```julia
+```@example mfexample
 load_spec = NodeSpec("Load data",
     PortSpec[],
     [PortSpec("Table", DataFrame, :table)],
@@ -44,12 +44,12 @@ load_spec = NodeSpec("Load data",
 
 trim_spec = NodeSpec("Trim",
     [PortSpec("Table",    DataFrame, :table),
-     PortSpec("Previous", TrimState, :previous; kind = :feedback)],
-    [PortSpec("State", TrimState, :state)])
+     PortSpec("Previous", TrimState2, :previous; kind = :feedback)],
+    [PortSpec("State", TrimState2, :state)])
 
 control_spec = NodeSpec("Control",
-    [PortSpec("State", TrimState, :state)],
-    [PortSpec("Next",       TrimState, :next),
+    [PortSpec("State", TrimState2, :state)],
+    [PortSpec("Next",       TrimState2, :next),
      PortSpec("Result",     DataFrame, :result;     kind = :terminal),
      PortSpec("Iterations", Int,       :iterations; kind = :terminal)],
     [:z, :maxiter])
@@ -59,7 +59,7 @@ control_spec = NodeSpec("Control",
 
 `Trim` knows only how to remove one observation. It has no idea when to stop:
 
-```julia
+```@example mfexample
 function MetidaFlows.execute_unsafe!(node::DataNode{LoadData})
     setdata!(node, :table, DataFrame(CSV.File(node.settings[:file])))
     return [:table]
@@ -70,11 +70,11 @@ function MetidaFlows.execute_unsafe!(node::DataNode{Trim})
 
     # first pass: the feedback buffer is empty, start from the normal input
     state = previous === nothing ?
-        TrimState(getinputdata(node, :table), 0) :
+        TrimState2(getinputdata(node, :table), 0) :
         previous
 
     i = argmax(zscores(state.table.Concentration))
-    setdata!(node, :state, TrimState(state.table[Not(i), :], state.iter + 1))
+    setdata!(node, :state, TrimState2(state.table[Not(i), :], state.iter + 1))
     return [:state]
 end
 ```
@@ -83,7 +83,7 @@ end
 flow: publishing `:next` keeps the loop running, publishing the terminal ports
 ends it.
 
-```julia
+```@example mfexample
 function MetidaFlows.execute_unsafe!(node::DataNode{Control})
     state = getinputdata(node, :state)
     zmax  = maximum(zscores(state.table.Concentration))
@@ -104,7 +104,7 @@ end
 
 ### Assembling and running
 
-```julia
+```@example mfexample
 w = Workflow(4; type = :ABW)
 w.name = "Trim with a separate controller"
 
@@ -116,8 +116,8 @@ add_connection!(w, load,    :table, trim,    :table)
 add_connection!(w, trim,    :state, control, :state)
 add_connection!(w, control, :next,  trim,    :previous)    # the cycle
 
-setsettings!(w, load,    Dict(:file => "pkdata2.csv"))
-setsettings!(w, control, Dict(:z => 3.0, :maxiter => 25))
+setsettings!(w, load,    Dict(:file => PKCSV_PATH))
+setsettings!(w, control, Dict(:z => 1.6, :maxiter => 10))
 
 scheduler!(w)
 

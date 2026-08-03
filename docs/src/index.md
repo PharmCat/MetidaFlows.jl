@@ -1,6 +1,11 @@
 ```@meta
 CurrentModule = MetidaFlows
 ```
+```@setup mfexample
+using MetidaFlows, CSV, DataFrames
+const CSV_PATH = joinpath(dirname(@__FILE__), "data.csv")
+const PKCSV_PATH = joinpath(dirname(@__FILE__), "conc.csv")
+```
 
 # MetidaFlows
 
@@ -33,6 +38,11 @@ You should expect breaking changes while the architecture stabilizes.
 ```julia
 using Pkg
 Pkg.add(url = "https://github.com/PharmCat/MetidaFlows.jl")
+```
+
+```julia
+using Pkg
+Pkg.add("MetidaFlows")
 ```
 
 ---
@@ -74,7 +84,7 @@ Instead of hidden execution magic, everything is explicit:
 
 ## Minimal example
 
-```julia
+```@example mfexample
 using MetidaFlows
 
 import MetidaFlows: Workflow, NodeSpec, PortSpec, DataNode, AbstractNodeType,
@@ -122,8 +132,8 @@ id1 = add_node!(workflow, DataNode(CSVNode, csv_spec))
 id2 = add_node!(workflow, DataNode(DataFrameNode, df_spec))
 # Add connection 
 add_connection!(workflow, id1, :csv, id2, :csv)
-# Set settinf for CSV node (file path)
-setsettings!(workflow, id1, Dict(:file => "data.csv"))
+# Set settinf for CSV node (file path), asume file `CSV_PATH` exists
+setsettings!(workflow, id1, Dict(:file => CSV_PATH))
 # Run workflow
 scheduler!(workflow)
 # Get result from DataFrame (from output port :dataframe)
