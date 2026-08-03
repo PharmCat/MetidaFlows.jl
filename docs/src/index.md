@@ -3,8 +3,12 @@ CurrentModule = MetidaFlows
 ```
 ```@setup mfexample
 using MetidaFlows, CSV, DataFrames
-const CSV_PATH = joinpath(dirname(@__FILE__), "data.csv")
-const PKCSV_PATH = joinpath(dirname(@__FILE__), "conc.csv")
+
+const CSV_PATH = joinpath(Main.DOCROOT, "src", "data.csv")
+const PKCSV_PATH = joinpath(Main.DOCROOT, "src", "conc.csv")
+
+#const CSV_PATH = joinpath(dirname(@__FILE__), "data.csv")
+#const PKCSV_PATH = joinpath(dirname(@__FILE__), "conc.csv")
 ```
 
 # MetidaFlows

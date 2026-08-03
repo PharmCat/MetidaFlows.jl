@@ -1,5 +1,5 @@
 ```@setup mfexample
-const PKCSV_PATH = joinpath(dirname(@__FILE__), "conc.csv")
+const PKCSV_PATH = joinpath(Main.DOCROOT, "src", "conc.csv")
 ```
 
 ## ABW — a cyclic graph with a feedback port
