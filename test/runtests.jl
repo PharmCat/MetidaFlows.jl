@@ -36,7 +36,8 @@ import MetidaFlows: PortSpec, MultiPort, SinglePort, DAW, ABW,
     push_buffer!,
     settings_schema, settings_schema_usermod!, node_schema, node_schema_usermod!,
     node_to_dict, node_properties_to_dict, spec_to_dict,
-    portspec_to_dict, portspec_to_dict_type, connection_to_dict, workflow_to_dict
+    portspec_to_dict, portspec_to_dict_type, connection_to_dict, workflow_to_dict,
+    exportmeta, getinputmeta
 
 # Здесь и ниже намеренно без `const`: при повторном include в одной сессии
 # переопределение const печатает WARNING: redefinition of constant.
@@ -45,22 +46,15 @@ TEST_DIR = dirname(@__FILE__)
 include(joinpath(TEST_DIR, "fixtures.jl"))
 
 TEST_GROUPS = (
-    (id = "api",           file = "test_api.jl",
-     descr = "контракт каждой публичной функции"),
-    (id = "scenarios",     file = "test_scenarios.jl",
-     descr = "сквозные конвейеры на CSV/DataFrames"),
-    (id = "semantics",     file = "test_semantics.jl",
-     descr = "статусы, инвалидация, кеширование"),
-    (id = "errors",        file = "test_errors.jl",
-     descr = "исключения, статусы отказа, предупреждения"),
-    (id = "cycles",        file = "test_cycles.jl",
-     descr = "циклические графы ABW, петли и ромб внутри цикла"),
-    (id = "edge",          file = "test_edge.jl",
-     descr = "нулевые, единичные и вырожденные случаи"),
-    (id = "serialization", file = "test_serialization.jl",
-     descr = "словарные представления и схемы"),
-    (id = "display",       file = "test_display.jl",
-     descr = "методы show"),
+    (id = "api",           file = "test_api.jl", descr = "контракт каждой публичной функции"),
+    (id = "scenarios",     file = "test_scenarios.jl", descr = "сквозные конвейеры на CSV/DataFrames"),
+    (id = "semantics",     file = "test_semantics.jl", descr = "статусы, инвалидация, кеширование"),
+    (id = "errors",        file = "test_errors.jl", descr = "исключения, статусы отказа, предупреждения"),
+    (id = "cycles",        file = "test_cycles.jl", descr = "циклические графы ABW, петли и ромб внутри цикла"),
+    (id = "edge",          file = "test_edge.jl", descr = "нулевые, единичные и вырожденные случаи"),
+    (id = "serialization", file = "test_serialization.jl", descr = "словарные представления и схемы"),
+    (id = "display",       file = "test_display.jl", descr = "методы show"),
+    (id = "exportmeta",    file = "test_exportmeta.jl", descr = "Export/query метаданных для портов"),
 )
 
 SELECTED = isempty(ARGS) ? [g.id for g in TEST_GROUPS] : ARGS
