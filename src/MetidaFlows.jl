@@ -2174,14 +2174,14 @@ something the engine defines.
 # Example
 ```julia
 # источник: читает только заголовок
-function MetidaFlows.portmeta_unsafe(node::DataNode{ReadCSV}, ::Symbol, inmeta)
+function MetidaFlows.exportmeta_unsafe(node::DataNode{ReadCSV}, ::Symbol, inmeta)
     path = get(node.settings, :file, nothing)
     (path === nothing || !isfile(path)) && return nothing
     return (columns = propertynames(CSV.File(path; limit = 0)),)
 end
 
 # прозрачная нода: строки фильтруются, схема сохраняется
-MetidaFlows.portmeta_unsafe(::DataNode{FilterRows}, ::Symbol, inmeta) = inmeta[:table]
+MetidaFlows.exportmeta_unsafe(::DataNode{FilterRows}, ::Symbol, inmeta) = inmeta[:table]
 ```
 """
 exportmeta_unsafe(::AbstractDataNode, ::Symbol, inmeta) = nothing
@@ -2202,7 +2202,7 @@ an empty `Dict`.
 Ports of kind `:feedback` and `:error` are skipped: a feedback edge closes a
 cycle, and following it would not terminate.
 
-`done` and `maxdepth` are threaded through to [`portmeta`](@ref): the first
+`done` and `maxdepth` are threaded through to [`exportmeta`](@ref): the first
 keeps a common ancestor from being described twice within one call, the second
 bounds the depth of the walk.
 
@@ -2244,8 +2244,8 @@ end
     ismetasource(node::AbstractDataNode, port::Symbol) -> Bool
 
 Declare that the node can describe `port` on its own, without asking its
-producers. When it returns `true`, [`portmeta`](@ref) stops the upward walk at
-this node and calls [`portmeta_unsafe`](@ref) with an **empty** `inmeta`.
+producers. When it returns `true`, [`exportmeta`](@ref) stops the upward walk at
+this node and calls [`exportmeta_unsafe`](@ref) with an **empty** `inmeta`.
 
 The default is `false`, so a node describes its output from its inputs unless
 it says otherwise.
@@ -2254,7 +2254,7 @@ The predicate may depend on the node state, which is the point: a node is
 often a source of metadata only once it has been configured.
 
 # Consistency
-`ismetasource` and [`portmeta_unsafe`](@ref) are written together and must
+`ismetasource` and [`exportmeta_unsafe`](@ref) are written together and must
 agree. Reaching for `inmeta[:label]` in a branch declared as a metadata source
 raises a `KeyError`, because the dictionary passed there is empty — the
 mismatch is loud on purpose, as with [`validate_settings`](@ref) and
@@ -2269,7 +2269,7 @@ MetidaFlows.ismetasource(node::DataNode{ReadCSV}, ::Symbol) = haskey(node.settin
 MetidaFlows.ismetasource(node::DataNode{Import}, ::Symbol) =
     !isempty(get(node.settings, :schema_file, ""))
 
-function MetidaFlows.portmeta_unsafe(node::DataNode{Import}, ::Symbol, inmeta)
+function MetidaFlows.exportmeta_unsafe(node::DataNode{Import}, ::Symbol, inmeta)
     haskey(node.settings, :schema_file) && return read_schema(node.settings[:schema_file])
     return inmeta[:table]                  # ветка, где нода НЕ источник описания
 end
@@ -2279,18 +2279,18 @@ ismetasource(::AbstractDataNode, ::Symbol)::Bool = false
 
 
 """
-    portmeta(model::Workflow, id::Int, port::Symbol)
+    exportmeta(model::Workflow, id::Int, port::Symbol)
 
 Describe what node `id` will produce on its output port `port`, without
 executing anything.
 
 Walks up the graph: the node's producers are asked first, their answers are
-handed to [`portmeta_unsafe`](@ref) as `inmeta`. The walk stops at nodes
+handed to [`exportmeta_unsafe`](@ref) as `inmeta`. The walk stops at nodes
 without incoming connections, and at any node for which
 [`ismetasource`](@ref) returns `true`.
 
 Returns `nothing` when the answer is unknown — because the node did not
-implement [`portmeta_unsafe`](@ref), because a producer up the chain did not,
+implement [`exportmeta_unsafe`](@ref), because a producer up the chain did not,
 or because the required settings are not filled in yet.
 
 # Arguments
