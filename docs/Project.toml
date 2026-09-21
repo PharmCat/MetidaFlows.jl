@@ -8,5 +8,5 @@ MetidaFlows = "755c5ba7-8e48-4bab-b874-155758dbfa11"
 [compat]
 Documenter = "1.17.0"
 Statistics = "<0.0.1, 1"
-CSV = "0.10"
+CSV = "0.10, 1.0"
 DataFrames = "1"
