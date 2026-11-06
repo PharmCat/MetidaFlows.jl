@@ -19,6 +19,7 @@ makedocs(;
         "Examples" => [
             "AWB cycle" => "examples_abw_cycle.md",
             "AWB two node cycle" => "examples_abw_two_node.md",
+            "Querying settings" => "examples_settings_query.md",
         ],
         "API" => "api.md",
     ],

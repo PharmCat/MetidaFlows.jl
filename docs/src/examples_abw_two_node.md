@@ -73,9 +73,7 @@ function MetidaFlows.execute_unsafe!(node::DataNode{Trim})
     previous = getinputdata(node, :previous)
 
     # first pass: the feedback buffer is empty, start from the normal input
-    state = previous === nothing ?
-        TrimState2(getinputdata(node, :table), 0) :
-        previous
+    state = previous === nothing ? TrimState2(getinputdata(node, :table), 0) : previous
 
     i = argmax(zscores(state.table.Concentration))
     setdata!(node, :state, TrimState2(state.table[Not(i), :], state.iter + 1))
@@ -125,8 +123,10 @@ setsettings!(w, control, Dict(:z => 1.6, :maxiter => 10))
 
 scheduler!(w, throw_error = true)
 
-getdata(w, control, :iterations)
-getdata(w, control, :result)
+ri = getdata(w, control, :iterations)
+df = getdata(w, control, :result)
+println("Removed:", ri)
+df[1:3, :]
 ```
 
 Replacing the policy means replacing one node. A controller that stops after a

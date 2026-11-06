@@ -139,7 +139,6 @@ scheduler!(workflow, throw_error = true)
 # Get result from DataFrame (from output port :dataframe)
 df = getdata(workflow, id2, :dataframe)
 # 
-println("CSV: ", getdata(workflow, id1, :csv))
 println("DataFrame: ", df)
 ```
 

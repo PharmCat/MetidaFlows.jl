@@ -74,9 +74,7 @@ function MetidaFlows.execute_unsafe!(node::DataNode{TrimLoop})
     previous = getinputdata(node, :previous)
 
     # first pass: the feedback buffer is empty, start from the normal input
-    state = previous === nothing ?
-        TrimState(getinputdata(node, :table), 0, Inf) :
-        previous
+    state = previous === nothing ? TrimState(getinputdata(node, :table), 0, Inf) : previous
 
     z    = zscores(state.table.Concentration)
     i    = argmax(z)
@@ -113,8 +111,10 @@ setsettings!(w, trim, Dict(:z => 1.6, :maxiter => 10))
 
 scheduler!(w, throw_error = true)
 
-getdata(w, trim, :iterations)      # how many observations were removed
-getdata(w, trim, :result)          # the trimmed dataset
+ri = getdata(w, trim, :iterations)      # how many observations were removed
+df = getdata(w, trim, :result)          # the trimmed dataset
+println("Removed:", ri)
+df[1:3, :]
 ```
 
 One call to [`scheduler!`](@ref) runs the whole loop to completion.

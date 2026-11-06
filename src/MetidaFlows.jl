@@ -1937,7 +1937,19 @@ end
 """
     settings_schema(node::AbstractDataNode) -> Dict
 
-Default settings schema.
+Description of the node settings for a user interface.
+
+The engine fills in `"settingslist"` — a copy of `spec.settings`, that is the
+keys the node understands — and then calls [`settings_schema_usermod!`](@ref),
+where a node type adds types, defaults, labels and allowed values.
+
+# Example
+```julia
+settings_schema(DataNode(FilterRows, filter_spec))
+# Dict{String, Any}("settingslist" => [:column, :threshold])
+```
+
+See also [`node_schema`](@ref) for the node as a whole.
 """
 function settings_schema(node::AbstractDataNode)
     d  = Dict{String, Any}()
@@ -1946,33 +1958,52 @@ function settings_schema(node::AbstractDataNode)
     return d
 end
 """
-    settings_schema_usermod!(d, node::AbstractDataNode) -> Dict
+    settings_schema_usermod!(d, node::AbstractDataNode)
 
-Modify settings schema for user-defined node types.
+Describe the settings of a node type, so an interface can render a form for
+them. Specialize it per node type; the default does nothing.
 
-Possible user modifications:
+`d` arrives already holding `"settingslist"`. Add to it — by convention under
+the key `"schema"`, one entry per setting.
 
+**Mutate `d`: the return value is discarded.** A method that builds a fresh
+dictionary and returns it has no effect.
+
+The engine never reads the contents of `"schema"` and passes it through
+untouched, so the keys below are a convention shared with the interface rather
+than a format the package enforces: `"type"`, `"default"`, `"description"`,
+`"required"`, `"options"`, `"min"`, `"max"`, `"pinned"` (show on the node body),
+`"source"` (`"upstream"`, `"user"`, `"none"`).
+
+# Example
 ```julia
-settings_schema_usermod!(d, node::DataNode{MyNodeType})
-    settings_dict = Dict{String, Any}()
-    settings_dict["my_setting1"] = Dict("type" => Int, 
-        "default" => 0, 
-        "description" => "My setting 1", 
-        "required" => true, 
-        "pinned" => true,
-        "source"	=> "upstream",
-        "validator" => (x -> x >= 0))
-        
-    settings_dict["my_setting2"] = Dict("type" => Array{Int}, 
-        "default" => [0], 
-        "description" => "My setting 2", 
-        "required" => true, 
-        "pinned" => false,
-        "source"	=> "none",
-        "validator" => (x -> x in [1,2,3]))
-    d["schema"] = settings_dict
+function MetidaFlows.settings_schema_usermod!(d, node::DataNode{FilterRows})
+    d["schema"] = Dict{String, Any}(
+        "column" => Dict{String, Any}(
+            "type"        => "Symbol",
+            "description" => "Column to compare",
+            "required"    => true,
+            "options"     => Symbol[]),
+        "threshold" => Dict{String, Any}(
+            "type"        => "Float64",
+            "default"     => 0.0,
+            "description" => "Keep rows whose value is greater than this",
+            "required"    => true,
+            "min"         => 0.0))
+    return d
 end
 ```
+
+The method receives the node, so the description may depend on its current
+settings. For choices that only a producer knows — the columns of a file the
+parent node will read — combine the schema with [`getinputmeta`](@ref) on the
+caller's side.
+
+# Notes
+- Keep the executable check in [`validate_settings`](@ref): a schema says what
+  an interface should offer, not whether the node may run.
+- Prefer JSON-safe values. A function encodes as a meaningless string, and a
+  `Type` is safer written as `"Float64"` than as `Float64`.
 """
 function settings_schema_usermod!(d, node::AbstractDataNode)
     return d
@@ -1980,7 +2011,18 @@ end
 """
     node_schema(node::AbstractDataNode) -> Dict
 
-Default node schema.
+Description of a whole node for a user interface: its ports and its settings
+form.
+
+The engine fills in `"spec"` ([`spec_to_dict`](@ref)) and `"settings_schema"`
+([`settings_schema`](@ref)), and then calls [`node_schema_usermod!`](@ref),
+where a node type adds presentation data.
+
+# Example
+```julia
+sort(collect(keys(node_schema(DataNode(FilterRows, filter_spec)))))
+# ["settings_schema", "spec"]
+```
 """
 function node_schema(node::AbstractDataNode)
     d  = Dict{String, Any}()
@@ -1990,17 +2032,31 @@ function node_schema(node::AbstractDataNode)
     return d
 end
 """
-    node_schema_usermod!(d, node::AbstractDataNode) -> Dict
+    node_schema_usermod!(d, node::AbstractDataNode)
 
-Modify node schema for user-defined node types.
+Describe the node itself — where it belongs in a node palette and how it is
+presented. Specialize it per node type; the default does nothing.
 
-Possible user modifications:
+`d` arrives already holding `"spec"` and `"settings_schema"`.
 
+**Mutate `d`: the return value is discarded.**
+
+Use this for presentation and grouping, and
+[`settings_schema_usermod!`](@ref) for the settings form.
+
+# Example
 ```julia
-node_schema_usermod!(d, node::AbstractDataNode)
-    d["section"]   = "Section 1"
-    d["groupname"] = "Group 1"
-    d["color"]     = "#8b5cf6"
+function MetidaFlows.node_schema_usermod!(d, node::DataNode{FilterRows})
+    d["section"]     = "Tables"           # node palette section
+    d["groupname"]   = "Filtering"        # group within that section
+    d["color"]       = "#8b5cf6"
+    d["icon"]        = "filter"
+    d["description"] = "Keeps rows whose value exceeds a threshold."
+
+    # the method sees the node, so the caption may depend on its settings
+    col = get(node.settings, :column, nothing)
+    d["caption"] = col === nothing ? "not configured" : "filter on \$(col)"
+    return d
 end
 ```
 """

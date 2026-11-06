@@ -237,36 +237,249 @@ For a [`SinglePort`](@ref), [`getinputdata`](@ref) returns the single value, or
 
 ## Serialization and schemas
 
+Two different jobs share this part of the API:
+
+* **serializing a workflow** — turning the graph into plain dictionaries, so it
+  can be written to JSON and inspected;
+* **describing a node** — telling a user interface which settings the node
+  accepts, how to render them and how to present the node itself.
+
+The first is fixed: the engine knows what a graph is made of. The second is
+open-ended, because only the node author knows what its settings mean, so the
+engine provides two hooks and gets out of the way.
+
+### Serializing a workflow
+
 [`workflow_to_dict`](@ref) produces a JSON-ready snapshot of the structure:
-nodes, connections and the incoming/outgoing indices. Note that `"nodes"` and
-`"connections"` are keyed by stringified ids while `"incoming"` and
-`"outgoing"` keep integer ids, and that execution state (`run_id`, logs,
-cached data) is not included.
-
-Building blocks: [`node_to_dict`](@ref), [`node_properties_to_dict`](@ref),
-[`spec_to_dict`](@ref), [`portspec_to_dict`](@ref),
-[`connection_to_dict`](@ref).
-
-Schemas describe a node to a UI. Extend them per node type:
+nodes, connections and the incoming/outgoing indices.
 
 ```julia
-function MetidaFlows.settings_schema_usermod!(d, node::DataNode{MyNode})
-    d["schema"] = Dict("threshold" => Dict(
-        "type" => Float64, "default" => 0.5, "required" => true,
-        "validator" => x -> 0 <= x <= 1))
-    return d
-end
-
-function MetidaFlows.node_schema_usermod!(d, node::DataNode{MyNode})
-    d["section"] = "Statistics"
-    d["color"]   = "#8b5cf6"
-    return d
-end
+d = workflow_to_dict(w)
+keys(d)   # "id", "name", "n_iter", "c_iter", "nodes", "connections", "incoming", "outgoing"
 ```
 
-[`settings_schema`](@ref) and [`node_schema`](@ref) call these hooks. Keep in
-mind that the `"settings"` key of [`node_to_dict`](@ref) holds the settings
-*schema*, not the current values.
+Two details are easy to trip over:
+
+* `"nodes"` and `"connections"` are keyed by *stringified* ids, while
+  `"incoming"` and `"outgoing"` keep integer node ids;
+* execution state — `run_id`, logs, cached output data and the current setting
+  *values* — is not included. The snapshot describes structure only.
+
+Building blocks, usable on their own: [`node_to_dict`](@ref),
+[`node_properties_to_dict`](@ref), [`spec_to_dict`](@ref),
+[`portspec_to_dict`](@ref), [`connection_to_dict`](@ref).
+
+### What a schema is
+
+A schema is the dictionary a graph editor reads to draw one node: its ports,
+its settings form, its place in the node palette.
+
+The engine fills in only what it can know by itself. Take a filtering node that
+declares two settings:
+
+```@example mfexample
+using MetidaFlows: settings_schema, node_schema, getnode
+
+struct FilterRows <: AbstractNodeType end
+
+filter_spec = NodeSpec("Filter rows",
+    [PortSpec("Table", DataFrame, :table)],
+    [PortSpec("Table", DataFrame, :table)],
+    [:column, :threshold])
+
+settings_schema(DataNode(FilterRows, filter_spec))
+```
+
+`"settingslist"` is a copy of `spec.settings` — the keys the node understands,
+and nothing more. It is enough to know *that* there are two settings, but not
+enough to render a form: no types, no defaults, no labels.
+
+[`node_schema`](@ref) adds the port specification:
+
+```@example mfexample
+sort(collect(keys(node_schema(DataNode(FilterRows, filter_spec)))))
+```
+
+Everything beyond that comes from the two hooks.
+
+### Describing settings: `settings_schema_usermod!`
+
+Specialize it on your node type and fill in `d`:
+
+```@example mfexample
+function MetidaFlows.settings_schema_usermod!(d, node::DataNode{FilterRows})
+    d["schema"] = Dict{String, Any}(
+        "column" => Dict{String, Any}(
+            "type"        => "Symbol",
+            "description" => "Column to compare",
+            "required"    => true,
+            "options"     => Symbol[]),
+        "threshold" => Dict{String, Any}(
+            "type"        => "Float64",
+            "default"     => 0.0,
+            "description" => "Keep rows whose value is greater than this",
+            "required"    => true,
+            "min"         => 0.0))
+    return d
+end
+
+settings_schema(DataNode(FilterRows, filter_spec))["schema"]["threshold"]
+```
+
+The contract is short:
+
+* `d` arrives already holding `"settingslist"`; add to it, don't rebuild it;
+* the hook receives the node, so the schema may depend on its current state;
+* **mutate `d`** — the return value is discarded (see *Things to watch*).
+
+### Conventional keys
+
+The engine never reads the contents of `"schema"`: it passes the dictionary
+through untouched. The keys are therefore a contract between the node author
+and the interface, not a format the package enforces. These are the ones worth
+keeping to, because the rest of the ecosystem expects them:
+
+| Key | Meaning |
+|---|---|
+| `"type"` | datatype of the value, as a string (`"Int"`, `"Symbol"`, `"Vector{Float64}"`) |
+| `"default"` | value to offer when the setting is unset |
+| `"description"` | one line for a label or tooltip |
+| `"required"` | whether the node cannot run without it |
+| `"options"` | allowed values, for a dropdown |
+| `"min"`, `"max"` | bounds for a numeric input |
+| `"pinned"` | show on the node body, not only in the settings panel |
+| `"source"` | where the value comes from: `"upstream"`, `"user"`, `"none"` |
+
+Validation is a separate matter: a schema tells the interface what to *offer*,
+while [`validate_settings`](@ref) decides whether the node may run. Keep the
+real check there — a value can always arrive without passing through a form.
+
+### Options that come from upstream
+
+The useful case is a setting whose choices are only known from the producer: a
+column name that exists in the file the parent node will read. The engine
+supplies the fact — [`getinputmeta`](@ref) — and the caller composes the form.
+
+The producer describes its output through [`exportmeta_unsafe`](@ref), reading
+only the header:
+
+```@example mfexample
+struct ReadTable <: AbstractNodeType end
+
+read_spec = NodeSpec("Read table", PortSpec[],
+    [PortSpec("Table", DataFrame, :table)], [:file])
+
+function MetidaFlows.execute_unsafe!(node::DataNode{ReadTable})
+    setdata!(node, :table, DataFrame(CSV.File(node.settings[:file])))
+    return [:table]
+end
+
+MetidaFlows.ismetasource(node::DataNode{ReadTable}, ::Symbol) = haskey(node.settings, :file)
+
+function MetidaFlows.exportmeta_unsafe(node::DataNode{ReadTable}, ::Symbol, inmeta)
+    path = get(node.settings, :file, nothing)
+    (path === nothing || !isfile(path)) && return nothing
+    return (columns = propertynames(CSV.File(path; limit = 0)),)
+end
+
+# a row filter does not change the schema, so it passes the input description through
+MetidaFlows.exportmeta_unsafe(::DataNode{FilterRows}, ::Symbol, inmeta) = inmeta[:table]
+nothing # hide
+```
+
+Filling the options is then three lines on the caller's side:
+
+```@example mfexample
+function filter_form(w, id)
+    d = settings_schema(getnode(w, id))
+    m = getinputmeta(w, id)[:table]
+    m === nothing || (d["schema"]["column"]["options"] = m.columns)
+    return d
+end
+nothing # hide
+```
+
+```@example mfexample
+wf  = Workflow(1)
+src = add_node!(wf, DataNode(ReadTable,  read_spec))
+flt = add_node!(wf, DataNode(FilterRows, filter_spec))
+add_connection!(wf, src, :table, flt, :table)
+
+filter_form(wf, flt)["schema"]["column"]["options"]   # the source is not configured yet
+```
+
+```@example mfexample
+setsettings!(wf, src, Dict(:file => CSV_PATH))
+
+filter_form(wf, flt)["schema"]["column"]["options"]   # names taken from the file header
+```
+
+Nothing has been executed: the file was opened for its header only. An empty
+list of options is an honest signal that the producer is not configured yet.
+
+### Describing the node: `node_schema_usermod!`
+
+The same pattern, one level up — everything about the node itself rather than
+its settings. `d` arrives holding `"settings_schema"` and `"spec"`:
+
+```@example mfexample
+function MetidaFlows.node_schema_usermod!(d, node::DataNode{FilterRows})
+    d["section"]     = "Tables"           # node palette section
+    d["groupname"]   = "Filtering"        # group within that section
+    d["color"]       = "#8b5cf6"
+    d["icon"]        = "filter"
+    d["description"] = "Keeps rows whose value in the chosen column exceeds a threshold."
+
+    # the hook sees the node, so the caption may depend on its settings
+    col = get(node.settings, :column, nothing)
+    d["caption"] = col === nothing ? "not configured" : "filter on $(col)"
+    return d
+end
+
+sort(collect(keys(node_schema(getnode(wf, flt))))) 
+```
+
+```@example mfexample
+node_schema(getnode(wf, flt))["caption"]
+```
+
+```@example mfexample
+setsettings!(wf, flt, Dict(:column => :length, :threshold => 100.0))
+
+node_schema(getnode(wf, flt))["caption"]
+```
+
+Use this hook for presentation and grouping; use
+`settings_schema_usermod!` for the form itself.
+
+### Things to watch
+
+* **The hook's return value is ignored.** Both hooks are called for their
+  effect on `d`, and `settings_schema` / `node_schema` return the `d` they
+  passed in. A hook that builds a fresh dictionary and returns it silently
+  does nothing:
+
+  ```julia
+  # wrong: the dictionary is built, but d is untouched, so the result is lost
+  function MetidaFlows.settings_schema_usermod!(d, node::DataNode{MyNode})
+      return Dict("schema" => ...)
+  end
+  ```
+
+  Write into `d` and return it, as in the examples above.
+
+* **Functions do not survive JSON.** A `"validator" => x -> x >= 0` entry
+  encodes as the string `"#2"` — no error, just a useless value. Express
+  constraints declaratively (`"min"`, `"max"`, `"options"`) and keep the
+  executable check in [`validate_settings`](@ref). Types are safer written as
+  strings: `"type" => "Float64"` rather than `"type" => Float64`.
+
+* **`node_to_dict`'s `"settings"` key holds the settings *schema*, not the
+  current values.** Setting values are not part of any dictionary the package
+  produces; read them from `node.settings`.
+
+* Both hooks are called on every `settings_schema` / `node_schema` call, so
+  keep them cheap. Inspecting a file is fine; computing anything is not.
 
 ---
 
