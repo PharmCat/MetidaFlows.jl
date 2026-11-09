@@ -504,14 +504,21 @@ function register_node!(node::DataNode{T}; overwrite = false, skipmode = false) 
     NODE_REGISTER[typestr] = (T, node.spec)
     typestr
 end
-function unregister_node!(node::T) where T <: DataNode
-    typestr = nodetypestr(node)
-    deleteat!(NODE_REGISTER, typestr)
+
+function unregister_node!(typestr::AbstractString)
+    key = String(typestr)
+    haskey(NODE_REGISTER, key) || return false
+    delete!(NODE_REGISTER, key)
+    return true
 end
+unregister_node!(node::T) where T <: DataNode = unregister_node!(nodetypestr(node))
+
 function getregnodeinfo(typestr::String)
-    if !isregistered(typestr) error("Node not registered, use `register_node!` before deserialization.") end
+    isregistered(typestr) ||
+        error("Node \"$(typestr)\" is not registered, call `register_node!` before deserialization")
     NODE_REGISTER[typestr]
 end
+
 function isregistered(node::T) where T <: DataNode
     return haskey(NODE_REGISTER, nodetypestr(node))
 end
@@ -603,7 +610,7 @@ end
 Return string representation of node type `T`.
 """
 function nodetypestr(::DataNode{T}) where T
-    string(T)
+    string(parentmodule(T), ".", nameof(T))
 end
 
 # Include get*
@@ -736,29 +743,29 @@ Validate a connection before it is registered. Raises an error unless:
  
 A rejected connection does not consume a connection identifier.
 """
-function check_connection_validity(model, c::NodeConnection)
+function check_connection_validity(model, c::NodeConnection; throw_error::Bool = true, throw_warn::Bool = true)
     input_id = c.input_id
     output_id = c.output_id
     input_port = c.input_port
     output_port = c.output_port
     # check nodes exist
-    haskey(model.nodes, output_id) || error("Output (parent) node  doesn't exist")
-    haskey(model.nodes, input_id)  || error("Input (child) node doesn't exist")
+    haskey(model.nodes, output_id) || (throw_error ? error("Output (parent) node  doesn't exist") : return false)
+    haskey(model.nodes, input_id)  || (throw_error ? error("Input (child) node doesn't exist") : return false)
     
     parent_node = getnode(model, output_id)
     child_node  = getnode(model, input_id)
     # check ports exist
-    isportexist(parent_node, output_port, :output) || error("Output node port $output_port doesn't exist")
-    isportexist(child_node, input_port, :input) || error("Input node port $input_port doesn't exist")
+    isportexist(parent_node, output_port, :output) || (throw_error ? error("Output node port $output_port doesn't exist") : return false)
+    isportexist(child_node, input_port, :input) || (throw_error ? error("Input node port $input_port doesn't exist") : return false)
 
-    getportspec(parent_node, output_port, :output).kind == :terminal && @warn "Output port $output_port is terminal and should not be connected" # Warn, but allow connection 
+    getportspec(parent_node, output_port, :output).kind == :terminal && throw_warn && @warn "Output port $output_port is terminal and should not be connected" # Warn, but allow connection 
 
     if haskey(model.incoming, input_id) # check if child node has incoming connections
         if length(model.incoming[input_id]) > 0
             for cid in model.incoming[input_id] # for all incoming connections of child node
                 existed_con = model.connections[cid]
                 if existed_con.input_port == input_port && !ismultiport(getportspec(child_node, input_port, :input))
-                    error("Node port occupied by another connection") 
+                    throw_error ? error("Node port occupied by another connection") : return false
                 end
             end
         end 
@@ -766,8 +773,8 @@ function check_connection_validity(model, c::NodeConnection)
     out_type = getporttype(parent_node, output_port, :output)
     in_type  = getporttype(child_node, input_port, :input)
 
-    out_type <: in_type || error("Type mismatch")
-    true
+    out_type <: in_type || (throw_error ? error("Type mismatch") : return false)
+    return true
 end
 """
     add_connection!(model::Workflow, c::NodeConnection)

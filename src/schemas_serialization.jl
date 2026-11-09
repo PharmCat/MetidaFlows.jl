@@ -263,7 +263,7 @@ function workflow_to_dict(w::Workflow)
     return d
 end
 
-function dict_to_workflow(d::Dict{String})
+function dict_to_workflow(d::Dict{String}; check_connection::Bool = true, check_connection_throw_error::Bool = true)
     haskey(d, "id") || error("No `id` field")
     haskey(d, "type") || error("No `type` field")
     if d["type"] ∉ ("DAW", "ABW") error("Unknown type") end
@@ -271,17 +271,24 @@ function dict_to_workflow(d::Dict{String})
     w = Workflow(d["id"]; type = Symbol(d["type"]))
     w.name     = d["name"]
 
-    w.n_iter   = d["n_iter"]
     for (k, n) in d["nodes"]
         node = dict_to_node(n)
         id   = node.properties.id
+        parse(Int, k) == id || error("Node key $(k) does not match the id $(id) inside it")
+        haskey(w.nodes, id) && error("Duplicate node id: $(id)")
         w.nodes[id] = node
     end
+    w.n_iter = max(d["n_iter"], isempty(w.nodes) ? 0 : maximum(keys(w.nodes)))
 
     w.c_iter = d["c_iter"]
     for (k, c) in d["connections"]
         id     =  parse(Int, k)
-        w.connections[id] = dict_to_connection(c)
+        con    = dict_to_connection(c)
+        if check_connection 
+            ccv = check_connection_validity(w, con; throw_error = check_connection_throw_error)
+            ccv || continue
+        end
+        w.connections[id] = con
     end
     # w.audit_log # technical debt
     refreshind!(w)
@@ -289,20 +296,24 @@ function dict_to_workflow(d::Dict{String})
 end
 
 function dict_to_node(d::Dict{String}; usermode = false)
-    id         = d["id"] 
-    status     = :dirty
-    properties = dict_to_properties(d["properties"])
-    typestr     = d["type"]
-    type, spec = getregnodeinfo(typestr)
+    id                = d["id"] 
+    properties        = dict_to_properties(d["properties"])
+    properties.status = :dirty
+    typestr           = d["type"]
+    type, spec        = getregnodeinfo(typestr)
     return DataNode(type, properties, spec; settings = Dict{Symbol, Any}(), data = Dict{Symbol, Any}(), state = NodeState(), input_buffer = Dict{Symbol, Dict{Int, Any}}())
 end
 
 function dict_to_connection(d::Dict{String})
-    return NodeConnection(d["output_id"], d["output_port"], d["input_id"], d["input_port"])
+    sym(x) = x isa Symbol ? x : Symbol(x)
+    return NodeConnection(Int(d["output_id"]), sym(d["output_port"]),
+                          Int(d["input_id"]),  sym(d["input_port"]))
 end
 
 function dict_to_properties(d::Dict{String})
-    return NodeProperties(d["id"], d["status"], d["position"])
+    status = d["status"] isa Symbol ? d["status"] : Symbol(d["status"])
+    p      = d["position"]
+    return NodeProperties(Int(d["id"]), status, (Int(p[1]), Int(p[2])))
 end
 
 dict_to_spec(d) = error("Define `dict_to_spec(d::Dict{String})::NodeSpec` function to use user serialization mode.")
