@@ -54,6 +54,10 @@ check_failed_nodes
 # Execution:
 
 execute_unsafe!,
+request_stop!,
+isstoprequested,
+failed_nodes,
+check_failed_nodes,
 validate_node,
 validate_settings, 
 validate_result,
@@ -66,6 +70,31 @@ node_properties_to_dict,
 spec_to_dict, 
 portspec_to_dict,
 connection_to_dict,
+settings_to_dict,
+node_state_to_dict,
+value_to_dict,
+
+dict_to_workflow,
+dict_to_node,
+dict_to_connection,
+dict_to_properties,
+dict_to_spec,
+dict_to_settings!,
+dict_to_node_state!,
+dict_to_value,
+
+settings_to_dict_usermod!,
+dict_to_settings_usermod!,
+
+# Node register:
+
+NODE_REGISTER,
+register_node!,
+unregister_node!,
+unregister_all!,
+isregistered,
+getregnodeinfo,
+nodetypestr,
 
 settings_schema,
 node_schema,
@@ -251,8 +280,9 @@ mutable struct NodeState <: AbstractNodeState
     ready_ports::Vector{Symbol}
     execution_id::UInt64
     log::Vector{LogMsg}
+    stop::Bool
     function NodeState()
-        new(0, Symbol[], 0, LogMsg[])
+        new(0, Symbol[], 0, LogMsg[], false)
     end
 end 
 """
@@ -264,6 +294,7 @@ function Base.empty!(ns::NodeState)
     ns.exec_n = 0
     empty!(ns.ready_ports)
     ns.execution_id = 0
+    ns.stop = false
     empty!(ns.log)
 end
 #
@@ -593,7 +624,6 @@ end
 function isregistered(typestr::String)
     return haskey(NODE_REGISTER, typestr)
 end
-
 """
     unregister_all!() -> Bool
  
@@ -904,7 +934,7 @@ end
 Rebuild the `incoming`/`outgoing` indices from `model.connections`.
  
 Cheaper than keeping them in a snapshot and safer: the indices cannot disagree
-with the connections they index. Used by [`dict_to_workflow`](@ref) after the
+with the connections they index. Used by `dict_to_workflow` after the
 nodes and connections are in place.
 """
 function refreshind!(model::Workflow)
@@ -1049,6 +1079,8 @@ The workflow.
 function reset!(model::Workflow; soft::Bool = false)
     for (k, node) in model.nodes
         node.state.exec_n = 0
+        #  Признак остановки принадлежит прогону
+        node.state.stop   = false
         mark_dirty!(node, soft = soft)
         # Полный сброс обязан снять состояние цикла
         if !soft
@@ -1131,6 +1163,61 @@ function mark_dirty!(node::AbstractDataNode; soft::Bool = false)
     empty!(node.data)
     node
 end
+"""
+    request_stop!(node::AbstractDataNode)
+
+Ask the scheduler to end the run as soon as this node finishes.
+
+Called from inside [`execute_unsafe!`](@ref) by a node that knows there is
+nothing left worth computing - a search that found its answer, a check that
+failed a precondition. What the node publishes is published as usual, so a
+result can travel out through a `:terminal` port in the same execution; what
+changes is that **nothing more is executed**.
+
+```julia
+function MetidaFlows.execute_unsafe!(n::DataNode{Found})
+    setdata!(n, :answer, getinputdata(n, :in))
+    request_stop!(n)
+    return [:answer]
+end
+```
+
+Both schedulers honour it: [`ABW`](@ref) stops serving the queue and
+[`DAW`](@ref) leaves the topological traversal. Nodes that were queued or
+still ahead in the order are not executed and end the run `:dirty`, exactly as
+they do below a failure - a stop is **not** a failure, so
+[`failed_nodes`](@ref) stays empty and `strict` does not raise. The scheduler
+appends an `:info` record to `model.log` naming the node that stopped it.
+
+The flag lives in the node's [`NodeState`](@ref) and is cleared by
+[`reset!`](@ref), so the next run starts clean. With `reset_mode = :none`
+nothing is reset, so a stop requested by an earlier run is still there and the
+next one ends on that node again.
+
+Which node stopped a run is an ordinary query afterwards:
+
+```julia
+[id for (id, n) in w.nodes if isstoprequested(n)]
+```
+
+See also [`isstoprequested`](@ref).
+"""
+request_stop!(node::AbstractDataNode) = (request_stop!(node.state); node)
+request_stop!(st::NodeState) = (st.stop = true; st)
+request_stop!(st::AbstractNodeState) = error("Node state of type $(typeof(st)) has no `stop` field; `request_stop!` needs a `NodeState`")
+
+"""
+    isstoprequested(node::AbstractDataNode) -> Bool
+
+Whether [`request_stop!`](@ref) was called on this node and not yet cleared by
+[`reset!`](@ref). A node whose state type has no `stop` field - a custom
+`AbstractNodeState` - always reports `false`, so a stop can never be requested
+by accident.
+"""
+isstoprequested(node::AbstractDataNode) = isstoprequested(node.state)
+isstoprequested(st::NodeState) = st.stop
+isstoprequested(::AbstractNodeState) = false
+
 """
     invalidate_downstream!(model::Workflow, id::Int)
 

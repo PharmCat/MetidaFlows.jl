@@ -88,6 +88,9 @@ This scheduler is designed for deterministic acyclic data-analysis workflows.
  
 # Notes
 - Nodes are executed at most once per scheduler run.
+- A node that calls [`request_stop!`](@ref) ends the traversal: everything
+  still ahead in the order is left `:dirty`. A stop is not a failure, so
+  `strict` does not raise on it.
 - A node is skipped when [`isready`](@ref) reports that a producer connected
   through a `:normal` port is not `:clean`. In an acyclic graph traversed in
   topological order that happens only below a node that failed, and skipping
@@ -128,6 +131,11 @@ function scheduler!(model::Workflow{DAW}; reset_mode::Symbol = :full, throw_erro
         #  A node whose producer failed must not be executed
         isready(model, id) || continue
         execute!(model, id; settings = ExecuteSettings(;execute_upstream = false, invalidate_downstream = false, check_cyclic = false), throw_error = throw_error) 
+        #  Узел поднимает флаг остановки: обход прекращается, остальные узлы порядка  :dirty.
+        if isstoprequested(getnode(model, id))
+            push!(model.log, LogMsg(:info, "Run stopped by node (id: $(id))"))
+            break
+        end
     end
     strict && check_failed_nodes(model)
     return true
@@ -148,7 +156,8 @@ several times during one call.
 2. Seed the queue with every node that has no input ports.
 3. Pop a node and execute it when [`isready`](@ref) reports that every
    producer connected through a `:normal` port is `:clean`; otherwise drop it -
-   a producer finishing later re-queues it.
+   a producer finishing later re-queues it. Stop serving the queue if the node
+   called [`request_stop!`](@ref).
 4. For every port the execution produced, mark the child **and everything
    downstream of it** `:dirty` - see [`mark_dirty_downstream!`](@ref) - and
    enqueue the child.
@@ -260,10 +269,15 @@ function scheduler!(model::Workflow{ABW}; reset_mode::Symbol = :full, maxiter = 
             #check_cyclic=false
             #check_input_buffer=false
             ready_ports = execute!(model, id; settings = ExecuteSettings(false), throw_error = throw_error)
+            #  Узел попросил остановиться. Опубликованное им уже лежит в буферах потомков, в очередь  не попадают.
+            if isstoprequested(getnode(model, id))
+                push!(model.log, LogMsg(:info, "Run stopped by node (id: $(id))"))
+                break
+            end
             for port in ready_ports
                 cons = getportconnections(model, id, port; direction = :output)
                 for con in cons
-                    #  Помечаем :dirty потомка И весь его конус вниз по обычным ребрам (данные в буферах не трогаем)
+                    #  Помечаем :dirty потомка И весь его конус вниз по обычным рёбрам (данные в буферах не трогаем)
                     mark_dirty_downstream!(model, con.input_id)
                     # добавляем только если нет в очереди
                     if !(con.input_id in queued)

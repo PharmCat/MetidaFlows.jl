@@ -270,3 +270,5 @@ end
 end
 
 end # @testset "СЕМАНТИКА ИСПОЛНЕНИЯ"
+
+include(joinpath(TEST_DIR, "semantics_stop.jl"))

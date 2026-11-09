@@ -630,6 +630,52 @@ count as a failure (`:failed` and the three `:invalid_*`) and which do not.
 recomputed, whether because an ancestor failed, because a gate took the other
 branch, or because a cyclic workflow finished its last turn.
 
+### Stopping a run early
+
+A node can end the run itself, with [`request_stop!`](@ref), when it knows
+there is nothing left worth computing — a search that found its answer, a
+check that failed a precondition:
+
+```julia
+function MetidaFlows.execute_unsafe!(n::DataNode{Found})
+    setdata!(n, :answer, getinputdata(n, :in))
+    request_stop!(n)
+    return [:answer]
+end
+```
+
+What the node publishes is published as usual — the answer travels out through
+a `:terminal` port in the same execution, and its children's buffers are
+filled. What changes is that nothing more is executed: `ABW` stops serving the
+queue, `DAW` leaves the traversal, and everything not reached ends the run
+`:dirty`. A stop is **not** a failure, so [`failed_nodes`](@ref) stays empty
+and `strict` does not raise; the scheduler appends an `:info` record to
+`model.log` naming the node, and afterwards the node itself still answers
+[`isstoprequested`](@ref), so `[id for (id, n) in w.nodes if
+isstoprequested(n)]` says who stopped it.
+
+**How much work this saves differs between the schedulers**, and the
+difference is worth knowing before relying on it:
+
+* in `ABW` the queue is served in the order producers finish, so a node that
+  is reached early stops a great deal — on a stand of five independent
+  branches, four of them ten nodes deep, stopping on the short branch leaves
+  the overwhelming majority of the work undone;
+* in `DAW` the order is topological and **not yours to choose**, so how much
+  is saved is *unspecified*. An independent branch may sit entirely before the
+  node that stops the run, in which case its work is already done. On the same
+  five-branch stand one Julia version executed one of the forty-one work nodes
+  before stopping and another executed all forty-one — the traversal order
+  follows `makegraph`, which walks dictionaries. The only saving guaranteed by
+  the graph is what lies **downstream** of the stopping node. For a search,
+  use `ABW`.
+
+The flag lives in the node's [`NodeState`](@ref) and [`reset!`](@ref) clears
+it, so `:full` and `:soft` both start clean. `reset_mode = :none` does not call
+`reset!` at all, so a stop requested by an earlier run is still set and the
+next run ends on that node again — clear it with `empty!(node.state)` if that
+is not what you want.
+
 ### Error routing with `:error` ports
 
 All of the above is what happens to a failure the node did **not** anticipate.

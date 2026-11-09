@@ -126,17 +126,23 @@ end
     @test isempty(st.ready_ports)
     @test st.execution_id == 0
     @test isempty(st.log)
+    @test st.stop === false
 
     # AbstractNodeFields даёт словарный доступ по именам полей.
-    @test keys(st) == (:exec_n, :ready_ports, :execution_id, :log)
+    @test keys(st) == (:exec_n, :ready_ports, :execution_id, :log, :stop)
     @test st[:exec_n] == 0
     st[:exec_n] = 3
     @test st[:exec_n] == 3
     push!(st[:ready_ports], :x)
 
+    # Признак остановки доступен и через поле, и через getindex.
+    st[:stop] = true
+    @test isstoprequested(DataNode(ConstNode, spec_const(); state = st))
+
     # empty! возвращает состояние к исходному виду.
     empty!(st)
     @test st[:exec_n] == 0
+    @test st[:stop] === false
     @test isempty(st[:ready_ports])
     @test st[:execution_id] == 0
     @test isempty(st[:log])
