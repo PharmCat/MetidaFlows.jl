@@ -227,10 +227,18 @@ function getportconnections(model::Workflow, id::Int, label::Symbol; direction =
 end
 
 #  Ищем родителей (входящие соединения ноды)
+
 """
     get_parents(model::Workflow, id::Int)
 
-Return parents - id vector
+Get parents (incoming connections of the node). Returns Vector of Tuple
+(input_port, parent_id) for each incoming connection - one entry per
+connection, so a node reached through several ports appears several times.
+
+An unknown `id` gives an empty vector.
+
+See also [`get_children`](@ref), which returns triples
+(output_port, child_id, input_port).
 """
 function get_parents(model::Workflow, id::Int)
     v = Vector{Tuple{Symbol, Int}}()

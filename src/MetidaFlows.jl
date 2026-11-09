@@ -776,6 +776,7 @@ function check_connection_validity(model, c::NodeConnection; throw_error::Bool =
     out_type <: in_type || (throw_error ? error("Type mismatch") : return false)
     return true
 end
+
 """
     add_connection!(model::Workflow, c::NodeConnection)
     add_connection!(model::Workflow, id_out::Int, port_out::Symbol, id_in::Int, port_in::Symbol)
@@ -824,11 +825,14 @@ function refreshind!(model::Workflow)
         push!(get!(model.incoming, c.input_id, Int[]), k)
         push!(get!(model.outgoing, c.output_id, Int[]), k)
     end
+    # sort! не косметика
     for v in values(model.incoming); sort!(v); end
     for v in values(model.outgoing); sort!(v); end
   
     return model
 end
+
+
 """
     delete_connection!(model::Workflow, id::Int)
 
@@ -922,25 +926,34 @@ function delete_node!(model::Workflow, id::Int)
 end
 
 
+
 """
     reset!(model::Workflow; soft::Bool = false)
- 
+
 Invalidate the whole workflow.
- 
+
 Zeroes the execution counter `exec_n` of every node, then applies
 [`mark_dirty!`](@ref) to each of them, forwarding `soft`:
- 
+
 - `soft = false` (default): statuses become `:dirty`, cached output data and
-  `ready_ports` are dropped;
-- `soft = true`: only statuses are reset, cached output data survives.
- 
+  `ready_ports` are dropped, and the buffers of `:feedback` input ports are
+  cleared;
+- `soft = true`: only statuses are reset; cached output data and the feedback
+  buffers survive.
+
+Clearing the feedback buffers is what makes a full reset a full reset for a
+cyclic workflow: those buffers hold the state of the last turn, and a loop head
+that still finds it there resumes the previous run instead of starting a new
+one. `soft = true` keeps them on purpose - that is how state is carried between
+[`scheduler!`](@ref) calls.
+
 This is the only place where `exec_n` is zeroed for the whole workflow, so the
 counter measures work done since the last `reset!` rather than since the last
 invalidation.
- 
-Node settings, input buffers and execution logs are kept in both cases - use
-`reset!(node)` for a full per-node reset.
- 
+
+Node settings, the buffers of `:normal` input ports and execution logs are kept
+in both cases - use `reset!(node)` for a full per-node reset.
+
 # Returns
 The workflow.
 """
@@ -948,6 +961,13 @@ function reset!(model::Workflow; soft::Bool = false)
     for (k, node) in model.nodes
         node.state.exec_n = 0
         mark_dirty!(node, soft = soft)
+        # Полный сброс обязан снять состояние цикла
+        if !soft
+            for ps in node.spec.input_ports
+                ps.kind == :feedback || continue
+                empty!(node.input_buffer[ps.label])
+            end
+        end
     end
     model
 end
@@ -1051,6 +1071,48 @@ function invalidate_downstream!(model::Workflow, id::Int)
     end
     
 end
+
+"""
+    mark_dirty_downstream!(model::Workflow, id::Int)
+
+Mark the node and everything downstream of it `:dirty`, following **`:normal`**
+edges only.
+
+Unlike [`invalidate_downstream!`](@ref) this touches nothing but the statuses:
+cached output data and input buffers are left in place, because a cyclic
+workflow carries its loop state in those buffers.
+
+Used by [`scheduler!`](@ref) for an [`ABW`](@ref) workflow after a node has
+published. Marking the whole cone - and not only the direct children - is what
+makes a turn independent of the order in which the connections were created:
+[`isready`](@ref) then holds a node back until every one of its `:normal`
+ancestors has been recomputed during this turn.
+
+A connection entering a port with `kind = :feedback` is not followed: a
+feedback edge means "next turn", so invalidation must not propagate through it.
+
+The walk stops at nodes that are already `:dirty`, which bounds the total work
+of one turn and terminates inside a cycle. It is iterative, so graph depth
+cannot overflow the stack.
+"""
+function mark_dirty_downstream!(model::Workflow, id::Int)
+    stack = Int[id]
+    while !isempty(stack)
+        nid  = pop!(stack)
+        node = getnode(model, nid)
+        getstatus(node) == :dirty && continue
+        setstatus!(node, :dirty)
+        for con_id in get(model.outgoing, nid, Int[])
+            con   = model.connections[con_id]
+            child = getnode(model, con.input_id)
+            getportspec(child, con.input_port, :input).kind == :feedback && continue
+            push!(stack, con.input_id)
+        end
+    end
+    return model
+end
+
+
 """
     invalidate_buffer!(node::AbstractDataNode, l::Symbol, con::Int)
 

@@ -79,15 +79,23 @@ several times during one call.
 3. Pop a node and execute it when [`isready`](@ref) reports that every
    producer connected through a `:normal` port is `:clean`; otherwise drop it -
    a producer finishing later re-queues it.
-4. For every port the execution produced, mark each child `:dirty` and enqueue
-   it.
+4. For every port the execution produced, mark the child **and everything
+   downstream of it** `:dirty` - see [`mark_dirty_downstream!`](@ref) - and
+   enqueue the child.
  
 # Arguments
-- `reset_mode`: `:full` (default) invalidates every node via [`reset!`](@ref)
-  and drops cached output data; `:soft` only marks nodes `:dirty` and keeps
-  the cache, which is how state is carried between runs; `:none` leaves
-  statuses untouched, so `:clean` nodes are not recomputed. Any other value
-  raises an error.
+- `reset_mode`: `:full` (default) invalidates every node via [`reset!`](@ref),
+  drops cached output data and **clears the buffers of `:feedback` ports**, so
+  a cyclic workflow starts a new run instead of resuming the previous one;
+  `:soft` only marks nodes `:dirty` and keeps both the cache and the loop
+  state, which is how state is carried between runs; `:none` leaves statuses
+  untouched, so `:clean` nodes are not recomputed. Any other value raises an
+  error.
+
+  `:none` is not a no-op on a cyclic workflow. [`execute!`](@ref) returns the
+  stored `ready_ports` of a `:clean` node, step 4 propagates from them, and the
+  children recompute - on the buffers left over from the previous run. Use
+  `:soft` to continue a loop and `:full` to start one.
 - `maxiter`: maximum number of scheduler iterations before aborting execution.
   For a cyclic workflow this is the backstop against a loop that never
   converges.
@@ -103,7 +111,18 @@ A cycle must be closed by a connection entering a port declared with
   cycle has a defined entry point;
 - step 4 marks children `:dirty` **unconditionally**, so a node that already
   ran during this call runs again instead of short-circuiting on `:clean`
-  inside [`execute!`](@ref).
+  inside [`execute!`](@ref);
+- step 4 marks the whole downstream cone, not only the direct children, so a
+  node is held back until every one of its `:normal` ancestors has been
+  recomputed during the turn. Without it the result would depend on the order
+  in which the connections were created, because that order is the order the
+  queue is served in.
+
+One consequence of marking the cone: a node below a branch that was not taken
+during the last turn - everything after a gate that closed the loop, for
+instance - ends the run `:dirty` rather than `:clean`, because it genuinely was
+not recomputed. "Every node is `:clean`" is therefore not a completion signal
+for a cyclic workflow.
  
 The loop ends when a node publishes nothing that has a consumer - by returning
 an empty vector of ready ports, or by publishing only unconnected or
@@ -152,7 +171,9 @@ function scheduler!(model::Workflow{ABW}; reset_mode::Symbol = :full, maxiter = 
     iter = 0
     while length(queue) > 0
         if iter > maxiter
-            error("max iterations reached")
+            error("max iterations reached ($(maxiter)): $(length(queue)) node(s) still queued, " *
+                  "next is node $(first(queue)). Raise `maxiter` for a long iteration, " *
+                  "or check that some node stops publishing into the loop.")
         end
         id = popfirst!(queue)
         delete!(queued, id)
@@ -165,9 +186,8 @@ function scheduler!(model::Workflow{ABW}; reset_mode::Symbol = :full, maxiter = 
             for port in ready_ports
                 cons = getportconnections(model, id, port; direction = :output)
                 for con in cons
-                    child = getnode(model, con.input_id)
-                    #  отмечаем потомки  dirty, чтобы он был выполнен далее (данные в буфере не удаляем)
-                    setstatus!(child, :dirty) # !!! crytical - otherwise child will not be executed if it was already clean                             
+                    #  Помечаем :dirty потомка И весь его конус вниз по обычным рёбрам (данные в буферах не трогаем)
+                    mark_dirty_downstream!(model, con.input_id)
                     # добавляем только если нет в очереди
                     if !(con.input_id in queued)
                         push!(queue, con.input_id)

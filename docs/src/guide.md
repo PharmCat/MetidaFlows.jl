@@ -641,17 +641,70 @@ state = previous === nothing ?
 
 A workflow that cannot be seeded is not an error: the queue is empty, the loop
 body is never reached, and [`scheduler!`](@ref) returns `true` having executed
-nothing. The symptom is that the nodes stay `:dirty`:
+nothing.
+
+Check the execution counters rather than the statuses:
 
 ```julia
 scheduler!(w)
 
-stalled = [id for (id, node) in w.nodes if getstatus(node) != :clean]
+idle = [id for (id, node) in w.nodes if getstate(node, :exec_n) == 0]
 ```
 
-If `stalled` contains the whole loop, check that some node upstream of it has
-no input ports.
+If `idle` contains the whole loop, check that some node upstream of it has no
+input ports. The same check catches a different mistake: a node that has
+normal inputs but no incoming connection never becomes ready either, and never
+runs.
 
-The same check is worth running after any `ABW` run for another reason: a node
-that has normal inputs but no incoming connection never becomes ready either,
-and stays `:dirty` in exactly the same way.
+`exec_n` is the right signal here and `getstatus` is not. In a cyclic
+workflow a finished run legitimately leaves part of the graph `:dirty` - see
+*Rule 3* - so "not `:clean`" does not mean "never ran".
+
+---
+
+## Rule 3. Inside a turn, a node waits for all of its normal ancestors
+
+The `ABW` scheduler serves a FIFO queue, and [`isready`](@ref) lets a node run
+once every producer on a `:normal` port is `:clean`. On its own that is not
+enough for a loop: at the start of a turn the whole body is still `:clean`
+**from the previous turn**, so a node could run on values that are one turn old.
+
+What prevents it is step 4 of the scheduler. When a node publishes, the
+scheduler marks `:dirty` not only its direct children but **everything
+downstream of them**, following `:normal` edges
+([`mark_dirty_downstream!`](@ref)). A node is therefore held back until every
+one of its `:normal` ancestors has been recomputed during this turn.
+
+This matters because without it the result would depend on the order in which
+the connections were created. `model.outgoing` keeps connection ids in
+insertion order, and that is the order the queue is served in, so a node with
+a short edge from the loop head and a longer path to the same value could be
+served before the long path caught up. Two workflows with identical nodes and
+identical edges would then behave differently.
+
+So you are free to wire a loop body the way the algorithm reads: each node
+takes the inputs it needs, from whatever depth. There is no need to equalize
+path lengths or to thread values through intermediate nodes.
+
+A feedback edge is never followed by this invalidation: it means "next turn",
+so marking through it would restart the body from the middle of a turn.
+
+### Two consequences worth knowing
+
+**A finished cyclic run leaves part of the graph `:dirty`.** On the last pass
+the loop head marks the body dirty as usual, the gate then publishes only a
+terminal port, and the body is never recomputed — correctly, because there was
+nothing left to compute. So for a cyclic workflow "every node is `:clean`" is
+not a completion signal; use `exec_n`, or the data on the terminal port.
+
+**A full reset clears the loop state.** [`reset!`](@ref) with `soft = false`
+— which is what `reset_mode = :full` uses — empties the buffers of `:feedback`
+ports along with the cached output data. Without that a second
+[`scheduler!`](@ref) call would find the last turn's state in the feedback
+buffer and resume the previous run instead of starting a new one. `:soft` keeps
+those buffers on purpose: that is how state is carried between runs.
+
+`reset_mode = :none` is a third thing again, and not a no-op on a cycle:
+[`execute!`](@ref) returns the stored `ready_ports` of a `:clean` node, the
+scheduler propagates from them, and the children recompute on whatever the
+buffers still hold. Use `:soft` to continue a loop and `:full` to start one.
