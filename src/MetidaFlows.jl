@@ -43,6 +43,7 @@ execute!,
 getstatus,
 getdata,
 getinputdata,
+getmeta,
 getinputmeta,
 isnodeexist,
 isportexist
@@ -68,7 +69,7 @@ settings_schema,
 node_schema,
 
 ismetasource,
-exportmeta_unsafe,
+getmeta_unsafe,
 =#
 #
 """
@@ -391,6 +392,7 @@ struct NodeSpec
         NodeSpec(name, input_ports, output_ports, Symbol[])
     end
 end
+
 #
 """
     NodeProperties(id, status, position)
@@ -466,7 +468,7 @@ struct DataNode{T <: AbstractNodeType, SettingsT, DataT, StateT, BufferT} <: Abs
     state::StateT         # NodeState by default
     # input_buffer[port_label][connection_id] = data
     input_buffer::Dict{Symbol, Dict{Int, BufferT}} # Dict{Symbol, Any}() by default
-    function DataNode(type::Type{T}, properties, spec, settings::SettingsT, data::DataT, state::StateT, input_buffer::Dict{Symbol, Dict{Int, BufferT}} ) where T <: AbstractNodeType where SettingsT where DataT  where StateT  where BufferT
+    function DataNode(type::Type{T}, properties::NodeProperties, spec::NodeSpec, settings::SettingsT, data::DataT, state::StateT, input_buffer::Dict{Symbol, Dict{Int, BufferT}} ) where T <: AbstractNodeType where SettingsT where DataT  where StateT  where BufferT
         for k in keys(input_buffer)
             isportinspec(k, spec, :input) || error("Input buffer key $k doesn't match any input port in node specification")
         end
@@ -477,12 +479,48 @@ struct DataNode{T <: AbstractNodeType, SettingsT, DataT, StateT, BufferT} <: Abs
         end
         new{T, SettingsT, DataT, StateT, BufferT}(properties, spec, settings, data, state, input_buffer)
     end
-    function DataNode(type::Type, id, status, position, spec; settings = Dict{Symbol, Any}(), data = Dict{Symbol, Any}(), state = NodeState(), input_buffer = Dict{Symbol, Dict{Int, Any}}())
+    function DataNode(type::Type, id, status, position, spec::NodeSpec; settings = Dict{Symbol, Any}(), data = Dict{Symbol, Any}(), state = NodeState(), input_buffer = Dict{Symbol, Dict{Int, Any}}())
         DataNode(type,  NodeProperties(id, status, position), spec, settings, data, state, input_buffer)
     end
-    function DataNode(type::Type, spec; settings = Dict{Symbol, Any}(), data = Dict{Symbol, Any}(), state = NodeState(), input_buffer = Dict{Symbol, Dict{Int, Any}}())
+    function DataNode(type::Type, properties::NodeProperties, spec::NodeSpec; settings = Dict{Symbol, Any}(), data = Dict{Symbol, Any}(), state = NodeState(), input_buffer = Dict{Symbol, Dict{Int, Any}}())
+        DataNode(type,  properties, spec, settings, data, state, input_buffer)
+    end
+    function DataNode(type::Type, spec::NodeSpec; settings = Dict{Symbol, Any}(), data = Dict{Symbol, Any}(), state = NodeState(), input_buffer = Dict{Symbol, Dict{Int, Any}}())
         DataNode(type,  NodeProperties(), spec, settings, data, state, input_buffer)
     end
+end
+
+const NODE_REGISTER = Dict{String, Tuple{Type, NodeSpec}}()
+
+function register_node!(node::DataNode{T}; overwrite = false, skipmode = false) where T
+    typestr = nodetypestr(node)
+    if isregistered(node) && !overwrite 
+        if skipmode
+            return nothing
+        else
+            error("Node $(typestr) alredy exists, use `overwrite = true` to overwrite, or `skipmode = true` to skip existed nodes")
+        end
+    end
+    NODE_REGISTER[typestr] = (T, node.spec)
+    typestr
+end
+function unregister_node!(node::T) where T <: DataNode
+    typestr = nodetypestr(node)
+    deleteat!(NODE_REGISTER, typestr)
+end
+function getregnodeinfo(typestr::String)
+    if !isregistered(typestr) error("Node not registered, use `register_node!` before deserialization.") end
+    NODE_REGISTER[typestr]
+end
+function isregistered(node::T) where T <: DataNode
+    return haskey(NODE_REGISTER, nodetypestr(node))
+end
+function isregistered(typestr::String)
+    return haskey(NODE_REGISTER, typestr)
+end
+function unregister_all!()
+    empty!(NODE_REGISTER)
+    true
 end
 
 #=
@@ -513,9 +551,9 @@ Fields:
 mutable struct Workflow{T <: WorkFlowType}
     id::Int                      # model ID
     name::String                 # Workflow name
-    n_iter::Int                  # 
+    n_iter::Int                  # node iterator
     nodes::Dict{Int, DataNode}   # {Node id, Node}
-    c_iter::Int
+    c_iter::Int                            # connection iterator
     connections::Dict{Int, NodeConnection} # {Connection id, Connection}
     incoming::Dict{Int, Vector{Int}} # {Node id, [connection ids]} 
     outgoing::Dict{Int, Vector{Int}} # {Node id, [connection ids]}
@@ -542,6 +580,22 @@ function Workflow(id::Int; type::Symbol = :DAW)
         error("Unknown workflow type: $(type) (expected :DAW or :ABW)")
     end
 end
+
+workflowtypestr(::Workflow{DAW}) = "DAW"
+workflowtypestr(::Workflow{ABW}) = "ABW"
+
+function register_node!(model::Workflow; skipmode = false)
+    names = String[]
+    for (k, node) in model.nodes
+        name = node.spec.name
+        rn   = register_node!(node; skipmode = skipmode)
+        if !isnothing(rn) push!(names, rn) end
+    end
+    names
+end
+
+
+#worflowtypestr(::Workflow{:ABW}) = "ABW"
 #
 """
     nodetypestr(node::DataNode{T}) where T
@@ -551,127 +605,27 @@ Return string representation of node type `T`.
 function nodetypestr(::DataNode{T}) where T
     string(T)
 end
-    # --------------------------------------------------------
-    # Basic functions
-    # --------------------------------------------------------
-"""
-    getnode(model::Workflow, id::Int)
 
- Return node by identifier `id`.
-"""
-function getnode(model::Workflow, id::Int)
-    return model.nodes[id]
-end
-"""
-    getconnection(model::Workflow, id::Int)
+# Include get*
+include("getters.jl")
 
-Return connection by identifier `id`.
-"""
-function getconnection(model::Workflow, id::Int)
-    return model.connections[id]
-end
-# --------------------------------------------------------
-# NODE FUNCTIONS
-# --------------------------------------------------------
-"""
-    getid(node::AbstractDataNode) -> Int
+# Include set*
+include("setters.jl")
 
-Return node unique identifier.
-"""
-function getid(node::AbstractDataNode)
-    node.properties.id
-end
-"""
-    getposition(node::AbstractDataNode) -> Tuple{Int,Int}
+# Include execute function
+include("execute.jl")
 
-Return node UI/graph position.
-"""
-function getposition(node::AbstractDataNode)
-    node.properties.position
-end
-"""
-    getstatus(node::AbstractDataNode) -> Symbol
+# Include scheduler!
+include("scheduler.jl")
 
-Return execution status of node.
+# Include show functions
+include("show.jl")
 
-Possible values:
-- `:idle`
-- `:dirty`
-- `:clean`
-- `:executing`
-- `:failed`
-- `:invalid_node`
-- `:invalid_settings`
-- `:invalid_result`
-"""
-function getstatus(node::AbstractDataNode)
-    node.properties.status
-end
-"""
-    setid!(node::AbstractDataNode, id::Int) -> DataNode
+# Include matadata functions
+include("meta.jl")
 
-Set node identifier. Mutates node in-place.
-"""
-function setid!(node::AbstractDataNode, id::Int)
-    node.properties.id = id
-    node
-end
-"""
-    setposition!(node::AbstractDataNode, p::Tuple{Int,Int}) -> DataNode
-
-Set UI/graph position of node.
-"""
-function setposition!(node::AbstractDataNode, p::Tuple{Int, Int})
-    node.properties.position = p
-    node
-end
-"""
-    setstatus!(node::AbstractDataNode, s::Symbol) -> DataNode
-
-Set execution status of node.
-
-This does NOT trigger validation or propagation.
-Pure mutation.
-"""
-function setstatus!(node::AbstractDataNode, s::Symbol)
-    node.properties.status = s
-    node
-end
-"""
-    getstate(node::AbstractDataNode, s::Symbol)
-
-Get value from node execution state.
-"""
-function getstate(node::AbstractDataNode, s::Symbol)
-    node.state[s]
-end
-"""
-    setstate!(node::AbstractDataNode, s::Symbol, v) -> DataNode
-
-Store value in node execution state.
-"""
-function setstate!(node::AbstractDataNode, s::Symbol, v)
-    node.state[s] = v
-    node
-end
-"""
-    setreadyports!(node::AbstractDataNode, v)
-
-Set ready output ports in node execution state.
-
-Overwrite the `ready_ports` execution state with `v`, reusing the existing
-vector. Called by [`execute!`](@ref) with the value returned by
-[`execute_unsafe!`](@ref).
-
-"""
-function setreadyports!(node::AbstractDataNode, v)
-    portvec = getstate(node, :ready_ports)
-    resize!(portvec, length(v))
-    @inbounds for i in eachindex(v)
-        portvec[i] = v[i]
-    end
-    node
-end
+# Include schemas and serialization functions
+include("schemas_serialization.jl")
 
 """
     haveinputs(node::AbstractDataNode)
@@ -689,54 +643,6 @@ function haveinputs(node::AbstractDataNode)
     return !isempty(node.spec.input_ports)
 end
 
-"""
-    getportnumber(node::AbstractDataNode, l::Symbol, direction::Symbol) 
-
-Return index of port by label and direction (`:input` or `:output`).
-"""
-function getportnumber(node::AbstractDataNode, l::Symbol, direction::Symbol) 
-    return node.spec.portmap[(direction, l)]
-end
-
-"""
-    getporttype(node::AbstractDataNode, i::Int, direction::Symbol) 
-
-Return Julia datatype of port by index and direction.
-"""
-function getporttype(node::AbstractDataNode, i::Int, direction::Symbol) 
-    if direction == :input
-        if i < 1 || i > length(node.spec.input_ports) error("Wrong port number") end
-        return node.spec.input_ports[i].datatype
-    elseif direction == :output
-        if i < 1 || i > length(node.spec.output_ports) error("Wrong port number") end
-        return node.spec.output_ports[i].datatype
-    end
-    error("Wrong port direction (input/output)")
-end
-"""
-    getporttype(node, label, direction) -> Type
-
-Return Julia datatype of port by label.
-"""
-function getporttype(node::AbstractDataNode, l::Symbol, direction::Symbol) 
-    i = getportnumber(node, l, direction) 
-    return getporttype(node, i, direction) 
-end
-
-"""
-    getportspec(node::AbstractDataNode, l::Symbol, direction::Symbol)
-
-Return the [`PortSpec`](@ref) of the port labelled `l` (`direction` is `:input` or `:output`).
-"""
-function  getportspec(node::AbstractDataNode, l::Symbol, direction::Symbol)
-    i = getportnumber(node, l, direction) 
-    if direction == :input
-        return node.spec.input_ports[i]
-    elseif direction == :output
-        return node.spec.output_ports[i]
-    end
-    error("Wrong direction")
-end
 """
     isportexist(node::AbstractDataNode, port::Symbol, direction::Symbol = :any)
 
@@ -799,107 +705,6 @@ function ismultiport(ps::PortSpec{SinglePort})
     return false
 end
 
-
-"""
-    getdata(node::AbstractDataNode, l::Symbol)
- 
-Return the output data stored under output port label `l`.
- 
-Returns `nothing` when the port is declared but holds no value yet - for
-instance after [`mark_dirty!`](@ref). Raises an error when `l` is not an
-output port of the node specification.
-"""
-function getdata(node::AbstractDataNode, l::Symbol)
-    if isportexist(node, l, :output) 
-        return get(node.data, l, nothing)
-    end
-    error("Wrong port label, available ports: $(collect(keys(node.data)))")
-end
-"""
-    getdata(model::Workflow, id::Int, l::Symbol)
- 
-Return the output data stored under output port label `l` of node `id`.
- 
-Raises a `KeyError` for an unknown node id; see the two-argument method for
-the port lookup rules.
-"""
-function getdata(model::Workflow, id::Int, l::Symbol)
-    node = getnode(model, id)
-    return getdata(node, l)
-end
-"""
-    setdata!(node::AbstractDataNode, l::Symbol, d) 
-
-Store `d` as the value of output port `l` and return `true`.
- 
-Raises an error when `l` is not an output port of the node specification.
-This is what a node implementation calls from [`execute_unsafe!`](@ref)
-before returning the list of ready ports.
-"""
-function setdata!(node::AbstractDataNode, l::Symbol, d) 
-    if isportexist(node, l, :output) 
-        node.data[l] = d
-        return true
-    end
-    error("Wrong port label")
-end
-
-"""
-    getinputdata(node::AbstractDataNode, l::Symbol)
-    getinputdata(node::AbstractDataNode, l::Symbol, con::Int)
- 
-Read value from node input buffer.
- 
-The two-argument form depends on the port arity:
- 
-- [`SinglePort`](@ref): returns the buffered value, or `nothing` when the
-  buffer is empty; more than one buffered value is an error.
-- [`MultiPort`](@ref): returns the whole `Dict{connection id, value}` buffer.
- 
-The three-argument form returns the value written by connection `con`, or
-`nothing` when that connection has nothing buffered.
- 
-Both forms raise an error when `l` is not an input port of the node
-specification, and neither consumes or clears the buffer.
-"""
-function getinputdata(node::AbstractDataNode, l::Symbol) 
-    if isportexist(node, l, :input)
-        port = getportspec(node, l, :input)
-        return _getinputdata(node, port)
-    end
-    error("Wrong port label")
-end
-function getinputdata(node::AbstractDataNode, l::Symbol, con::Int) 
-    if isportexist(node, l, :input)   
-        return get(node.input_buffer[l], con, nothing)
-    end
-    error("Wrong port label")
-end
-function _getinputdata(node::AbstractDataNode, port::PortSpec{SinglePort})
-    len = length(node.input_buffer[port.label])
-    if len == 1
-        return first(node.input_buffer[port.label])[2]
-    elseif len == 0
-        return nothing
-    else
-        error("Multiple connections in single port")
-    end
-end
-function _getinputdata(node::AbstractDataNode, port::PortSpec{MultiPort})
-    return node.input_buffer[port.label]
-end
-"""
-    setinputbuffer!(node::AbstractDataNode, label::Symbol, connection_id::Int, value)
-
-Write value into node input buffer.
-
-Used by workflow engine to propagate outputs between nodes.
-"""
-function setinputbuffer!(node::AbstractDataNode, l::Symbol, con::Int, d)
-    # input_buffer[port_label][connection_id] = data
-    node.input_buffer[l][con] = d
-    node
-end
 # Find connections by node id
 """
     find_connections(model::Workflow, id::Int)
@@ -914,39 +719,6 @@ function find_connections(model::Workflow, id::Int)
     end
     if haskey(model.outgoing, id)
         append!(v, model.outgoing[id])
-    end
-    return v
-end
-"""
-    getportconnections(model::Workflow, id::Int, label::Symbol; direction = :both)
-
-Return all connections attached to a specific port.
-
-Direction:
-- `:input`
-- `:output`
-- `:both`
-"""
-function getportconnections(model::Workflow, id::Int, label::Symbol; direction = :both)
-    # ADD MULTIPLE OUTPUT CONNECTION SUPPORT
-    v = NodeConnection[]
-    direction in (:input, :output, :both) || error("wrong direction")
-    node = getnode(model, id)
-    if direction == :input || direction == :both
-        for con_id in get(model.incoming, id, Int[])
-            con = getconnection(model, con_id)
-            if con.input_port == label 
-                push!(v, con) 
-            end
-        end
-    end
-    if direction == :output || direction == :both
-        for con_id in get(model.outgoing, id, Int[])
-            con = getconnection(model, con_id)
-            if con.output_port == label 
-                push!(v, con) 
-            end
-        end
     end
     return v
 end
@@ -1038,6 +810,18 @@ function add_connection!(model::Workflow, id_out::Int, port_out::Symbol, id_in::
     return add_connection!(model, connection)
 end
 
+function refreshind!(model::Workflow)
+    empty!(model.incoming)
+    empty!(model.outgoing)
+    for (k,c) in model.connections
+        push!(get!(model.incoming, c.input_id, Int[]), k)
+        push!(get!(model.outgoing, c.output_id, Int[]), k)
+    end
+    for v in values(model.incoming); sort!(v); end
+    for v in values(model.outgoing); sort!(v); end
+  
+    return model
+end
 """
     delete_connection!(model::Workflow, id::Int)
 
@@ -1129,41 +913,7 @@ function delete_node!(model::Workflow, id::Int)
     end
     return false
 end
-    #  Ищем родителей (входящие соединения ноды)
-"""
-    get_parents(model::Workflow, id::Int)
 
-Return parents - id vector
-"""
-function get_parents(model::Workflow, id::Int)
-    v = Vector{Tuple{Symbol, Int}}()
-    if haskey(model.nodes, id) 
-        # Ищем все входящие соединения
-        for cid in get(model.incoming, id, Int[])
-            conn = model.connections[cid]
-            push!(v, (conn.input_port, conn.output_id))
-        end
-    end
-    return v
-end
-    #  Ищем детей (исходящие соединения ноды)
-"""
-    get_children(model::Workflow, id::Int)
-
-Get children. Returns Vector of Tuple (output_port, child_id, input_port) for each child connection.
-"""
-function get_children(model::Workflow, id::Int) 
-    v = Tuple{Symbol, Int, Symbol}[]
-    for cid in get(model.outgoing, id, Int[])
-        conn = model.connections[cid]
-        push!(v,
-            (conn.output_port,
-            conn.input_id,
-            conn.input_port)
-        )
-    end
-    return v
-end
 
 """
     reset!(model::Workflow; soft::Bool = false)
@@ -1304,48 +1054,7 @@ function invalidate_buffer!(node::AbstractDataNode, l::Symbol, con::Int)
     delete!(node.input_buffer[l], con)
     return node
 end
-"""
-    setsettings!(model::Workflow, id::Int, settings::Dict{Symbol, <: Any})
- 
-Apply new node settings and invalidate dependent nodes.
- 
-Settings are applied using [`setsettings_unsafe!`](@ref), after which the
-target node and all downstream nodes are invalidated via
-[`invalidate_downstream!`](@ref).
- 
-# Notes
-- This function is the safe high-level entry point for mutating node
-  configuration inside a workflow.
-- Settings are **merged**: only the keys present in `settings` are
-  overwritten, the rest are kept.
- 
-# Returns
-The node.
-"""
-function setsettings!(model::Workflow, id::Int, settings::Dict{Symbol, <: Any})
-    node = getnode(model, id)
-    setsettings_unsafe!(node, settings)
-    invalidate_downstream!(model, id)
-    node
-end
-"""
-    setsettings_unsafe!(node::AbstractDataNode, settings::Dict{Symbol, <: Any})
 
-Direct mutation of node settings without invalidation. Can be re-implemented for every node type.
-
-Default implementation copies all provided key-value pairs into `node.settings`.
-
-# Warning
-This function does NOT invalidate cached execution results or downstream nodes.
-
-Use [`setsettings!`](@ref) for normal workflow operation
-"""
-function setsettings_unsafe!(node::AbstractDataNode, settings::Dict{Symbol, <: Any})
-    for (k, v) in settings
-        node.settings[k] = v
-    end
-    node
-end
 """
     isready(model::Workflow, id::Int)
  
@@ -1513,165 +1222,6 @@ function push_buffer!(model::Workflow, id::Int, ready_ports::Vector{Symbol})
     return model
 end
 
-# Main executing
-# :clean, :dirty, :executing, :failed
-"""
-    execute!(model::Workflow, id::Int; settings::ExecuteSettings = ExecuteSettings(),
-             throw_error::Bool = false)
- 
-Execute workflow node.
- 
-Main workflow execution entry point.
- 
-# Execution Stages
-1. Initialize per-run execution state and logs.
-2. Optionally detect recursive cyclic execution.
-3. Skip execution for nodes already marked `:clean`.
-4. Mark node as `:executing`.
-5. Optionally execute upstream dependencies recursively.
-6. Validate node structure and execution readiness.
-7. Validate node settings.
-8. Increment `exec_n` and execute node implementation via [`execute_unsafe!`](@ref).
-9. Validate execution result.
-10. Store execution state (`ready_ports`).
-11. Propagate outputs downstream through input buffers.
-12. Optionally invalidate downstream nodes.
-13. Mark node as `:clean`.
- 
-# Arguments
-- `settings`: per-call execution flags, see [`ExecuteSettings`](@ref).
-- `throw_error`: rethrow an exception raised by [`execute_unsafe!`](@ref)
-  after the node status and the log record have been written. With the
-  default `false` the error is swallowed and reported through the status and
-  `model.log`.
- 
-# Returns
-Vector of output port labels (`Vector{Symbol}`) produced during execution, or
-an empty vector when the node was skipped, rejected by validation or failed.
- 
-The vector is not copied: for a `:clean` node it is the stored `ready_ports`
-state, and otherwise it is whatever [`execute_unsafe!`](@ref) returned. Treat
-the result as read-only.
- 
-# Status after the call
-`:clean` on success, otherwise `:invalid_node`, `:invalid_settings`,
-`:invalid_result` or `:failed`.
- 
-# Example
-```julia
-execute!(w, id)                                                    # parents pulled in
-execute!(w, id; settings = ExecuteSettings(; execute_upstream = false))
-execute!(w, id; throw_error = true)
-```
-"""
-function execute!(model::Workflow, id::Int; settings::ExecuteSettings = ExecuteSettings(), throw_error::Bool = false) 
-    node =  getnode(model, id)
-
-    if getstate(node, :execution_id) != model.run_id
-        empty!(getstate(node, :log))
-        setstate!(node, :execution_id, model.run_id)
-    end
-
-    if settings.check_cyclic
-        # Это обнаружит цикл только при повторном заходе в тот же узел в рамках одного вызова. 
-        # Не является настоящей защитой от циклов (реализовано в scheduler!)
-        if getstatus(node) == :executing
-            @warn "Ring detected"
-            return Symbol[]
-        end
-    end
-    #
-    if getstatus(node) == :clean
-        # clean node - no need for executing
-        return getstate(node, :ready_ports)
-    end
-    #
-    # need to catch errors...
-    setstatus!(node, :executing)
-    # Check and execute parent nodes
-    # execute_upstream should bu use carefully
-    if settings.execute_upstream
-        if length(model.nodes) > 1000 @warn "A large number of nodes (nodes count = $(length(model.nodes))) can cause stack overflow." end
-        parents = get_parents(model, id)
-        for (k,p) in parents
-            execute!(model, p; settings = settings)
-        end
-    end
-    # Check is valid 
-    if !execution_node_validation(node, settings.check_input_buffer)
-        setstatus!(node, :invalid_node)
-        return Symbol[]
-    end
-    if !validate_settings(node)
-        setstatus!(node, :invalid_settings)
-        return Symbol[]
-    end
-    # Execute node
-    ready_ports = try 
-        node.state.exec_n += 1
-        execute_unsafe!(node)
-    catch e
-        setstatus!(node, :failed)
-        # Log error
-        push!(model.log, LogMsg(:error, "Node (id: $(getid(node))) execution failed: $(e)"))
-        if throw_error
-            rethrow(e)
-        end
-        return Symbol[]
-    end
-    # Post-execution validation
-    if !validate_result(node)
-        setstatus!(node, :invalid_result)
-        return Symbol[]
-    end
-    # Save state ready_ports
-    setreadyports!(node, ready_ports)
-    # push outputs for each ready port
-    push_buffer!(model, id)
-    # Invalidate children
-    if settings.invalidate_downstream
-        children = get_children(model, id)
-        for (op, c, ip) in children
-            invalidate_downstream!(model, c)
-        end
-    end
-    #
-    setstatus!(node, :clean)
-    return ready_ports # no probleb wit state because setstatus! copy ready_ports to state
-end
-"""
-    execute_unsafe!(node::AbstractDataNode)
- 
-Low-level node execution interface.
- 
-This function contains node-specific execution logic. The default
-implementation throws an error and must be specialized for every executable
-node type.
- 
-Read inputs with [`getinputdata`](@ref), write results with
-[`setdata!`](@ref) and return the vector of output port labels that were
-produced. That vector is the contract with the engine: it is stored as the
-`ready_ports` state and only connections leaving these ports are refreshed by
-[`push_buffer!`](@ref). Returning a subset of the output ports is allowed.
- 
-# Example
-```julia
-struct Doubler <: AbstractNodeType end
- 
-function MetidaFlows.execute_unsafe!(node::DataNode{Doubler})
-    x = getinputdata(node, :in)
-    setdata!(node, :out, 2x)
-    return [:out]
-end
-```
- 
-# Notes
-Errors raised here are caught by [`execute!`](@ref), which marks the node
-`:failed` and appends an `:error` record to `workflow.log`.
-"""
-function execute_unsafe!(node::AbstractDataNode)
-    error("Node type undefined")
-end
 # --------------------------------------------------------
 # support functions
 # --------------------------------------------------------
@@ -1705,705 +1255,6 @@ function makegraph(model::Workflow)
         add_edge!(g, v.output_id, v.input_id)
     end
     g
-end
-# --------------------------------------------------------
-# Scheduler functions
-# --------------------------------------------------------
-
-"""
-    scheduler!(model::Workflow{DAW}; reset_mode::Symbol = :full,
-               throw_error::Bool = false)
- 
-Execute entire data analysis workflow (DAW) using topological ordering.
- 
-This scheduler is designed for deterministic acyclic data-analysis workflows.
- 
-# Execution Steps
-1. Build workflow graph.
-2. Validate graph acyclicity.
-3. Generate new workflow `run_id`.
-4. Apply `reset_mode`.
-5. Execute nodes in topological order.
- 
-# Arguments
-- `reset_mode`: `:full` (default) invalidates every node via [`reset!`](@ref)
-  and drops cached output data; `:soft` only marks nodes `:dirty` and keeps
-  the cache; `:none` leaves statuses untouched, so nodes that are already
-  `:clean` are not recomputed. Any other value raises an error.
-- `throw_error`: forwarded to [`execute!`](@ref); aborts the run on the first
-  node that raises instead of recording the failure.
- 
-# Notes
-- Nodes are executed at most once per scheduler run.
-- Upstream execution and downstream invalidation are disabled
-  because execution order is already guaranteed by topology.
-- Required input ports are enforced (`check_input_buffer` stays on).
-- Cyclic workflows are rejected before execution starts, including cycles
-  closed by a `:feedback` port - see [`makegraph`](@ref). In a `DAW` workflow
-  the only effect of `kind = :feedback` is that the port is exempt from the
-  required-buffer check; there is no delay and no second pass.
- 
-# Returns
-`true` when the traversal completed. This is not a success flag: individual
-nodes may still end up `:failed` or `:invalid_*`, so check [`getstatus`](@ref)
-when it matters.
- 
-# Example
-```julia
-scheduler!(workflow)
-result = getdata(workflow, output_id, :result)
-```
-"""
-function scheduler!(model::Workflow{DAW}; reset_mode::Symbol = :full, throw_error::Bool = false)
-    g = makegraph(model)
-    if is_cyclic(g) error("workflow is cyclic") end
-    if reset_mode ∉ (:full, :soft, :none) error("Wrong reset mode: $reset_mode , only :full, :soft, :none availabel.") end
-    soft_reset = false
-    # change to thread safe
-    model.run_id = rand(UInt64)
-    if reset_mode == :soft soft_reset = true end
-    if reset_mode != :none reset!(model; soft = soft_reset) end
-
-    order = topological_sort(g)
-    for id in order
-        execute!(model, id; settings = ExecuteSettings(;execute_upstream = false, invalidate_downstream = false, check_cyclic = false), throw_error = throw_error) 
-    end
-    return true
-end
-"""
-    scheduler!(model::Workflow{ABW}; reset_mode::Symbol = :full, maxiter = 1000,
-               throw_error::Bool = false, throw_warn::Bool = true)
- 
-Execute workflow using queue-based agent/event scheduling.
- 
-Intended for dynamic, agent-based and **iterative** workflows. Unlike
-[`DAW`](@ref), this scheduler accepts cyclic graphs, and a node may execute
-several times during one call.
- 
-# Execution Steps
-1. Generate a new workflow `run_id` and apply `reset_mode`.
-2. Seed the queue with every node that has no input ports.
-3. Pop a node and execute it when [`isready`](@ref) reports that every
-   producer connected through a `:normal` port is `:clean`; otherwise drop it -
-   a producer finishing later re-queues it.
-4. For every port the execution produced, mark each child `:dirty` and enqueue
-   it.
- 
-# Arguments
-- `reset_mode`: `:full` (default) invalidates every node via [`reset!`](@ref)
-  and drops cached output data; `:soft` only marks nodes `:dirty` and keeps
-  the cache, which is how state is carried between runs; `:none` leaves
-  statuses untouched, so `:clean` nodes are not recomputed. Any other value
-  raises an error.
-- `maxiter`: maximum number of scheduler iterations before aborting execution.
-  For a cyclic workflow this is the backstop against a loop that never
-  converges.
-- `throw_error`: forwarded to [`execute!`](@ref).
-- `throw_warn`: warn when the seed queue is empty. Nothing is executed in that
-  case and the nodes stay `:dirty`, which is otherwise silent.
- 
-# Cycles
-A cycle must be closed by a connection entering a port declared with
-`kind = :feedback`; see [`PortSpec`](@ref). Two properties make the loop run:
- 
-- [`isready`](@ref) does not wait for the producer of a feedback edge, so the
-  cycle has a defined entry point;
-- step 4 marks children `:dirty` **unconditionally**, so a node that already
-  ran during this call runs again instead of short-circuiting on `:clean`
-  inside [`execute!`](@ref).
- 
-The loop ends when a node publishes nothing that has a consumer - by returning
-an empty vector of ready ports, or by publishing only unconnected or
-`:terminal` ports. The queue then drains.
- 
-Every cyclic workflow needs at least one node with **no input ports**: a
-`:feedback` port is still an input port, so a loop on its own is never seeded
-and never starts. See [`haveinputs`](@ref).
- 
-# Notes
-- Nodes are executed with `ExecuteSettings(false)`, so required input ports
-  are **not** enforced here, unlike the [`DAW`](@ref) path.
-- A node with input ports but without incoming connections never becomes
-  ready and stays `:dirty`.
- 
-# Returns
-`true` when the queue is drained.
- 
-# Example
-```julia
-scheduler!(w)                             # full reset, one pass or one loop
-scheduler!(w; reset_mode = :soft)         # keep cached results between runs
-scheduler!(w; maxiter = 10_000)           # long-running iteration
-scheduler!(w; throw_warn = false)         # a deliberately unseeded graph
-```
-"""
-function scheduler!(model::Workflow{ABW}; reset_mode::Symbol = :full, maxiter = 1000, throw_error::Bool = false, throw_warn::Bool = true)
-    if reset_mode ∉ (:full, :soft, :none) error("Wrong reset mode: $reset_mode , only :full, :soft, :none availabel.") end
-    soft_reset = false
-    # change to thread safe
-    model.run_id = rand(UInt64)
-    if reset_mode == :soft soft_reset = true end
-    if reset_mode != :none reset!(model; soft = soft_reset) end
-
-    queued = Set{Int}() # Ноды которые уже добавлены - не реализовано
-    queue = Int[]
-    #
-    for (id, node) in model.nodes
-        if !haveinputs(node)
-            push!(queue, id)
-            push!(queued, id)
-        end
-    end
-    if throw_warn && length(queue) == 0 @warn "No nodes in queue..." end
-    # execute
-    iter = 0
-    while length(queue) > 0
-        if iter > maxiter
-            error("max iterations reached")
-        end
-        id = popfirst!(queue)
-        delete!(queued, id)
-        if isready(model, id)
-            #execute_upstream=false
-            #invalidate_downstream=false 
-            #check_cyclic=false
-            #check_input_buffer=false
-            ready_ports = execute!(model, id; settings = ExecuteSettings(false), throw_error = throw_error)
-            for port in ready_ports
-                cons = getportconnections(model, id, port; direction = :output)
-                for con in cons
-                    child = getnode(model, con.input_id)
-                    #  отмечаем потомки  dirty, чтобы он был выполнен далее (данные в буфере не удаляем)
-                    setstatus!(child, :dirty) # !!! crytical - otherwise child will not be executed if it was already clean                             
-                    # добавляем только если нет в очереди
-                    if !(con.input_id in queued)
-                        push!(queue, con.input_id)
-                        push!(queued, con.input_id)
-                    end
-                end
-            end
-        end
-        iter += 1
-    end
-    return true
-end
-# --------------------------------------------------------
-# SHOW functions
-# --------------------------------------------------------
-function show(io::IO, n::AbstractDataNode)
-    println(io, "Node:")
-    println(io, "  ID: ", getid(n))
-    println(io, "  Status: ", getstatus(n))
-    println(io, "  spec:")
-    println(io, n.spec)
-    print(io, "  Settings:", n.settings)
-end
-#
-function show(io::IO, n::NodeSpec)
-    println(io, "     Name: ", n.name)
-    print(io, "     Input ports: ")
-    if length(n.input_ports) == 0 
-        println(io, "empty")
-    else
-        println(io, "")
-        for (i,p) in enumerate(n.input_ports)
-            print(io, "        #$i ", p)
-        end
-    end
-    print(io, "     Output ports: ",)
-    if length(n.output_ports) == 0 
-        println(io, "empty")
-    else
-        println(io, "")
-        for (i,p) in enumerate(n.output_ports)
-            print(io, "        #$i ", p)
-        end
-    end
-    println(io, "     Available settings: ", n.settings)
-end
-#
-function show(io::IO, n::PortSpec)
-    println(io, "Port name: $(n.name); label: \"$(n.label)\"; datatype: $(n.datatype) ($(n.required ? "required" : "optional"), $(n.kind)).")
-end
-#
-function show(io::IO, c::T) where T <: NodeConnection
-    println(io, "Node Connection:")
-    println(io, "  Output node ID: ", c.output_id, " (Output port: ", c.output_port , ")")
-    print(io, "  Input node ID: ", c.input_id, " (Input port: ", c.input_port, ")")
-end
-# --------------------------------------------------------
-# STRUCT TO DICT FOR JSON
-# --------------------------------------------------------
-"""
-    settings_schema(node::AbstractDataNode) -> Dict
-
-Description of the node settings for a user interface.
-
-The engine fills in `"settingslist"` — a copy of `spec.settings`, that is the
-keys the node understands — and then calls [`settings_schema_usermod!`](@ref),
-where a node type adds types, defaults, labels and allowed values.
-
-# Example
-```julia
-settings_schema(DataNode(FilterRows, filter_spec))
-# Dict{String, Any}("settingslist" => [:column, :threshold])
-```
-
-See also [`node_schema`](@ref) for the node as a whole.
-"""
-function settings_schema(node::AbstractDataNode)
-    d  = Dict{String, Any}()
-    d["settingslist"] = copy(node.spec.settings)
-    settings_schema_usermod!(d, node::AbstractDataNode)
-    return d
-end
-"""
-    settings_schema_usermod!(d, node::AbstractDataNode)
-
-Describe the settings of a node type, so an interface can render a form for
-them. Specialize it per node type; the default does nothing.
-
-`d` arrives already holding `"settingslist"`. Add to it — by convention under
-the key `"schema"`, one entry per setting.
-
-**Mutate `d`: the return value is discarded.** A method that builds a fresh
-dictionary and returns it has no effect.
-
-The engine never reads the contents of `"schema"` and passes it through
-untouched, so the keys below are a convention shared with the interface rather
-than a format the package enforces: `"type"`, `"default"`, `"description"`,
-`"required"`, `"options"`, `"min"`, `"max"`, `"pinned"` (show on the node body),
-`"source"` (`"upstream"`, `"user"`, `"none"`).
-
-# Example
-```julia
-function MetidaFlows.settings_schema_usermod!(d, node::DataNode{FilterRows})
-    d["schema"] = Dict{String, Any}(
-        "column" => Dict{String, Any}(
-            "type"        => "Symbol",
-            "description" => "Column to compare",
-            "required"    => true,
-            "options"     => Symbol[]),
-        "threshold" => Dict{String, Any}(
-            "type"        => "Float64",
-            "default"     => 0.0,
-            "description" => "Keep rows whose value is greater than this",
-            "required"    => true,
-            "min"         => 0.0))
-    return d
-end
-```
-
-The method receives the node, so the description may depend on its current
-settings. For choices that only a producer knows — the columns of a file the
-parent node will read — combine the schema with [`getinputmeta`](@ref) on the
-caller's side.
-
-# Notes
-- Keep the executable check in [`validate_settings`](@ref): a schema says what
-  an interface should offer, not whether the node may run.
-- Prefer JSON-safe values. A function encodes as a meaningless string, and a
-  `Type` is safer written as `"Float64"` than as `Float64`.
-"""
-function settings_schema_usermod!(d, node::AbstractDataNode)
-    return d
-end
-"""
-    node_schema(node::AbstractDataNode) -> Dict
-
-Description of a whole node for a user interface: its ports and its settings
-form.
-
-The engine fills in `"spec"` ([`spec_to_dict`](@ref)) and `"settings_schema"`
-([`settings_schema`](@ref)), and then calls [`node_schema_usermod!`](@ref),
-where a node type adds presentation data.
-
-# Example
-```julia
-sort(collect(keys(node_schema(DataNode(FilterRows, filter_spec)))))
-# ["settings_schema", "spec"]
-```
-"""
-function node_schema(node::AbstractDataNode)
-    d  = Dict{String, Any}()
-    d["settings_schema"] = settings_schema(node)
-    d["spec"]            = spec_to_dict(node.spec)
-    node_schema_usermod!(d, node::AbstractDataNode)
-    return d
-end
-"""
-    node_schema_usermod!(d, node::AbstractDataNode)
-
-Describe the node itself — where it belongs in a node palette and how it is
-presented. Specialize it per node type; the default does nothing.
-
-`d` arrives already holding `"spec"` and `"settings_schema"`.
-
-**Mutate `d`: the return value is discarded.**
-
-Use this for presentation and grouping, and
-[`settings_schema_usermod!`](@ref) for the settings form.
-
-# Example
-```julia
-function MetidaFlows.node_schema_usermod!(d, node::DataNode{FilterRows})
-    d["section"]     = "Tables"           # node palette section
-    d["groupname"]   = "Filtering"        # group within that section
-    d["color"]       = "#8b5cf6"
-    d["icon"]        = "filter"
-    d["description"] = "Keeps rows whose value exceeds a threshold."
-
-    # the method sees the node, so the caption may depend on its settings
-    col = get(node.settings, :column, nothing)
-    d["caption"] = col === nothing ? "not configured" : "filter on \$(col)"
-    return d
-end
-```
-"""
-function node_schema_usermod!(d, node::AbstractDataNode)
-    return d
-end
-"""
-    node_to_dict(node::AbstractDataNode; specs::Bool = true, settings::Bool = true) -> Dict
- 
-Convert node to JSON-serializable dictionary.
- 
-Keys: `"id"`, `"properties"`, `"status"`, plus `"spec"` when `specs` is set
-and `"settings"` when `settings` is set.
- 
-# Notes
-The `"settings"` entry holds the settings *schema* produced by
-[`settings_schema`](@ref), not the current setting values.
-"""
-function node_to_dict(node::AbstractDataNode; specs::Bool = true, settings::Bool = true)
-    d                = Dict{String, Any}()
-    d["id"]           = getid(node)
-    d["properties"]   = node_properties_to_dict(node.properties)
-    if specs
-        d["spec"]     = spec_to_dict(node.spec)
-    end
-    d["status"]       = getstatus(node)
-    if settings
-        d["settings"] = settings_schema(node)
-    end
-    return d
-end
-"""
-    node_properties_to_dict(np::NodeProperties) -> Dict
-
-Convert node properties to JSON-serializable dictionary.
-"""
-function node_properties_to_dict(np::NodeProperties)
-    d            = Dict{String, Any}()
-    d["id"]       = np.id
-    d["status"]   = np.status
-    d["position"] = np.position
-    return d
-end
-"""
-    spec_to_dict(spec::NodeSpec) -> Dict
-
-Convert NodeSpec to dictionary representation.
-"""
-function spec_to_dict(spec::NodeSpec)
-    d                = Dict{String, Any}()
-    d["name"]         = spec.name
-    d["input_ports"]  = [portspec_to_dict(i) for i in spec.input_ports]
-    d["output_ports"] = [portspec_to_dict(i) for i in spec.output_ports]
-    d["settings"]     = copy(spec.settings)
-    return d
-end
-"""
-    portspec_to_dict(ps::PortSpec)
- 
-Convert port specification to JSON-serializable dictionary.
- 
-Keys: `"name"`, `"label"`, `"datatype"`, `"required"`, `"kind"`, `"type"`.
- 
-`"label"`, `"datatype"` and `"kind"` are stringified; `"type"` holds the port
-arity as `"SinglePort"` or `"MultiPort"`.
-"""
-function portspec_to_dict(ps::PortSpec)
-    d            = Dict{String, Any}()
-    d["name"]     = ps.name
-    d["label"]    = string(ps.label)
-    d["datatype"] = string(ps.datatype)
-    d["required"] = ps.required
-    d["kind"]     = string(ps.kind)
-    d["type"]     = portspec_to_dict_type(ps)
-    return d
-end
-function portspec_to_dict_type(ps::PortSpec{MultiPort})
-    return "MultiPort"
-end
-function portspec_to_dict_type(ps::PortSpec{SinglePort})
-    return "SinglePort"
-end
-"""
-    connection_to_dict(conn::NodeConnection) -> Dict
-
-Convert connection to dictionary representation.
-"""
-function connection_to_dict(nc::NodeConnection)
-    d               = Dict{String, Union{Int, Symbol}}()
-    d["output_id"]   = nc.output_id
-    d["output_port"] = nc.output_port
-    d["input_id"]    = nc.input_id
-    d["input_port"]  = nc.input_port
-    return d
-end
-"""
-    workflow_to_dict(w::Workflow) -> Dict
- 
-Convert workflow to dictionary representation, ready to be serialized to JSON.
- 
-Keys: `"id"`, `"name"`, `"n_iter"`, `"c_iter"`, `"nodes"`, `"connections"`,
-`"incoming"`, `"outgoing"`.
- 
-# Notes
-- `"nodes"` and `"connections"` are keyed by *stringified* identifiers, while
-  `"incoming"` and `"outgoing"` keep integer node ids.
-- Execution state - `run_id`, logs, cached output data and settings values -
-  is not included, so the result describes structure only.
-"""
-function workflow_to_dict(w::Workflow)
-    d               = Dict{String, Any}()
-    d["id"]          = w.id
-    d["name"]        = w.name
-    d["n_iter"]      = w.n_iter
-    n               = Dict{String, Dict}()
-    for (k,v) in w.nodes
-        n[string(k)] = node_to_dict(v)
-    end
-    d["nodes"]       = n
-    d["c_iter"]      = w.c_iter
-    c               = Dict{String, Dict}()
-    for (k,v) in w.connections
-        c[string(k)] = connection_to_dict(v)
-    end
-    d["connections"] = c
-    i               = Dict{Int, Vector}()
-    for (k,v) in w.incoming
-        i[k] = copy(v)
-    end
-    d["incoming"]    = i
-    o               = Dict{Int, Vector}()
-    for (k, v) in w.outgoing
-        o[k] = copy(v)
-    end
-    d["outgoing"]    = o
-    return d
-end
-
-
-
-
-"""
-    exportmeta_unsafe(node::AbstractDataNode, port::Symbol, inmeta)
-
-Describe what the node will produce on output port `port`, **without
-executing it**.
-
-This is the extension point of metadata propagation, the configuration-time
-counterpart of [`execute_unsafe!`](@ref). Like it, the method sees only the
-node: `inmeta` carries the descriptions of the node's own input ports, keyed
-by the node's own port labels, in exactly the shape [`getinputdata`](@ref)
-uses:
-
-- [`SinglePort`](@ref): the description, or `nothing` when the port is
-  unconnected or the producer does not know;
-- [`MultiPort`](@ref): a `Dict{connection id, description}`.
-
-The default implementation returns `nothing`, meaning "unknown". The shape of
-a description is a contract between nodes sharing a port datatype, not
-something the engine defines.
-
-# Rules
-- Never pass a description through unchanged unless the node really preserves
-  it. A node that renames or drops columns must describe its own result;
-  returning the input description would propagate a lie downstream.
-- This is not validation. `nothing` means "cannot tell", not "misconfigured" —
-  checking that a configured column actually exists belongs in
-  [`validate_settings`](@ref) and in the node body.
-- Reading a little is fine, computing is not: parse a header, not a file.
-
-# Example
-```julia
-# источник: читает только заголовок
-function MetidaFlows.exportmeta_unsafe(node::DataNode{ReadCSV}, ::Symbol, inmeta)
-    path = get(node.settings, :file, nothing)
-    (path === nothing || !isfile(path)) && return nothing
-    return (columns = propertynames(CSV.File(path; limit = 0)),)
-end
-
-# прозрачная нода: строки фильтруются, схема сохраняется
-MetidaFlows.exportmeta_unsafe(::DataNode{FilterRows}, ::Symbol, inmeta) = inmeta[:table]
-```
-"""
-exportmeta_unsafe(::AbstractDataNode, ::Symbol, inmeta) = nothing
-
-
-"""
-    getinputmeta(model::Workflow, id::Int) -> Dict{Symbol, Any}
-
-Collect descriptions of every input port of node `id`, asking its producers
-recursively.
-
-Keys are the **input port labels of node `id`** — taken from the connections,
-so a producer never needs to know which port of which consumer it feeds. Every
-`:normal` input port is present in the result: an unconnected
-[`SinglePort`](@ref) maps to `nothing`, an unconnected [`MultiPort`](@ref) to
-an empty `Dict`.
-
-Ports of kind `:feedback` and `:error` are skipped: a feedback edge closes a
-cycle, and following it would not terminate.
-
-`done` and `maxdepth` are threaded through to [`exportmeta`](@ref): the first
-keeps a common ancestor from being described twice within one call, the second
-bounds the depth of the walk.
-
-# Example
-```julia
-collect_input_meta(w, mean_id)
-# Dict{Symbol, Any}(:input_data => (columns = [:Subject, :Time, :Concentration],))
-```
-"""
-function getinputmeta(model::Workflow, id::Int;
-                            visited  = Set{Int}(),
-                            done     = Dict{Tuple{Int, Symbol}, Any}(),                 # мемоизация
-                            maxdepth::Int = 1000)
-    node   = getnode(model, id)
-    inmeta = Dict{Symbol, Any}()
-
-    # каждый :normal-вход присутствует всегда, даже неподключённый
-    for ps in node.spec.input_ports
-        ps.kind == :normal || continue
-        inmeta[ps.label] = ismultiport(ps) ? Dict{Int, Any}() : nothing                # заполняем словарь, ключ - порт
-    end
-
-    for cid in get(model.incoming, id, Int[])
-        c  = getconnection(model, cid)                                                  # Получаем связь из workflow
-        ps = getportspec(node, c.input_port, :input)                                    # Описание входного порта
-        ps.kind == :normal || continue                                                 # отсекаем не normal 
-        m  = exportmeta(model, c.output_id, c.output_port; visited = visited, done = done, maxdepth = maxdepth)  # Получаем данные от РОДИТЕЛЯ
-        if ismultiport(ps)
-            inmeta[c.input_port][cid] = m                                               # ключ - id связи, как во входном буфере
-        else
-            inmeta[c.input_port] = m
-        end
-    end
-    return inmeta
-end
-
-
-"""
-    ismetasource(node::AbstractDataNode, port::Symbol) -> Bool
-
-Declare that the node can describe `port` on its own, without asking its
-producers. When it returns `true`, [`exportmeta`](@ref) stops the upward walk at
-this node and calls [`exportmeta_unsafe`](@ref) with an **empty** `inmeta`.
-
-The default is `false`, so a node describes its output from its inputs unless
-it says otherwise.
-
-The predicate may depend on the node state, which is the point: a node is
-often a source of metadata only once it has been configured.
-
-# Consistency
-`ismetasource` and [`exportmeta_unsafe`](@ref) are written together and must
-agree. Reaching for `inmeta[:label]` in a branch declared as a metadata source
-raises a `KeyError`, because the dictionary passed there is empty — the
-mismatch is loud on purpose, as with [`validate_settings`](@ref) and
-[`execute_unsafe!`](@ref).
-
-# Example
-```julia
-# схему знаю, только если задан путь к файлу
-MetidaFlows.ismetasource(node::DataNode{ReadCSV}, ::Symbol) = haskey(node.settings, :file)
-
-# нода с необязательным входом «схема из файла»
-MetidaFlows.ismetasource(node::DataNode{Import}, ::Symbol) =
-    !isempty(get(node.settings, :schema_file, ""))
-
-function MetidaFlows.exportmeta_unsafe(node::DataNode{Import}, ::Symbol, inmeta)
-    haskey(node.settings, :schema_file) && return read_schema(node.settings[:schema_file])
-    return inmeta[:table]                  # ветка, где нода НЕ источник описания
-end
-```
-"""
-ismetasource(::AbstractDataNode, ::Symbol)::Bool = false
-
-
-"""
-    exportmeta(model::Workflow, id::Int, port::Symbol)
-
-Describe what node `id` will produce on its output port `port`, without
-executing anything.
-
-Walks up the graph: the node's producers are asked first, their answers are
-handed to [`exportmeta_unsafe`](@ref) as `inmeta`. The walk stops at nodes
-without incoming connections, and at any node for which
-[`ismetasource`](@ref) returns `true`.
-
-Returns `nothing` when the answer is unknown — because the node did not
-implement [`exportmeta_unsafe`](@ref), because a producer up the chain did not,
-or because the required settings are not filled in yet.
-
-# Arguments
-- `maxdepth`: longest chain of nodes the walk may descend into before raising.
-  Guards against a pathological graph exhausting the stack; a node declaring
-  [`ismetasource`](@ref) ends the walk without consuming depth.
-
-# Notes
-- Within one call each `(node, output port)` pair is described **once**: a
-  diamond does not compute its common ancestor twice. The memo lives for the
-  duration of the call only, so nothing can go stale between calls — a file
-  may change on disk, and the next call sees it.
-- Nothing is cached **between** calls. Memoize inside the node if a source is
-  expensive to inspect.
-- A node declaring [`ismetasource`](@ref) cuts the walk short, so the branches
-  above it are never visited.
-- In a graph containing a cycle built from `:normal` edges the answer for a
-  node inside the cycle depends on where the walk started. Such a graph is
-  rejected by the [`DAW`](@ref) scheduler and never produced by [`ABW`](@ref),
-  where cycles are closed by `:feedback` edges that this walk does not follow.
-- `:feedback` and `:error` edges are not followed, so cyclic [`ABW`](@ref)
-  workflows are safe. A cycle built from `:normal` edges only is detected as a
-  back edge and yields `nothing` for the repeated node instead of recursing
-  forever.
-
-# Example
-```julia
-portmeta(w, csv_id, :table)      # (columns = [:Subject, :Formulation, :Time, :Concentration],)
-```
-"""
-function exportmeta(model::Workflow, id::Int, port::Symbol;
-                  visited  = Set{Int}(),
-                  done     = Dict{Tuple{Int, Symbol}, Any}(),                          # мемоизация
-                  maxdepth::Int = 1000)
-    key = (id, port)
-    haskey(done, key) && return done[key]                                              # уже считали это тузел - взвращаем данные из done
-
-    node = getnode(model, id)
-    isportexist(node, port, :output) || error("Wrong port label: $(port) is not an output port of node $(id)")
-
-    # нода объявила себя источником описания: подъёма не происходит
-    if ismetasource(node, port)
-        return done[key] = exportmeta_unsafe(node, port, Dict{Symbol, Any}())          # Возвращаем то, что отдала "терминальная" нода
-    end
-
-    id in visited && return nothing          # обратное ребро: результат зависит от пути, в done не кладём
-
-    length(visited) >= maxdepth && error(
-        "Metadata traversal exceeded maxdepth = $(maxdepth) at node $(id). ")
-
-    push!(visited, id)
-    try
-        inmeta = getinputmeta(model, id; visited = visited, done = done, maxdepth = maxdepth) # Продолжаем подниматься по уровню рекурсии выше 
-        return done[key] = exportmeta_unsafe(node, port, inmeta)                              # Дописываем в то что пришло от родительских нод свою информацию
-    finally
-        delete!(visited, id)                                                                  # множество хранит текущий путь, не всё пройденное
-    end
 end
 
 

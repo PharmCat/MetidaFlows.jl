@@ -360,7 +360,7 @@ The useful case is a setting whose choices are only known from the producer: a
 column name that exists in the file the parent node will read. The engine
 supplies the fact — [`getinputmeta`](@ref) — and the caller composes the form.
 
-The producer describes its output through [`exportmeta_unsafe`](@ref), reading
+The producer describes its output through [`getmeta_unsafe`](@ref), reading
 only the header:
 
 ```@example mfexample
@@ -376,14 +376,14 @@ end
 
 MetidaFlows.ismetasource(node::DataNode{ReadTable}, ::Symbol) = haskey(node.settings, :file)
 
-function MetidaFlows.exportmeta_unsafe(node::DataNode{ReadTable}, ::Symbol, inmeta)
+function MetidaFlows.getmeta_unsafe(node::DataNode{ReadTable}, ::Symbol, inmeta)
     path = get(node.settings, :file, nothing)
     (path === nothing || !isfile(path)) && return nothing
     return (columns = propertynames(CSV.File(path; limit = 0)),)
 end
 
 # a row filter does not change the schema, so it passes the input description through
-MetidaFlows.exportmeta_unsafe(::DataNode{FilterRows}, ::Symbol, inmeta) = inmeta[:table]
+MetidaFlows.getmeta_unsafe(::DataNode{FilterRows}, ::Symbol, inmeta) = inmeta[:table]
 nothing # hide
 ```
 

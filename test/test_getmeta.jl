@@ -19,7 +19,7 @@
 # --------------------------------------------------------------------------
 # Фикстуры
 # --------------------------------------------------------------------------
-import MetidaFlows: exportmeta_unsafe, exportmeta, getinputmeta
+import MetidaFlows: getmeta_unsafe, getmeta, getinputmeta
 
 struct MetaSource <: AbstractNodeType end  # описание знает сам, входов нет
 struct MetaThru   <: AbstractNodeType end  # прозрачная нода: проброс описания
@@ -45,12 +45,12 @@ spec_metamulti()  = NodeSpec("Meta multi",
 
 # --- реализации хука ------------------------------------------------------
 
-function MetidaFlows.exportmeta_unsafe(node::DataNode{MetaSource}, ::Symbol, inmeta)
+function MetidaFlows.getmeta_unsafe(node::DataNode{MetaSource}, ::Symbol, inmeta)
     countcall!(:meta_source)
     return (columns = [:a, :b],)
 end
 
-function MetidaFlows.exportmeta_unsafe(node::DataNode{MetaThru}, ::Symbol, inmeta)
+function MetidaFlows.getmeta_unsafe(node::DataNode{MetaThru}, ::Symbol, inmeta)
     countcall!(:meta_thru)
     return inmeta[:table]                      # проброс ЯВНЫЙ
 end
@@ -58,14 +58,14 @@ end
 # Условный источник: если схема задана настройкой — знаю сам, иначе спрашиваю выше.
 MetidaFlows.ismetasource(node::DataNode{MetaGate}, ::Symbol) = haskey(node.settings, :schema)
 
-function MetidaFlows.exportmeta_unsafe(node::DataNode{MetaGate}, ::Symbol, inmeta)
+function MetidaFlows.getmeta_unsafe(node::DataNode{MetaGate}, ::Symbol, inmeta)
     countcall!(:meta_gate)
     isempty(inmeta) && countcall!(:meta_gate_empty_inmeta)
     haskey(node.settings, :schema) && return (columns = node.settings[:schema],)
     return inmeta[:table]
 end
 
-function MetidaFlows.exportmeta_unsafe(node::DataNode{MetaJoin}, ::Symbol, inmeta)
+function MetidaFlows.getmeta_unsafe(node::DataNode{MetaJoin}, ::Symbol, inmeta)
     countcall!(:meta_join)
     l, r = inmeta[:input1], inmeta[:input2]
     (l === nothing || r === nothing) && return nothing
@@ -88,8 +88,8 @@ end
     add_connection!(w, s,  :out, t1, :table)
     add_connection!(w, t1, :out, t2, :table)
 
-    @test exportmeta(w, s,  :out) == (columns = [:a, :b],)
-    @test exportmeta(w, t2, :out) == (columns = [:a, :b],)
+    @test getmeta(w, s,  :out) == (columns = [:a, :b],)
+    @test getmeta(w, t2, :out) == (columns = [:a, :b],)
 
     inmeta = getinputmeta(w, t2)
     @test collect(keys(inmeta)) == [:table]     # метка входа потребителя
@@ -97,8 +97,8 @@ end
 
     # источник опрашивался на каждый запрос: результат нигде не кешируется
     resetcalls!()
-    exportmeta(w, t2, :out)
-    exportmeta(w, t2, :out)
+    getmeta(w, t2, :out)
+    getmeta(w, t2, :out)
     @test calls(:meta_source) == 2
     @test calls(:meta_thru)   == 4
 end
@@ -119,7 +119,7 @@ end
 
     # Настройки не заданы: гейт закрыт, поднимаемся до самого источника.
     resetcalls!()
-    @test exportmeta(w, t, :out) == (columns = [:a, :b],)
+    @test getmeta(w, t, :out) == (columns = [:a, :b],)
     @test calls(:meta_source) == 1
     @test calls(:meta_gate_empty_inmeta) == 0
 
@@ -128,14 +128,14 @@ end
     @test MetidaFlows.ismetasource(getnode(w, g), :out) == true
 
     resetcalls!()
-    @test exportmeta(w, g, :out) == (columns = [:x, :y],)
+    @test getmeta(w, g, :out) == (columns = [:x, :y],)
     @test calls(:meta_source) == 0               # выше не поднимались
     @test calls(:meta_gate)   == 1
     @test calls(:meta_gate_empty_inmeta) == 1    # inmeta пришёл пустым
 
     # Запрос ниже по цепочке тоже останавливается на гейте.
     resetcalls!()
-    @test exportmeta(w, t, :out) == (columns = [:x, :y],)
+    @test getmeta(w, t, :out) == (columns = [:x, :y],)
     @test calls(:meta_source) == 0
 end
 
@@ -145,7 +145,7 @@ end
     w1 = Workflow(0)
     t1 = add_node!(w1, DataNode(MetaThru, spec_metathru()))
     @test getinputmeta(w1, t1) == Dict{Symbol, Any}(:table => nothing)
-    @test exportmeta(w1, t1, :out) === nothing
+    @test getmeta(w1, t1, :out) === nothing
 
     # Нода без реализации хука рвёт цепочку, но не роняет её.
     w2 = Workflow(0)
@@ -154,11 +154,11 @@ end
     t2 = add_node!(w2, DataNode(MetaThru,   spec_metathru()))
     add_connection!(w2, s2, :out, m2, :table)
     add_connection!(w2, m2, :out, t2, :table)
-    @test exportmeta(w2, m2, :out) === nothing
-    @test exportmeta(w2, t2, :out) === nothing
+    @test getmeta(w2, m2, :out) === nothing
+    @test getmeta(w2, t2, :out) === nothing
 
     # Несуществующий выходной порт — ошибка, а не тихий nothing.
-    @test_throws ErrorException exportmeta(w2, t2, :ghost)
+    @test_throws ErrorException getmeta(w2, t2, :ghost)
 end
 
 # --------------------------------------------------------------------------
@@ -177,7 +177,7 @@ end
     @test Set(keys(inmeta)) == Set([:input1, :input2])
     @test inmeta[:input1] == (columns = [:a, :b],)
     @test inmeta[:input2] == (columns = [:z],)
-    @test exportmeta(w, j, :out) == (columns = [:a, :b, :z],)
+    @test getmeta(w, j, :out) == (columns = [:a, :b, :z],)
 
     # Один вход не подключён -> nothing, но ключ на месте.
     w2 = Workflow(0)
@@ -187,7 +187,7 @@ end
     im2 = getinputmeta(w2, j2)
     @test im2[:input1] == (columns = [:a, :b],)
     @test im2[:input2] === nothing
-    @test exportmeta(w2, j2, :out) === nothing
+    @test getmeta(w2, j2, :out) === nothing
 
     # MultiPort: словарь по id связей, как во входном буфере.
     w3 = Workflow(0)
@@ -212,7 +212,7 @@ end
     b1 = add_node!(w1, DataNode(MetaThru, spec_metathru()))
     add_connection!(w1, a1, :out, b1, :table)
     add_connection!(w1, b1, :out, a1, :table)
-    @test exportmeta(w1, a1, :out) === nothing
+    @test getmeta(w1, a1, :out) === nothing
 
     # Тот же цикл, но один из узлов объявил себя источником описания:
     # подъёма из него нет, поэтому ответ определён.
@@ -222,8 +222,8 @@ end
     add_connection!(w2, g2, :out, t2, :table)
     add_connection!(w2, t2, :out, g2, :table)
     setsettings!(w2, g2, Dict(:schema => [:x]))
-    @test exportmeta(w2, g2, :out) == (columns = [:x],)
-    @test exportmeta(w2, t2, :out) == (columns = [:x],)
+    @test getmeta(w2, g2, :out) == (columns = [:x],)
+    @test getmeta(w2, t2, :out) == (columns = [:x],)
 
     # Обратное ребро ABW не обходится вообще.
     w3 = Workflow(0; type = :ABW)
@@ -237,7 +237,7 @@ end
     add_connection!(w3, l3, :out, l3, :previous)
     im3 = getinputmeta(w3, l3)
     @test collect(keys(im3)) == [:table]         # :feedback в сборе не участвует
-    @test exportmeta(w3, l3, :out) == (columns = [:a, :b],)
+    @test getmeta(w3, l3, :out) == (columns = [:a, :b],)
 end
 
 # --------------------------------------------------------------------------
@@ -259,15 +259,15 @@ end
     add_connection!(w, t2, :out, j,  :input2)
 
     resetcalls!()
-    @test exportmeta(w, j, :out) == (columns = [:a, :b, :a, :b],)
+    @test getmeta(w, j, :out) == (columns = [:a, :b, :a, :b],)
     @test calls(:meta_source) == 1        # общий предок — один раз
     @test calls(:meta_thru)   == 2
 
     # мемо не переживает вызов: следующий запрос считает заново
     resetcalls!()
-    exportmeta(w, j, :out)
+    getmeta(w, j, :out)
     @test calls(:meta_source) == 1
-    exportmeta(w, j, :out)
+    getmeta(w, j, :out)
     @test calls(:meta_source) == 2
 end
 
@@ -286,18 +286,18 @@ end
     add_connection!(w, t3, :out, t4, :table)
 
     # умолчание с запасом
-    @test exportmeta(w, t4, :out) == (columns = [:a, :b],)
+    @test getmeta(w, t4, :out) == (columns = [:a, :b],)
 
     # тесный предел обрывает обход ошибкой, а не тихим nothing
-    @test_throws ErrorException exportmeta(w, t4, :out; maxdepth = 3)
+    @test_throws ErrorException getmeta(w, t4, :out; maxdepth = 3)
 
     # достаточный предел проходит
-    @test exportmeta(w, t4, :out; maxdepth = 10) == (columns = [:a, :b],)
+    @test getmeta(w, t4, :out; maxdepth = 10) == (columns = [:a, :b],)
 
     # источник описания обрывает обход, не расходуя глубину:
     # с тем же тесным пределом запрос теперь проходит
     setsettings!(w, g, Dict(:schema => [:x]))
-    @test exportmeta(w, t4, :out; maxdepth = 3) == (columns = [:x],)
+    @test getmeta(w, t4, :out; maxdepth = 3) == (columns = [:x],)
 end
 
 

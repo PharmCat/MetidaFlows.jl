@@ -154,6 +154,10 @@ end
     # Копии индексов независимы от workflow.
     push!(d["outgoing"][p.load], 999)
     @test w.outgoing[p.load] == [1]
+
+    unregister_all!()
+    register_node!(w)
+    @test_nowarn dict_to_workflow(d)
 end
 
 end # @testset "СЕРИАЛИЗАЦИЯ"

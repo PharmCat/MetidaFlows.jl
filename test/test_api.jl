@@ -278,6 +278,8 @@ end
 
     w.name = "demo"
     @test w.name == "demo"
+
+    @test workflowtypestr(w) == "DAW"
 end
 
 # --------------------------------------------------------------------------

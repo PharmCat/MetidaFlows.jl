@@ -23,6 +23,7 @@ using Test, CSV, DataFrames, Dates
 
 import MetidaFlows: PortSpec, MultiPort, SinglePort, DAW, ABW,
     NodeState, NodeProperties, LogMsg, AbstractNodeState, ExecuteSettings,
+    workflowtypestr,
     setdata!,
     getnode, getconnection, isnodeexist, nodetypestr, makegraph,
     getid, setid!, getposition, setposition!, setstatus!,
@@ -37,7 +38,8 @@ import MetidaFlows: PortSpec, MultiPort, SinglePort, DAW, ABW,
     settings_schema, settings_schema_usermod!, node_schema, node_schema_usermod!,
     node_to_dict, node_properties_to_dict, spec_to_dict,
     portspec_to_dict, portspec_to_dict_type, connection_to_dict, workflow_to_dict,
-    exportmeta, getinputmeta
+    register_node!, unregister_all!, dict_to_workflow,
+    getmeta, getinputmeta
 
 # Здесь и ниже намеренно без `const`: при повторном include в одной сессии
 # переопределение const печатает WARNING: redefinition of constant.
@@ -54,7 +56,7 @@ TEST_GROUPS = (
     (id = "edge",          file = "test_edge.jl", descr = "нулевые, единичные и вырожденные случаи"),
     (id = "serialization", file = "test_serialization.jl", descr = "словарные представления и схемы"),
     (id = "display",       file = "test_display.jl", descr = "методы show"),
-    (id = "exportmeta",    file = "test_exportmeta.jl", descr = "Export/query метаданных для портов"),
+    (id = "getmeta",    file = "test_getmeta.jl", descr = "метаданные портов: getmeta / getinputmeta"),
 )
 
 SELECTED = isempty(ARGS) ? [g.id for g in TEST_GROUPS] : ARGS

@@ -1,3 +1,7 @@
+```@meta
+CurrentModule = MetidaFlows
+```
+
 ```@setup mfmeta
 DATA_PATH = joinpath(pwd(), "data.csv")
 CONC_PATH = joinpath(pwd(), "conc.csv")
@@ -11,7 +15,7 @@ file that has not been read yet.
 
 Two functions answer that without executing anything:
 
-* [`exportmeta`](@ref) — what a node **will produce** on one of its output ports;
+* [`getmeta`](@ref) — what a node **will produce** on one of its output ports;
 * [`getinputmeta`](@ref) — what **will arrive** at every input port of a node.
 
 Both walk up the graph, asking each node to describe itself. What is done with
@@ -31,7 +35,7 @@ average — a column that only exists after the join.
 
 ```@example mfmeta
 using MetidaFlows, CSV, DataFrames, Statistics
-import MetidaFlows: exportmeta_unsafe, ismetasource
+import MetidaFlows: getmeta_unsafe, ismetasource
 
 struct ReadCSV    <: AbstractNodeType end
 struct JoinOn     <: AbstractNodeType end
@@ -86,7 +90,7 @@ file, and declares itself a metadata source so the walk stops there:
 ```@example mfmeta
 MetidaFlows.ismetasource(node::DataNode{ReadCSV}, ::Symbol) = haskey(node.settings, :file)
 
-function MetidaFlows.exportmeta_unsafe(node::DataNode{ReadCSV}, ::Symbol, inmeta)
+function MetidaFlows.getmeta_unsafe(node::DataNode{ReadCSV}, ::Symbol, inmeta)
     path = get(node.settings, :file, nothing)
     (path === nothing || !isfile(path)) && return nothing
     return (columns = propertynames(CSV.File(path; limit = 0)),)
@@ -98,7 +102,7 @@ nothing # hide
 input description through — the key column appears once, not twice:
 
 ```@example mfmeta
-function MetidaFlows.exportmeta_unsafe(node::DataNode{JoinOn}, ::Symbol, inmeta)
+function MetidaFlows.getmeta_unsafe(node::DataNode{JoinOn}, ::Symbol, inmeta)
     l, r = inmeta[:left], inmeta[:right]
     (l === nothing || r === nothing) && return nothing
     on = get(node.settings, :on, nothing)
@@ -114,7 +118,7 @@ the real result schema.
 
 `MeanColumn` produces a scalar, so there is nothing to describe and the default
 `nothing` is correct. A node that does not implement
-[`exportmeta_unsafe`](@ref) breaks the chain the same way: the caller offers no
+[`getmeta_unsafe`](@ref) breaks the chain the same way: the caller offers no
 completion rather than a wrong one.
 
 ---
@@ -153,11 +157,11 @@ Configure the sources — still without executing anything:
 setsettings!(w, left,  Dict(:file => DATA_PATH))
 setsettings!(w, right, Dict(:file => CONC_PATH))
 
-exportmeta(w, left, :table)
+getmeta(w, left, :table)
 ```
 
 A source has no input ports, so [`getinputmeta`](@ref) would return an empty
-dictionary for it — [`exportmeta`](@ref) is the way to ask what a node emits.
+dictionary for it — [`getmeta`](@ref) is the way to ask what a node emits.
 
 Now the join can be offered a list of usable keys. Deriving it is the caller's
 job, and it is a one-liner over the input descriptions:
@@ -178,7 +182,7 @@ Pick one of the offered values and ask the join what it will produce:
 ```@example mfmeta
 setsettings!(w, join, Dict(:on => :id))
 
-exportmeta(w, join, :table)
+getmeta(w, join, :table)
 ```
 
 The last node offers the columns of the joined table. Here the description
@@ -209,14 +213,14 @@ getdata(w, avg, :mean)
 
 ### Which function to call
 
-|  | [`exportmeta`](@ref) | [`getinputmeta`](@ref) |
+|  | [`getmeta`](@ref) | [`getinputmeta`](@ref) |
 |---|---|---|
 | Answers | what node `id` emits on `port` | what arrives at every input port of node `id` |
 | Keyed by | one output port label | the node's own input port labels |
 | Use for | sources, nodes with several outputs, previewing a configured result | filling a settings form from upstream |
 | On a node without input ports | works | returns an empty dictionary |
 
-`getinputmeta` is [`exportmeta`](@ref) applied to every incoming connection,
+`getinputmeta` is [`getmeta`](@ref) applied to every incoming connection,
 arranged by input port label — so a producer never learns which port of which
 consumer it feeds, and two producers of the same type cannot be confused.
 
