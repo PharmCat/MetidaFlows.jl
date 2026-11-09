@@ -160,4 +160,43 @@ end
     @test_nowarn dict_to_workflow(d)
 end
 
+# --------------------------------------------------------------------------
+@testset "R7. реестр: граф целиком                         " begin
+    #  Реестр — шлюз загрузки, поэтому первое, что делает человек, —
+    #  регистрирует типы целым графом. На графе с ДВУМЯ узлами одного
+    #  типа это падало: второй узел считался повторной регистрацией.
+    #  Теперь тип вносится один раз за вызов, из первого своего узла.
+    w  = Workflow(0; type = :DAW)
+    a  = add_node!(w, DataNode(LoadCSVNode, spec_loadcsv()))
+    b  = add_node!(w, DataNode(LoadCSVNode, spec_loadcsv()))   # тот же тип
+    c  = add_node!(w, DataNode(ToDataFrameNode, spec_todf()))
+    add_connection!(w, a, :csv, c, :csv)
+
+    unregister_all!()
+    names = register_node!(w)                      # без skipmode — и не падает
+    @test length(names) == 2                       # два РАЗНЫХ типа, не три узла
+    @test names == sort(names)                     # порядок не зависит от обхода Dict
+    @test allunique(names)
+    @test isregistered(getnode(w, a)) && isregistered(getnode(w, c))
+
+    #  Ключ, занятый ДО вызова, — по-прежнему ошибка с подсказкой
+    @test_throws ErrorException register_node!(w)
+    @test_nowarn register_node!(w; skipmode = true)
+    @test register_node!(w; skipmode = true) == String[]   # добавлять нечего
+    @test length(register_node!(w; overwrite = true)) == 2 # а перезаписать можно
+
+    #  и граф из одних одинаковых узлов тоже регистрируется
+    w2 = Workflow(0; type = :DAW)
+    for _ in 1:5 add_node!(w2, DataNode(LoadCSVNode, spec_loadcsv())) end
+    unregister_all!()
+    @test length(register_node!(w2)) == 1
+
+    #  после этого снимок такого графа загружается
+    d2 = workflow_to_dict(w2)
+    @test length(dict_to_workflow(d2).nodes) == 5
+    unregister_all!()
+end
+
 end # @testset "СЕРИАЛИЗАЦИЯ"
+
+include(joinpath(TEST_DIR, "serialization_state.jl"))

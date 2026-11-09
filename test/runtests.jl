@@ -39,7 +39,7 @@ import MetidaFlows: PortSpec, MultiPort, SinglePort, DAW, ABW,
     settings_schema, settings_schema_usermod!, node_schema, node_schema_usermod!,
     node_to_dict, node_properties_to_dict, spec_to_dict,
     portspec_to_dict, portspec_to_dict_type, connection_to_dict, workflow_to_dict,
-    register_node!, unregister_all!, dict_to_workflow,
+    register_node!, unregister_all!, isregistered, dict_to_workflow,
     getmeta, getinputmeta
 
 # Здесь и ниже намеренно без `const`: при повторном include в одной сессии

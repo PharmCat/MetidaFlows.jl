@@ -406,8 +406,9 @@ distance](examples_edit_distance.md) builds both and compares them.
 
 Two different jobs share this part of the API:
 
-* **serializing a workflow** — turning the graph into plain dictionaries, so it
-  can be written to JSON and inspected;
+* **saving and loading a workflow** — turning the graph into plain
+  dictionaries and back, so it can be written to JSON, inspected and read
+  again;
 * **describing a node** — telling a user interface which settings the node
   accepts, how to render them and how to present the node itself.
 
@@ -417,24 +418,155 @@ engine provides two hooks and gets out of the way.
 
 ### Serializing a workflow
 
-[`workflow_to_dict`](@ref) produces a JSON-ready snapshot of the structure:
-nodes, connections and the incoming/outgoing indices.
+[`workflow_to_dict`](@ref) produces a JSON-ready snapshot. What goes in it is
+chosen by two keywords, because a snapshot is asked to do two different jobs.
 
 ```julia
-d = workflow_to_dict(w)
-keys(d)   # "id", "name", "n_iter", "c_iter", "nodes", "connections", "incoming", "outgoing"
+d = workflow_to_dict(w)                      # structure and settings values
+d = workflow_to_dict(w; state = true)        # ... and the state of a running loop
+d = workflow_to_dict(w; values = false)      # structure only
 ```
 
-Two details are easy to trip over:
+The default — structure plus the current setting *values* — is a workflow
+someone else can load and run. Add `state = true` and it is a checkpoint of a
+run in progress.
+
+```julia
+keys(workflow_to_dict(w))
+# "format_version", "id", "name", "n_iter", "c_iter", "nodes", "connections",
+# "incoming", "outgoing"
+```
+
+Three details are easy to trip over:
 
 * `"nodes"` and `"connections"` are keyed by *stringified* ids, while
   `"incoming"` and `"outgoing"` keep integer node ids;
-* execution state — `run_id`, logs, cached output data and the current setting
-  *values* — is not included. The snapshot describes structure only.
+* inside a node, `"settings"` holds the settings **schema** and
+  `"settings_values"` holds the **values**. The names are close and the
+  contents are not related;
+* `run_id`, the audit log and cached output *data* are never included. Cached
+  data is not needed: a loaded workflow is `:dirty` and recomputes;
+* `"incoming"` and `"outgoing"` are written for a reader and **ignored on
+  load** — [`dict_to_workflow`](@ref) rebuilds both from `"connections"` with
+  [`refreshind!`](@ref). Editing them in a file changes nothing.
 
 Building blocks, usable on their own: [`node_to_dict`](@ref),
 [`node_properties_to_dict`](@ref), [`spec_to_dict`](@ref),
-[`portspec_to_dict`](@ref), [`connection_to_dict`](@ref).
+[`portspec_to_dict`](@ref), [`connection_to_dict`](@ref),
+[`settings_to_dict`](@ref), [`node_state_to_dict`](@ref).
+
+### Loading a workflow
+
+[`dict_to_workflow`](@ref) reads a snapshot back.
+
+```julia
+w = dict_to_workflow(d)
+```
+
+**Loading never executes anything.** A node type is not stored in the file —
+the file only *names* it, and the name is looked up in
+[`NODE_REGISTER`](@ref). The register is the list of what may be built, so
+every node type in the snapshot has to be registered first:
+
+```julia
+register_node!(w)       # once per node type, from your own code
+```
+
+That registers every node type of the graph, once each, and returns the keys it
+added. Several nodes of one type are not a repeated registration. A key that
+was taken *before* the call is one, and then the flags apply:
+`overwrite = true` to replace a spec that has changed, `skipmode = true` to keep
+what is registered.
+
+An unregistered type is an error, not a warning. The same rule holds one level
+down: a type named inside a *value* (the element type of an array, say) is
+looked up in a fixed table and never resolved, so a snapshot cannot name a type
+the package does not already know.
+
+What the file does **not** get to decide:
+
+* the node *type* and its *spec* both come from the register, not from the
+  snapshot. The `"spec"` section of a node is written for a human reader and
+  for a graph editor; changing it changes nothing on load;
+* setting keys that are not declared in the spec are ignored;
+* every loaded node is `:dirty`, whatever status the file carries.
+
+The last point has a consequence worth stating: if the spec in your code has
+changed since the snapshot was taken — a port renamed, a port removed — the
+*connections* that mention the old port no longer validate. By default that is
+an error naming the port. With `check_connection_throw_error = false` those
+connections are dropped instead, and a graph that silently lost an edge is a
+graph that computes something else, so prefer the default.
+
+### Checkpointing a run
+
+A long iterative run can be stopped, written out and continued:
+
+```julia
+d = workflow_to_dict(w; state = true)       # ... write d to a file
+w = dict_to_workflow(d)                     # ... read it back later
+scheduler!(w; reset_mode = :soft)           # continue, do not start over
+```
+
+`reset_mode = :soft` is the part that matters. The default `:full` clears
+feedback buffers, which is exactly the state that was just restored; `:soft`
+keeps them and marks every node `:dirty`, so the run picks up from the loop
+state instead of from the seed nodes.
+
+Only the buffers of `:feedback` ports are saved, and that is sufficient rather
+than an approximation. A normal input buffer is filled by its parent within
+the same turn, and `isready` does not let a node run until all of its normal
+parents are `:clean` — so re-running refills it. A feedback buffer is the only
+value that crosses a turn boundary, because its producer sits downstream and
+has not run yet when the turn begins. On the gradient-descent example, 2 of
+the 39 non-empty buffer entries are feedback ones, and a run resumed from those
+2 reproduces the uninterrupted run bit for bit.
+
+Two things to expect when you resume:
+
+* **the last turn is replayed.** A loop usually ends at a gate that publishes
+  its terminal ports and does not write to the feedback port, so the buffer
+  holds the state of the turn before. Resuming recomputes that turn;
+* **`exec_n` starts from zero.** `reset!` zeroes the counter on any run, so it
+  is not saved. An algorithm that needs to know its own iteration number
+  carries that number through a feedback port, and that is saved.
+
+### Values a snapshot can carry
+
+Settings and feedback buffers hold user values, and a snapshot has to survive
+the trip through a text format, where only `nothing`, `Bool`, `Int64`,
+`Float64`, `String`, arrays and dictionaries exist. Everything else is written
+as a tagged dictionary by [`value_to_dict`](@ref) and read back by
+[`dict_to_value`](@ref):
+
+| Julia                              | in the snapshot                           |
+|:-----------------------------------|:------------------------------------------|
+| `nothing`, `Bool`, `Int64`, `Float64`, `String` | as they are                  |
+| `Symbol`, `Char`                   | `{"t": "Symbol", "v": "…"}`               |
+| other `Integer`, `AbstractFloat`   | `{"t": "Int32", "v": 7}`                  |
+| `Tuple`                            | `{"t": "Tuple", "v": [...]}`              |
+| `AbstractVector`                   | `{"t": "Vector", "e": "Int64", "v": [...]}` |
+| `AbstractDict` (`Symbol`/`String` keys) | `{"t": "Dict", "k": "Symbol", "v": {...}}` |
+
+A value of any other type is an error naming the node and the setting, not a
+silently dropped field. Two hooks let a node type carry its own:
+
+```julia
+function MetidaFlows.settings_to_dict_usermod!(d, node::DataNode{LoadCSVNode})
+    d["file"] = string(node.settings[:file])      # a path, not the open file
+    d
+end
+
+function MetidaFlows.dict_to_settings_usermod!(s, node::DataNode{LoadCSVNode}, d)
+    haskey(d, "file") && (s[:file] = String(d["file"]))
+    s
+end
+```
+
+A feedback buffer needs no such hook for the element type of an array: the
+port declares its datatype in the spec, and the restored value is converted to
+it. A `Vector{Int}` that a text format flattened into a plain array comes back
+as a `Vector{Int}`.
 
 ### What a schema is
 
@@ -642,8 +774,8 @@ Use this hook for presentation and grouping; use
   strings: `"type" => "Float64"` rather than `"type" => Float64`.
 
 * **`node_to_dict`'s `"settings"` key holds the settings *schema*, not the
-  current values.** Setting values are not part of any dictionary the package
-  produces; read them from `node.settings`.
+  current values.** The values live under `"settings_values"` and go through
+  the value codec; the schema is what a form is drawn from.
 
 * Both hooks are called on every `settings_schema` / `node_schema` call, so
   keep them cheap. Inspecting a file is fine; computing anything is not.

@@ -141,7 +141,8 @@ and `"settings"` when `settings` is set.
 The `"settings"` entry holds the settings *schema* produced by
 [`settings_schema`](@ref), not the current setting values.
 """
-function node_to_dict(node::AbstractDataNode; specs::Bool = true, settings::Bool = true)
+function node_to_dict(node::AbstractDataNode; specs::Bool = true, settings::Bool = true,
+                      values::Bool = true, state::Bool = false)
     d                 = Dict{String, Any}()
     d["id"]           = getid(node)
     d["type"]         = nodetypestr(node)
@@ -152,6 +153,12 @@ function node_to_dict(node::AbstractDataNode; specs::Bool = true, settings::Bool
     d["status"]       = getstatus(node)
     if settings
         d["settings"] = settings_schema(node)
+    end
+    if values
+        d["settings_values"] = settings_to_dict(node)
+    end
+    if state
+        d["state"] = node_state_to_dict(node)
     end
     return d
 end
@@ -212,41 +219,306 @@ end
 Convert connection to dictionary representation.
 """
 function connection_to_dict(nc::NodeConnection)
-    d               = Dict{String, Union{Int, Symbol}}()
+    d               = Dict{String, Any}()
     d["output_id"]   = nc.output_id
     d["output_port"] = nc.output_port
     d["input_id"]    = nc.input_id
     d["input_port"]  = nc.input_port
     return d
 end
+# ==========================================================================
+#  Value codec
+#
+#  Settings and feedback buffers hold user values, and a snapshot has to
+#  survive a round trip through a text format (JSON, YAML, TOML), where only
+#  `nothing`, `Bool`, `Int64`, `Float64`, `String`, arrays and dictionaries
+#  exist. Anything else is written as a tagged dictionary.
+#
+#  A tag is looked up in `VALUE_TYPES` and never resolved from the file: a
+#  snapshot can only name a type this table already holds. No `eval`, no
+#  `getfield` — loading a workflow must not be able to run anything.
+# ==========================================================================
+
+const SNAPSHOT_FORMAT_VERSION = 1
+
+const VALUE_TYPES = Dict{String, Type}(
+    "Any"     => Any,     "Bool"    => Bool,
+    "Int64"   => Int64,   "Int32"   => Int32,   "Int16"   => Int16,  "Int8"  => Int8,
+    "UInt64"  => UInt64,  "UInt32"  => UInt32,  "UInt16"  => UInt16, "UInt8" => UInt8,
+    "Float64" => Float64, "Float32" => Float32, "Float16" => Float16,
+    "String"  => String,  "Symbol"  => Symbol,  "Char"    => Char)
+
 """
-    workflow_to_dict(w::Workflow) -> Dict
+    value_to_dict(x)
+
+Write a single value in a form a text format can carry.
+
+`nothing`, `Bool`, `Int64`, `Float64` and `String` are returned as they are.
+Everything else becomes a dictionary with a `"t"` type tag: `Symbol`, `Char`,
+`Tuple`, `Vector` (with an `"e"` element type tag), `Dict` (with a `"k"` key
+type tag) and the numeric types listed in `VALUE_TYPES`.
+
+A value of any other type raises an error naming the type. Define
+[`settings_to_dict_usermod!`](@ref) for the node type to serialize it
+yourself.
+
+See also [`dict_to_value`](@ref).
+"""
+value_to_dict(x::Nothing) = nothing
+value_to_dict(x::Bool)    = x
+value_to_dict(x::Int64)   = x
+value_to_dict(x::Float64) = x
+value_to_dict(x::String)  = x
+value_to_dict(x::Symbol)  = Dict{String, Any}("t" => "Symbol", "v" => String(x))
+value_to_dict(x::Char)    = Dict{String, Any}("t" => "Char",   "v" => string(x))
+value_to_dict(x::Tuple)   = Dict{String, Any}("t" => "Tuple",
+                                "v" => Any[value_to_dict(v) for v in x])
+function value_to_dict(x::Union{Integer, AbstractFloat})
+    t = string(typeof(x))
+    haskey(VALUE_TYPES, t) || error("No `value_to_dict` method for type $(typeof(x))")
+    Dict{String, Any}("t" => t, "v" => x isa Integer ? Int64(x) : Float64(x))
+end
+function value_to_dict(x::AbstractVector)
+    e = string(eltype(x))
+    haskey(VALUE_TYPES, e) || (e = "Any")
+    Dict{String, Any}("t" => "Vector", "e" => e,
+                      "v" => Any[value_to_dict(v) for v in x])
+end
+function value_to_dict(x::AbstractDict)
+    v = Dict{String, Any}()
+    for (k, e) in x
+        k isa Union{Symbol, AbstractString} ||
+            error("A dictionary can be serialized only with Symbol or String keys, got $(typeof(k))")
+        v[String(k)] = value_to_dict(e)
+    end
+    Dict{String, Any}("t" => "Dict",
+                      "k" => keytype(x) <: Symbol ? "Symbol" : "String", "v" => v)
+end
+value_to_dict(x) = error("No `value_to_dict` method for type $(typeof(x))")
+
+"""
+    dict_to_value(x)
+
+Read back a value written by [`value_to_dict`](@ref).
+
+A tagged dictionary is rebuilt through the `VALUE_TYPES` table, so an unknown
+tag raises an error instead of being resolved: a type named in a file is never
+turned into a type object.
+"""
+dict_to_value(x::Nothing)        = nothing
+dict_to_value(x::Bool)           = x
+dict_to_value(x::Integer)        = Int64(x)
+dict_to_value(x::AbstractFloat)  = Float64(x)
+dict_to_value(x::AbstractString) = String(x)
+dict_to_value(x::Symbol)         = x
+dict_to_value(x::AbstractVector) = Any[dict_to_value(v) for v in x]
+function dict_to_value(d::AbstractDict)
+    haskey(d, "t") || error("A tagged value needs a `t` field")
+    t = d["t"] isa Symbol ? String(d["t"]) : d["t"]
+    t == "Symbol" && return Symbol(d["v"])
+    t == "Char"   && return first(String(d["v"]))
+    t == "Tuple"  && return Tuple(dict_to_value(v) for v in d["v"])
+    if t == "Vector"
+        e = get(d, "e", "Any")
+        T = get(VALUE_TYPES, e, nothing)
+        isnothing(T) && error("Unknown element type tag $(repr(e))")
+        return T[dict_to_value(v) for v in d["v"]]
+    end
+    if t == "Dict"
+        K = get(d, "k", "String") == "Symbol" ? Symbol : String
+        r = Dict{K, Any}()
+        for (k, v) in d["v"]
+            r[K(k)] = dict_to_value(v)
+        end
+        return r
+    end
+    T = get(VALUE_TYPES, t, nothing)
+    isnothing(T) && error("Unknown value type tag $(repr(t))")
+    return convert(T, d["v"])
+end
+
+"""
+    settings_to_dict(node::AbstractDataNode)
+
+Settings **values** of a node, keyed by setting name.
+
+Only the keys declared in `node.spec.settings` are written; values go through
+[`value_to_dict`](@ref). The function then calls
+[`settings_to_dict_usermod!`](@ref), which a node type can specialize to write
+a value the codec cannot.
+
+This is not the settings *schema* — see [`settings_schema`](@ref) for that.
+
+See also [`dict_to_settings!`](@ref).
+"""
+function settings_to_dict(node::AbstractDataNode)
+    d = Dict{String, Any}()
+    for k in node.spec.settings
+        haskey(node.settings, k) || continue
+        try
+            d[String(k)] = value_to_dict(node.settings[k])
+        catch e
+            error("Node $(getid(node)) setting `:$(k)`: $(sprint(showerror, e))")
+        end
+    end
+    settings_to_dict_usermod!(d, node)
+    return d
+end
+
+"""
+    settings_to_dict_usermod!(d, node::AbstractDataNode)
+
+User hook of [`settings_to_dict`](@ref). The default method returns `d`
+unchanged; specialize it on the node type to write a setting the value codec
+cannot carry.
+
+```julia
+function MetidaFlows.settings_to_dict_usermod!(d, node::DataNode{FilterRows})
+    d["frame"] = describe_my_frame(node.settings[:frame])
+    d
+end
+```
+"""
+settings_to_dict_usermod!(d, node::AbstractDataNode) = d
+
+"""
+    dict_to_settings!(node::AbstractDataNode, d)
+
+Put settings values from `d` into `node`.
+
+Only the keys declared in `node.spec.settings` are read, so a file cannot
+inject a setting the node does not know. Values go through
+[`dict_to_value`](@ref), then [`dict_to_settings_usermod!`](@ref) is called,
+and the result is written with `setsettings_unsafe!` — the node is `:dirty`
+right after loading, so there is nothing to invalidate.
+
+See also [`settings_to_dict`](@ref).
+"""
+function dict_to_settings!(node::AbstractDataNode, d)
+    s = Dict{Symbol, Any}()
+    for k in node.spec.settings
+        ks = String(k)
+        haskey(d, ks) || continue
+        try
+            s[k] = dict_to_value(d[ks])
+        catch e
+            error("Node $(getid(node)) setting `:$(k)`: $(sprint(showerror, e))")
+        end
+    end
+    dict_to_settings_usermod!(s, node, d)
+    setsettings_unsafe!(node, s)
+    return node
+end
+
+"""
+    dict_to_settings_usermod!(s, node::AbstractDataNode, d)
+
+User hook of [`dict_to_settings!`](@ref): `s` is the settings dictionary being
+built, `d` is the dictionary read from the file. The default method returns `s`
+unchanged. Specialize it on the node type to read back what
+[`settings_to_dict_usermod!`](@ref) wrote.
+"""
+dict_to_settings_usermod!(s, node::AbstractDataNode, d) = s
+
+"""
+    node_state_to_dict(node::AbstractDataNode)
+
+Execution state of a node that a later run cannot recompute: the contents of
+its `:feedback` input buffers, keyed by port label and then by connection id.
+
+Normal input buffers are **not** written. A normal buffer is filled by its
+parent within the same turn, and `isready` does not let a node run until every
+normal parent is `:clean`, so re-running refills it. A feedback buffer is the
+only value that crosses a turn boundary: its producer sits downstream and has
+not run yet when the turn begins.
+
+`exec_n` is not written either, because `reset!` zeroes it on any resumed run.
+An algorithm that needs its own iteration counter carries it through a
+feedback port, and that counter is saved here.
+
+See also [`dict_to_node_state!`](@ref).
+"""
+function node_state_to_dict(node::AbstractDataNode)
+    b = Dict{String, Any}()
+    for ps in node.spec.input_ports
+        ps.kind == :feedback || continue
+        buf = node.input_buffer[ps.label]
+        isempty(buf) && continue
+        e = Dict{String, Any}()
+        for (con, v) in buf
+            try
+                e[string(con)] = value_to_dict(v)
+            catch err
+                error("Node $(getid(node)) feedback port `:$(ps.label)`: " *
+                      sprint(showerror, err))
+            end
+        end
+        b[String(ps.label)] = e
+    end
+    return Dict{String, Any}("feedback_buffer" => b)
+end
+
+"""
+    dict_to_node_state!(node::AbstractDataNode, d)
+
+Put feedback buffer contents from `d` back into `node`.
+
+Each value is converted to the datatype the port declares in the registered
+spec, which both restores a concrete element type a text format had flattened
+(`Vector{Int}` from a plain array) and checks the value against the port. A
+port that is missing from the spec, or is not of kind `:feedback`, is an error.
+
+See also [`node_state_to_dict`](@ref).
+"""
+function dict_to_node_state!(node::AbstractDataNode, d)
+    for (port, buf) in get(d, "feedback_buffer", Dict{String, Any}())
+        label = Symbol(port)
+        isportexist(node, label, :input) ||
+            error("Node $(getid(node)) has no input port `:$(label)`")
+        getportspec(node, label, :input).kind == :feedback ||
+            error("Input port `:$(label)` of node $(getid(node)) is not a feedback port")
+        T = getporttype(node, label, :input)
+        for (con, v) in buf
+            value = dict_to_value(v)
+            setinputbuffer!(node, label, parse(Int, con),
+                            isnothing(value) ? nothing : convert(T, value))
+        end
+    end
+    return node
+end
+
+"""
+    workflow_to_dict(w::Workflow; values::Bool = true, state::Bool = false) -> Dict
  
 Convert workflow to dictionary representation, ready to be serialized to JSON.
  
-Keys: `"id"`, `"name"`, `"n_iter"`, `"c_iter"`, `"nodes"`, `"connections"`,
-`"incoming"`, `"outgoing"`.
+Keys: `"format_version"`, `"id"`, `"name"`, `"n_iter"`, `"c_iter"`, `"nodes"`,
+`"connections"`, `"incoming"`, `"outgoing"`.
+ 
+`values` writes the current settings values of every node, so the result is a
+workflow that can be loaded and run. `state` adds the contents of `:feedback`
+input buffers, which turns the result into a checkpoint of a run in progress -
+see [`node_state_to_dict`](@ref) and resume with `reset_mode = :soft`.
  
 # Notes
 - `"nodes"` and `"connections"` are keyed by *stringified* identifiers, while
   `"incoming"` and `"outgoing"` keep integer node ids.
-- Execution state - `run_id`, logs, cached output data, `exec_n`, the contents
-  of input buffers and settings *values* - is not included, so the result
-  describes structure only. `"settings"` inside a node holds the settings
-  SCHEMA ([`settings_schema`](@ref)), not the values.
-- A workflow restored from this dictionary cannot run until its settings are
-  set again, and a cyclic one cannot be resumed: the state of the last turn
-  lives in the buffer of a `:feedback` port. See [`dict_to_workflow`](@ref).
+- Inside a node, `"settings"` holds the settings *schema*
+  ([`settings_schema`](@ref)) and `"settings_values"` holds the *values*
+  ([`settings_to_dict`](@ref)).
+- `run_id`, logs and cached output data are never included. Cached data is not
+  needed: a loaded node is `:dirty` and recomputes.
 """
-function workflow_to_dict(w::Workflow)
+function workflow_to_dict(w::Workflow; values::Bool = true, state::Bool = false)
     d                = Dict{String, Any}()
+    d["format_version"] = SNAPSHOT_FORMAT_VERSION
     d["id"]          = w.id
     d["type"]        = workflowtypestr(w)
     d["name"]        = w.name
     d["n_iter"]      = w.n_iter
     n                = Dict{String, Dict}()
     for (k,v) in w.nodes
-        n[string(k)] = node_to_dict(v)
+        n[string(k)] = node_to_dict(v; values = values, state = state)
     end
     d["nodes"]       = n
     d["c_iter"]      = w.c_iter
@@ -269,58 +541,53 @@ function workflow_to_dict(w::Workflow)
 end
 
 """
-    dict_to_workflow(d::Dict{String}; check_connection::Bool = true,
+    dict_to_workflow(d::Dict{String}; usermode::Bool = false,
+                     check_connection::Bool = true,
                      check_connection_throw_error::Bool = true) -> Workflow
 
-Rebuild a workflow from a dictionary produced by [`workflow_to_dict`](@ref).
+Rebuild a workflow from the dictionary [`workflow_to_dict`](@ref) produced.
 
-Node types come from [`NODE_REGISTER`](@ref): a snapshot names a type with
-[`nodetypestr`](@ref), and a name that is not registered raises, naming it.
-Nothing in the dictionary is evaluated or resolved as a Julia name - the
-specification comes from the register, not from the file - so loading an
-untrusted snapshot cannot execute anything. Loading never runs a node either.
+Every node type named in `d` must be registered first ([`register_node!`](@ref)):
+the file names a type, the register decides whether it may be built. **Loading
+executes nothing** - no user code runs, and no type is resolved from a string.
 
-Node keys must match the `"id"` inside their `"properties"`, ids must be
-unique, and `n_iter` is raised to cover every id in use, so the next
-[`add_node!`](@ref) cannot overwrite a restored node.
+Settings values and feedback buffer contents are restored when the file carries
+them; see [`dict_to_node`](@ref). Statuses are not: every loaded node is
+`:dirty`, so a loaded workflow recomputes. To continue an interrupted run
+instead of starting it over, call `scheduler!(w; reset_mode = :soft)`.
 
-# What is restored, and what is not
-Restored: the workflow type and name, the nodes with their types,
-specifications and positions, the connections, and the `incoming`/`outgoing`
-indices (rebuilt by [`refreshind!`](@ref) rather than read from the file).
+`usermode` is passed to [`dict_to_node`](@ref). `check_connection` runs
+[`check_connection_validity`](@ref) on every connection, and
+`check_connection_throw_error` decides whether a connection that does not
+validate is an error (the default) or is silently dropped - a graph that lost
+an edge computes something else, so prefer the error.
 
-**Not** restored: setting *values*, the contents of input buffers, cached
-output data, `exec_n`, and the log. Every node comes back `:dirty`.
-
-A loaded workflow therefore **cannot run as it stands**: nodes that read
-`node.settings` fail. And a cyclic workflow cannot be resumed, because the
-state of the last turn lives in the buffer of a `:feedback` port, which is not
-part of a snapshot. See *Serialization* in the guide.
-
-# Connections
-With `check_connection` every connection goes through
-[`check_connection_validity`](@ref), which rejects a port that is not in the
-specification, a reference to a node that is not in the snapshot, and
-mismatched port datatypes. With `check_connection_throw_error = false` such a
-connection is dropped instead of raising, and the workflow loads without it.
-
-!!! warning "The single-port check does not fire here"
-    [`check_connection_validity`](@ref) looks for an occupied port in
-    `model.incoming`, and that index is only filled by [`refreshind!`](@ref)
-    after the loop over connections. A snapshot holding two connections into
-    the same `SinglePort` is therefore loaded, although
-    [`add_connection!`](@ref) would reject it.
+# Notes
+- Every node key must match the `"id"` inside its `"properties"`, and ids must
+  be unique; either mismatch raises, naming the key.
+- `n_iter` and `c_iter` are raised to the largest id actually loaded, so the
+  next [`add_node!`](@ref) or [`add_connection!`](@ref) cannot overwrite
+  something the file brought in.
+- A snapshot with a `"format_version"` newer than `SNAPSHOT_FORMAT_VERSION` is
+  refused; one without the key is read as version 1.
 """
-function dict_to_workflow(d::Dict{String}; check_connection::Bool = true, check_connection_throw_error::Bool = true)
+function dict_to_workflow(d::Dict{String}; usermode::Bool = false,
+                          check_connection::Bool = true, check_connection_throw_error::Bool = true)
     haskey(d, "id") || error("No `id` field")
     haskey(d, "type") || error("No `type` field")
     if d["type"] ∉ ("DAW", "ABW") error("Unknown type") end
+    #  A file without a version is a pre-versioned snapshot, read as 1. A
+    #  newer one is refused: its meaning is not known here.
+    fv = get(d, "format_version", 1)
+    (fv isa Integer && fv <= SNAPSHOT_FORMAT_VERSION) ||
+        error("Unsupported snapshot format version $(repr(fv)); " *
+              "this version reads up to $(SNAPSHOT_FORMAT_VERSION)")
 
     w = Workflow(d["id"]; type = Symbol(d["type"]))
     w.name     = d["name"]
 
     for (k, n) in d["nodes"]
-        node = dict_to_node(n)
+        node = dict_to_node(n; usermode = usermode)
         id   = node.properties.id
         parse(Int, k) == id || error("Node key $(k) does not match the id $(id) inside it")
         haskey(w.nodes, id) && error("Duplicate node id: $(id)")
@@ -328,18 +595,23 @@ function dict_to_workflow(d::Dict{String}; check_connection::Bool = true, check_
     end
     w.n_iter = max(d["n_iter"], isempty(w.nodes) ? 0 : maximum(keys(w.nodes)))
 
-    w.c_iter = d["c_iter"]
     for (k, c) in d["connections"]
         id     =  parse(Int, k)
         con    = dict_to_connection(c)
-        if check_connection 
+        if check_connection
             ccv = check_connection_validity(w, con; throw_error = check_connection_throw_error)
             ccv || continue
         end
         w.connections[id] = con
-        push!(get!(w.incoming, con.input_id, Int[]), id)
+        #  Index as we go: check_connection_validity reads model.incoming to
+        #  see whether a SinglePort is already taken, and that check is blind
+        #  while the index is empty. refreshind! below rebuilds it anyway.
+        push!(get!(w.incoming, con.input_id,  Int[]), id)
         push!(get!(w.outgoing, con.output_id, Int[]), id)
     end
+    #  Same clamp as n_iter above: a connection id from the file must never be
+    #  handed out again, or the next add_connection! overwrites a loaded edge.
+    w.c_iter = max(d["c_iter"], isempty(w.connections) ? 0 : maximum(keys(w.connections)))
     # w.audit_log # technical debt
     refreshind!(w)
     return w
@@ -348,32 +620,44 @@ end
 """
     dict_to_node(d::Dict{String}; usermode = false) -> DataNode
 
-Rebuild one node from its dictionary.
+Rebuild one node from the dictionary [`node_to_dict`](@ref) produced.
 
-The node type and the specification come from [`NODE_REGISTER`](@ref) by the
-`"type"` key of the dictionary. The node is created `:dirty` whatever status
-the snapshot holds: cached output data is not part of a snapshot, so a node
-must not claim to be up to date without it. Setting values are not restored
-either - the node starts with empty settings.
+The node *type* and its *spec* come from [`NODE_REGISTER`](@ref), looked up by
+the `"type"` string; the `"spec"` section of the file is not used. Settings
+values (`"settings_values"`) and feedback buffers (`"state"`) are restored when
+present - see [`dict_to_settings!`](@ref) and [`dict_to_node_state!`](@ref).
+The node comes back `:dirty` whatever status the file carries, and without
+cached output data.
 
-`usermode` is accepted for a future path where the specification is rebuilt by
-[`dict_to_spec`](@ref) instead of being taken from the register, which a node
-with settings-dependent ports needs. It is not wired up yet.
+With `usermode = true` the spec is rebuilt from the file by `dict_to_spec`,
+which you define yourself; the type still comes from the register. This lets a
+snapshot carry a spec the register does not have.
 """
 function dict_to_node(d::Dict{String}; usermode = false)
-    id                = d["id"] 
     properties        = dict_to_properties(d["properties"])
     properties.status = :dirty
+    d["id"] == properties.id ||
+        error("Node `id` $(d["id"]) does not match `properties.id` $(properties.id)")
     typestr           = d["type"]
+    #  The node type always comes from the register: a snapshot names a type,
+    #  it never defines one. In user mode the *spec* is rebuilt from the file
+    #  by `dict_to_spec`, so a snapshot can carry a spec the register lacks.
     type, spec        = getregnodeinfo(typestr)
-    return DataNode(type, properties, spec; settings = Dict{Symbol, Any}(), data = Dict{Symbol, Any}(), state = NodeState(), input_buffer = Dict{Symbol, Dict{Int, Any}}())
+    usermode && (spec = dict_to_spec(d["spec"]))
+    node = DataNode(type, properties, spec; settings = Dict{Symbol, Any}(), data = Dict{Symbol, Any}(), state = NodeState(), input_buffer = Dict{Symbol, Dict{Int, Any}}())
+    haskey(d, "settings_values") && dict_to_settings!(node, d["settings_values"])
+    haskey(d, "state")           && dict_to_node_state!(node, d["state"])
+    return node
 end
 
 """
     dict_to_connection(d::Dict{String}) -> NodeConnection
 
-Rebuild one connection. Port labels are accepted both as `Symbol` - what
-[`connection_to_dict`](@ref) writes - and as the strings a JSON reader returns.
+Rebuild one connection from the dictionary [`connection_to_dict`](@ref)
+produced. Port labels are accepted as `Symbol` or as `String`, so a dictionary
+that has been through a text format reads back unchanged.
+
+The connection is not validated here; [`dict_to_workflow`](@ref) does that.
 """
 function dict_to_connection(d::Dict{String})
     sym(x) = x isa Symbol ? x : Symbol(x)
@@ -384,9 +668,10 @@ end
 """
     dict_to_properties(d::Dict{String}) -> NodeProperties
 
-Rebuild node properties. Accepts both what [`node_properties_to_dict`](@ref)
-writes (a `Symbol` status, a `Tuple` position) and what survives a JSON round
-trip (a string status, a two-element array).
+Rebuild node properties from the dictionary
+[`node_properties_to_dict`](@ref) produced. `"status"` is accepted as `Symbol`
+or `String` and `"position"` as a tuple or a two-element array, so a dictionary
+that has been through a text format reads back unchanged.
 """
 function dict_to_properties(d::Dict{String})
     status = d["status"] isa Symbol ? d["status"] : Symbol(d["status"])
@@ -397,9 +682,21 @@ end
 """
     dict_to_spec(d::Dict{String}) -> NodeSpec
 
-Rebuild a node specification from a dictionary. Not defined by default: a
-specification normally comes from [`NODE_REGISTER`](@ref). Define it for a node
-type whose ports depend on its settings.
+User-defined inverse of [`spec_to_dict`](@ref), used only by
+[`dict_to_node`](@ref) with `usermode = true`. The package ships no method: a
+spec is normally taken from [`NODE_REGISTER`](@ref), which is what keeps a
+snapshot from describing a node the running code does not have.
+
+Define it if you need snapshots to carry specs:
+
+```julia
+function MetidaFlows.dict_to_spec(d::Dict{String})
+    NodeSpec(d["name"], my_ports(d["input_ports"]), my_ports(d["output_ports"]),
+             Symbol.(d["settings"]))
+end
+```
+
+Resolve nothing from the file into a type or a function: a snapshot is data.
 """
 dict_to_spec(d) = error("Define `dict_to_spec(d::Dict{String})::NodeSpec` function to use user serialization mode.")
 

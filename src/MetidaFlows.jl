@@ -548,10 +548,16 @@ so that a snapshot naming it can be restored. Returns the key, which is
 [`nodetypestr`](@ref) of the node.
  
 Registering a different type under a key already taken raises; `overwrite`
-replaces the entry, `skipmode` returns `nothing` instead of raising. The
-`Workflow` form walks every node of a graph and returns the keys it added - a
-graph normally holds several nodes of one type, so `skipmode = true` is
-what you want there.
+replaces the entry, `skipmode` returns `nothing` instead of raising.
+
+The `Workflow` form registers every node type of a graph and returns the keys it
+added, sorted. A graph normally holds several nodes of one type, and that is not
+a repeated registration: each type is registered once per call, from its first
+node, and the remaining nodes of that type are passed over. So
+`register_node!(w)` is the ordinary call, and the flags mean for a graph exactly
+what they mean for a node - what to do about a key that was **already taken
+before this call**. A type whose spec has changed is the case for
+`overwrite = true`; `skipmode = true` keeps whatever is registered.
  
 !!! warning "Register from `__init__`, not at top level"
     A package that registers its nodes in top-level code loses the
@@ -578,7 +584,7 @@ function register_node!(node::DataNode{T}; overwrite = false, skipmode = false) 
         if skipmode
             return nothing
         else
-            error("Node $(typestr) alredy exists, use `overwrite = true` to overwrite, or `skipmode = true` to skip existed nodes")
+            error("Node $(typestr) already registered, use `overwrite = true` to replace it, or `skipmode = true` to keep it")
         end
     end
     NODE_REGISTER[typestr] = (T, node.spec)
@@ -701,14 +707,23 @@ end
 workflowtypestr(::Workflow{DAW}) = "DAW"
 workflowtypestr(::Workflow{ABW}) = "ABW"
 
-function register_node!(model::Workflow; skipmode = false)
+function register_node!(model::Workflow; overwrite = false, skipmode = false)
     names = String[]
-    for (k, node) in model.nodes
-        name = node.spec.name
-        rn   = register_node!(node; skipmode = skipmode)
-        if !isnothing(rn) push!(names, rn) end
+    seen  = Set{String}()
+    for (_, node) in model.nodes
+        typestr = nodetypestr(node)
+        #  Несколько узлов одного типа в одном графе — это не повторная
+        #  регистрация: тип внесён этим же вызовом и из этого же графа.
+        #  Без этого естественный `register_node!(w)` падал на втором
+        #  таком узле, то есть почти на любом настоящем графе.
+        typestr in seen && continue
+        push!(seen, typestr)
+        rn = register_node!(node; overwrite = overwrite, skipmode = skipmode)
+        isnothing(rn) || push!(names, rn)
     end
-    names
+    #  Порядок обхода `model.nodes` машинно-зависим, порядок возврата — нет.
+    sort!(names)
+    return names
 end
 
 
@@ -934,7 +949,7 @@ end
 Rebuild the `incoming`/`outgoing` indices from `model.connections`.
  
 Cheaper than keeping them in a snapshot and safer: the indices cannot disagree
-with the connections they index. Used by `dict_to_workflow` after the
+with the connections they index. Used by [`dict_to_workflow`](@ref) after the
 nodes and connections are in place.
 """
 function refreshind!(model::Workflow)
