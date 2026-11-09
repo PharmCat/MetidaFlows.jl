@@ -56,7 +56,8 @@ TEST_GROUPS = (
     (id = "edge",          file = "test_edge.jl", descr = "нулевые, единичные и вырожденные случаи"),
     (id = "serialization", file = "test_serialization.jl", descr = "словарные представления и схемы"),
     (id = "display",       file = "test_display.jl", descr = "методы show"),
-    (id = "getmeta",    file = "test_getmeta.jl", descr = "метаданные портов: getmeta / getinputmeta"),
+    (id = "getmeta",       file = "test_getmeta.jl", descr = "метаданные портов: getmeta / getinputmeta"),
+    (id = "algo",          file = "test_algorithms.jl", descr = "зоопарк алгоритмов"),
 )
 
 SELECTED = isempty(ARGS) ? [g.id for g in TEST_GROUPS] : ARGS
