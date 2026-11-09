@@ -26,6 +26,7 @@ makedocs(;
             "Newton's method and :error ports" => "examples_newton.md",
             "Horner's scheme on DAW" => "examples_horner.md",
             "Edit distance: dynamic programming" => "examples_edit_distance.md",
+            "Modular exponentiation: skipping work" => "examples_power.md",
         ],
         "API" => "api.md",
     ],

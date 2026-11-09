@@ -59,7 +59,8 @@ end
 
 """
     scheduler!(model::Workflow{DAW}; reset_mode::Symbol = :full,
-               throw_error::Bool = false, strict::Bool = false)
+               throw_error::Bool = false, strict::Bool = false,
+               release_optional::Bool = false)
  
 Execute entire data analysis workflow (DAW) using topological ordering.
  
@@ -85,7 +86,16 @@ This scheduler is designed for deterministic acyclic data-analysis workflows.
   that can finish, finish, and then reports every failure at once; the
   workflow is left in its post-run state. `throw_error` wins: if it raised,
   this check is never reached.
- 
+- `release_optional`: run a node that is held back **only** by a `required =
+  false` port, reading `nothing` there instead of skipping it. Off by default.
+  In topological order a producer that is not `:clean` when its consumer comes
+  up has already had its turn - it failed, or a gate above it did not take its
+  branch - so there is nothing left to wait for, and this is what makes
+  `required = false` mean on a run what it says on the port. Any earlier run's
+  value left in that buffer is dropped first, see
+  [`invalidate_stale_optional!`](@ref). A `required` port still holds the node
+  back. Without the flag such a consumer ends the run `:dirty`.
+
 # Notes
 - Nodes are executed at most once per scheduler run.
 - A node that calls [`request_stop!`](@ref) ends the traversal: everything
@@ -116,7 +126,7 @@ scheduler!(workflow)
 result = getdata(workflow, output_id, :result)
 ```
 """
-function scheduler!(model::Workflow{DAW}; reset_mode::Symbol = :full, throw_error::Bool = false, strict::Bool = false)
+function scheduler!(model::Workflow{DAW}; reset_mode::Symbol = :full, throw_error::Bool = false, strict::Bool = false, release_optional::Bool = false)
     g = makegraph(model)
     if is_cyclic(g) error("workflow is cyclic") end
     if reset_mode ∉ (:full, :soft, :none) error("Wrong reset mode: $reset_mode , only :full, :soft, :none availabel.") end
@@ -129,8 +139,18 @@ function scheduler!(model::Workflow{DAW}; reset_mode::Symbol = :full, throw_erro
     order = topological_sort(g)
     for id in order
         #  A node whose producer failed must not be executed
-        isready(model, id) || continue
-        execute!(model, id; settings = ExecuteSettings(;execute_upstream = false, invalidate_downstream = false, check_cyclic = false), throw_error = throw_error) 
+        if !isready(model, id)
+            #  Узел не готов. Если блокируют его ТОЛЬКО необязательные
+            #  порты, то в топологическом порядке их производители свой
+            #  шанс уже использовали: значения не будет никогда, и
+            #  `nothing` — законный ответ, а не «еще не посчитано».
+            #  Проверка стоит здесь, а не выше: на готовом узле лишнего
+            #  обхода связей не делается.
+            release_optional || continue
+            isready(model, id; wait_optional = false) || continue
+            invalidate_stale_optional!(model, id)
+        end
+        execute!(model, id; settings = ExecuteSettings(;execute_upstream = false, invalidate_downstream = false, check_cyclic = false), throw_error = throw_error)
         #  Узел поднимает флаг остановки: обход прекращается, остальные узлы порядка  :dirty.
         if isstoprequested(getnode(model, id))
             push!(model.log, LogMsg(:info, "Run stopped by node (id: $(id))"))
@@ -141,9 +161,52 @@ function scheduler!(model::Workflow{DAW}; reset_mode::Symbol = :full, throw_erro
     return true
 end
 """
+    release_optional_blocked!(model::Workflow, queue::Vector{Int},
+                              queued::Set{Int}, released::Set{Int}) -> Int
+
+Enqueue every `:dirty` node that [`isready`](@ref) refuses **only** because of
+an optional port, and return how many were released.
+
+Called by [`scheduler!`](@ref) on an [`ABW`](@ref) workflow with
+`release_optional = true`, and only when the queue has run dry. That moment is
+the guarantee the relaxation needs: an empty queue means nothing will execute
+again by itself, so a producer that is not `:clean` now will never be, and its
+optional consumers can be told so instead of waiting for it forever.
+
+An id is recorded in `released`, which is what tells the queue loop to serve
+that node under the relaxed rule once - the loop re-checks readiness when it
+pops a node, and the ordinary rule would refuse it again and release it again
+forever. Its stale optional buffers are cleared at that point, by
+[`invalidate_stale_optional!`](@ref). Nodes are queued in id order, so a run
+does not depend on `model.nodes` iteration order.
+
+A node blocked by a `required` port is never released: that is a missing value
+the node declared it cannot work without.
+"""
+function release_optional_blocked!(model::Workflow, queue::Vector{Int}, queued::Set{Int}, released::Set{Int})
+    ids = Int[]
+    for (nid, node) in model.nodes
+        getstatus(node) == :dirty || continue
+        isready(model, nid) && continue                       # не заблокирован — вернёт обычный путь
+        isready(model, nid; wait_optional = false) || continue # блокирует обязательный порт
+        push!(ids, nid)
+    end
+    isempty(ids) && return 0
+    sort!(ids)   # порядок обхода Dict машинно-зависим, порядок выпуска — нет
+    for nid in ids
+        push!(released, nid)
+        if !(nid in queued)
+            push!(queue, nid)
+            push!(queued, nid)
+        end
+    end
+    return length(ids)
+end
+
+"""
     scheduler!(model::Workflow{ABW}; reset_mode::Symbol = :full, maxiter = 1000,
                throw_error::Bool = false, throw_warn::Bool = true,
-               strict::Bool = false)
+               strict::Bool = false, release_optional::Bool = false)
  
 Execute workflow using queue-based agent/event scheduling.
  
@@ -161,6 +224,16 @@ several times during one call.
 4. For every port the execution produced, mark the child **and everything
    downstream of it** `:dirty` - see [`mark_dirty_downstream!`](@ref) - and
    enqueue the child.
+5. Enqueue, without marking, the children attached to `:normal` connections
+   leaving a port the execution did **not** produce: no value is coming for
+   them, and a consumer whose port is optional is ready to run with `nothing`.
+   Without this step such a consumer would depend on whether it happened to be
+   dropped from the queue before its producer went silent - a node that
+   publishes nothing enqueues nobody, so nothing would bring it back.
+ 
+Required input ports are enforced, as in [`DAW`](@ref): a node whose
+`required` `:normal` port has no value at all is refused with `:invalid_node`
+instead of being run on nothing. See [`execution_node_validation`](@ref).
  
 # Arguments
 - `reset_mode`: `:full` (default) invalidates every node via [`reset!`](@ref),
@@ -188,7 +261,17 @@ several times during one call.
   caught. `throw_error` wins: if it raised, this check is never reached.
 - `throw_warn`: warn when the seed queue is empty. Nothing is executed in that
   case and the nodes stay `:dirty`, which is otherwise silent.
- 
+- `release_optional`: when the queue runs dry, release the nodes that
+  [`isready`](@ref) holds back **only** because of a `required = false` port -
+  see [`release_optional_blocked!`](@ref) - and go on serving the queue. Off by
+  default. The empty queue is what makes it sound: until then a producer that
+  is not `:clean` may still be about to run, and reading `nothing` from its
+  port would be wrong rather than conditional. This is what lets a whole
+  branch be skipped and the result merged back afterwards: without it a
+  consumer waits for a producer that was itself never executed, and the run
+  stops mid-loop with no result and no error. One `:info` record is appended
+  to `model.log` the first time a run releases anything.
+
 # Cycles
 A cycle must be closed by a connection entering a port declared with
 `kind = :feedback`; see [`PortSpec`](@ref). Two properties make the loop run:
@@ -235,7 +318,7 @@ scheduler!(w; maxiter = 10_000)           # long-running iteration
 scheduler!(w; throw_warn = false)         # a deliberately unseeded graph
 ```
 """
-function scheduler!(model::Workflow{ABW}; reset_mode::Symbol = :full, maxiter = 1000, throw_error::Bool = false, throw_warn::Bool = true, strict::Bool = false)
+function scheduler!(model::Workflow{ABW}; reset_mode::Symbol = :full, maxiter = 1000, throw_error::Bool = false, throw_warn::Bool = true, strict::Bool = false, release_optional::Bool = false)
     if reset_mode ∉ (:full, :soft, :none) error("Wrong reset mode: $reset_mode , only :full, :soft, :none availabel.") end
     soft_reset = false
     # change to thread safe
@@ -255,7 +338,26 @@ function scheduler!(model::Workflow{ABW}; reset_mode::Symbol = :full, maxiter = 
     if throw_warn && length(queue) == 0 @warn "No nodes in queue..." end
     # execute
     iter = 0
-    while length(queue) > 0
+    announced = false
+    released = Set{Int}()   # выпущенные на затишье: ослабление действует на один съём
+    while true
+        if isempty(queue)
+            #  Очередь пуста — обычный прогон на этом кончается. С
+            #  `release_optional` сперва проверяем, не встал ли он на
+            #  узлах, которым мешают только необязательные порты: пустая
+            #  очередь и есть доказательство, что их производители уже
+            #  не отработают.
+            release_optional || break
+            n = release_optional_blocked!(model, queue, queued, released)
+            n == 0 && break
+            if !announced
+                #  Один раз за прогон: иначе на длинном цикле запись
+                #  в лог на каждый виток.
+                push!(model.log, LogMsg(:info,
+                    "Released $(n) node(s) blocked only by optional inputs (release_optional = true)"))
+                announced = true
+            end
+        end
         if iter > maxiter
             error("max iterations reached ($(maxiter)): $(length(queue)) node(s) still queued, " *
                   "next is node $(first(queue)). Raise `maxiter` for a long iteration, " *
@@ -263,12 +365,27 @@ function scheduler!(model::Workflow{ABW}; reset_mode::Symbol = :full, maxiter = 
         end
         id = popfirst!(queue)
         delete!(queued, id)
-        if isready(model, id)
-            #execute_upstream=false
-            #invalidate_downstream=false 
-            #check_cyclic=false
-            #check_input_buffer=false
-            ready_ports = execute!(model, id; settings = ExecuteSettings(false), throw_error = throw_error)
+        #  Ослабление действует ровно на один съём того узла, который
+        #  выпустил проход по затишью. Иначе узел, снова попавший в
+        #  очередь обычным путём, считался бы по ослабленному правилу —
+        #  то есть мог бы прочитать `nothing` там, где значение ещё шло.
+        relaxed = id in released
+        if relaxed
+            delete!(released, id)
+            #  Производитель необязательного порта не отработал: что
+            #  лежит в буфере — значение прошлого витка, а не ответ.
+            invalidate_stale_optional!(model, id)
+        end
+        if isready(model, id; wait_optional = !relaxed)
+            #  Не ExecuteSettings(false): он выключил бы и проверку
+            #  заполненности обязательных входов, то есть флаг
+            #  `required` в ABW не значил бы ничего. Порядок и
+            #  инвалидацию ведёт сам планировщик, их и выключаем.
+            ready_ports = execute!(model, id;
+                settings = ExecuteSettings(; execute_upstream = false,
+                                             invalidate_downstream = false,
+                                             check_cyclic = false),
+                throw_error = throw_error)
             #  Узел попросил остановиться. Опубликованное им уже лежит в буферах потомков, в очередь  не попадают.
             if isstoprequested(getnode(model, id))
                 push!(model.log, LogMsg(:info, "Run stopped by node (id: $(id))"))
@@ -284,6 +401,26 @@ function scheduler!(model::Workflow{ABW}; reset_mode::Symbol = :full, maxiter = 
                         push!(queue, con.input_id)
                         push!(queued, con.input_id)
                     end
+                end
+            end
+            #  Потомки портов, в которые узел НЕ публиковал, тоже должны
+            #  попасть в очередь. Значения им не будет никогда, и если
+            #  порт необязательный, узел готов считаться с `nothing` —
+            #  на этом стоит условное вычисление. Без этого он зависел бы
+            #  от того, выбросили ли его из очереди ДО того, как родитель
+            #  замолчал: не-готовый узел здесь отбрасывается, а вернуть
+            #  его могла только публикация, которой не будет.
+            #  :dirty не помечаем — новых данных узел не получил.
+            #  Обратные и :error рёбра пропускаем: первые замкнули бы
+            #  цикл навсегда, вторые защёлкивают диагноз.
+            for cid in get(model.outgoing, id, Int[])
+                con = model.connections[cid]
+                con.output_port in ready_ports && continue
+                child = getnode(model, con.input_id)
+                getportspec(child, con.input_port, :input).kind == :normal || continue
+                if !(con.input_id in queued)
+                    push!(queue, con.input_id)
+                    push!(queued, con.input_id)
                 end
             end
         end

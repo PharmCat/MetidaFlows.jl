@@ -114,6 +114,8 @@ function execute!(model::Workflow, id::Int; settings::ExecuteSettings = ExecuteS
     setreadyports!(node, ready_ports)
     # push outputs for each ready port
     push_buffer!(model, id)
+    #  снять с потребителей значения тех портов, в которые на этом исполнении не публиковали, иначе "нет значения" не отличить от значения прошлого витка
+    invalidate_unpublished!(model, id, ready_ports)
     # Invalidate children
     if settings.invalidate_downstream
         children = get_children(model, id)

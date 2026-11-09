@@ -1219,6 +1219,70 @@ isstoprequested(st::NodeState) = st.stop
 isstoprequested(::AbstractNodeState) = false
 
 """
+    invalidate_unpublished!(model::Workflow, id::Int, ready_ports::Vector{Symbol})
+
+Clear the consumer buffers of every `:normal` connection leaving a port that
+this execution did **not** publish to.
+
+Called by [`execute!`](@ref) right after [`push_buffer!`](@ref), and it is what
+keeps "there is no value" distinguishable from "there is last turn's value".
+Without it a node that publishes a port on one turn and not on the next leaves
+its consumer reading the earlier value and reporting `:clean` - and a consumer
+with an optional port can never tell that the producer went silent, which is
+what makes conditional evaluation work at all.
+
+`:feedback` connections are left alone: their buffers *are* the state of a
+loop, which is exactly what has to survive a turn. So are `:error` ones, which
+latch a diagnosis until something reads it.
+
+See also [`push_buffer!`](@ref), [`invalidate_buffer!`](@ref).
+"""
+function invalidate_unpublished!(model::Workflow, id::Int, ready_ports::Vector{Symbol})
+    haskey(model.outgoing, id) || return model
+    node = getnode(model, id)
+    for cid in model.outgoing[id]
+        con = model.connections[cid]
+        con.output_port in ready_ports && continue
+        child = getnode(model, con.input_id)
+        getportspec(child, con.input_port, :input).kind == :normal || continue
+        invalidate_buffer!(child, con.input_port, cid)
+    end
+    return model
+end
+
+"""
+    invalidate_stale_optional!(model::Workflow, id::Int)
+
+Clear this node's buffer for every `:normal` connection entering an **optional**
+port whose producer is not `:clean`.
+
+The producer has not published in the current turn, so whatever sits in that
+buffer came from an earlier one. [`invalidate_unpublished!`](@ref) covers the
+producer that *ran* and stayed silent; this covers the producer that did not
+run at all, whose buffer nothing else touches - [`mark_dirty_downstream!`](@ref)
+deliberately leaves input buffers alone, because in a cyclic workflow they are
+the loop state.
+
+Called by [`scheduler!`](@ref) with `release_optional = true`, for the node it
+is about to release, and only for one: a node that is ready under the ordinary
+rule has every producer `:clean` and nothing stale to clear.
+
+See also [`isready`](@ref), [`invalidate_buffer!`](@ref).
+"""
+function invalidate_stale_optional!(model::Workflow, id::Int)
+    node = getnode(model, id)
+    for con_id in get(model.incoming, id, Int[])
+        con = getconnection(model, con_id)
+        ps  = getportspec(node, con.input_port, :input)
+        ps.kind == :normal || continue
+        ps.required        && continue
+        getstatus(getnode(model, con.output_id)) == :clean && continue
+        invalidate_buffer!(node, con.input_port, con_id)
+    end
+    return model
+end
+
+"""
     invalidate_downstream!(model::Workflow, id::Int)
 
 Recursively invalidate all downstream nodes.
@@ -1301,33 +1365,73 @@ function invalidate_buffer!(node::AbstractDataNode, l::Symbol, con::Int)
 end
 
 """
-    isready(model::Workflow, id::Int)
+    isready(model::Workflow, id::Int; wait_optional::Bool = true)
+
+Check whether a node is ready for execution.
+
+A node is ready when, for every connection entering a **`:normal`** input
+port, the producer has status `:clean` **and**, if the port is `required`, that
+producer actually published to the port this connection leaves. Connections
+entering ports of any other kind are not waited for.
  
-Check whether node is ready for execution in ABW.
- 
-A node is ready when every producer connected to it through a **`:normal`**
-input port has status `:clean`. Connections entering ports of any other kind
-are not waited for.
- 
-This asymmetry is what makes cycles possible: a `:feedback` edge carries the
-value of the previous iteration, so requiring its producer to be `:clean`
+The kind asymmetry is what makes cycles possible: a `:feedback` edge carries
+the value of the previous iteration, so requiring its producer to be `:clean`
 would deadlock - the node would wait for a producer that waits for the node.
  
+The publication condition is what makes conditional evaluation work. A node
+that publishes only some of its output ports - every gate in the package does
+this - leaves the others with no value at all, and
+[`invalidate_unpublished!`](@ref) clears the consumer buffers so that nothing
+of the previous turn is read in their place. A consumer whose port is
+`required` therefore is not ready and does not run, in either scheduler; one
+whose port is `required = false` is ready and reads `nothing`, which is where
+a condition can be acted on.
+
+# `wait_optional`
+An optional port's producer is waited for by default, and that wait is not
+about the value - it is what separates "the producer published nothing" from
+"the producer has not run yet". Both read `nothing`, and only the first one is
+an answer.
+
+With `wait_optional = false` an optional port stops contributing to readiness
+altogether: a producer that is not `:clean` is read as absent instead of being
+waited for. That is only sound where the producer has already had its chance
+to run, so this is not something to set by hand - it is what
+`scheduler!(model; release_optional = true)` uses, in the one place each
+scheduler can guarantee it. Required ports are unaffected.
+
+A node released this way may still be holding an earlier turn's value in the
+optional port's buffer, which [`invalidate_stale_optional!`](@ref) clears.
+
 # Notes
 - Current node status itself is not checked.
-- Input buffer completeness is validated separately via
-  [`execution_node_validation`](@ref).
+- A port with **no connection at all** is a different case: this function
+  walks connections and cannot see such a port. Completeness of required
+  buffers is validated separately by [`execution_node_validation`](@ref),
+  which both schedulers enable: such a port makes the node `:invalid_node`.
 - A node with `:normal` input ports but no incoming connection is ready
   immediately; it just never gets enqueued unless something feeds it.
 """
-function isready(model::Workflow, id::Int)
+function isready(model::Workflow, id::Int; wait_optional::Bool = true)
     node = getnode(model, id)
     connections = get(model.incoming, id, Int[])
     for con_id in connections
         con = getconnection(model, con_id)
         parent_node = getnode(model, con.output_id)
         ps = getportspec(node, con.input_port, :input)
-        if ps.kind == :normal && getstatus(parent_node) != :clean return false end # ps.kind == :normal - crytical for cycling
+        ps.kind == :normal || continue
+        if ps.required
+            getstatus(parent_node) != :clean && return false # crytical for cycling
+            #  Родитель :clean, но в ЭТОТ порт на своём исполнении не публиковал: значения нет и не будет.
+            # Для обязательного порта это значит "не готов2, и узел не исполняется — иначе он посчитал бы на nothing.
+            (con.output_port in getstate(parent_node, :ready_ports)) || return false
+        elseif wait_optional
+            #  Отсутствие значения на необязательном порту законно, на
+            #  нем и стоит условное вычисление. Но ждать производителя
+            #  все равно надо, пока он может отработать: иначе `nothing`
+            #  значит не "нечего ждать", а "еще не посчитано".
+            getstatus(parent_node) != :clean && return false
+        end
     end
     return true
 end
@@ -1370,19 +1474,27 @@ Optional ports and ports of kind `:feedback` or `:error` may be empty: a
 feedback buffer is empty on the first pass of a loop by definition.
  
 With `check_input_buffer` disabled only [`validate_node`](@ref) is consulted.
-The [`ABW`](@ref) scheduler runs nodes that way.
+Both schedulers enable it, so a `required` `:normal` port left without a
+connection makes the node `:invalid_node` in either engine. A port that *has* a
+connection whose producer published nothing is a different case, caught earlier
+by [`isready`](@ref).
  
 # Returns
 - `true` if node is ready for execution.
 - `false` otherwise.
 """
 function execution_node_validation(node::AbstractDataNode, check_input_buffer::Bool = true)
-    # All ports must have something in input_buffer if port is required
+    #  Обязательный обычный порт должен иметь значение в буфере. Цикл, а
+    #  не `all` с замыканием: замыкание захватывает node и аллоцирует, а
+    #  эта функция зовётся на каждое исполнение узла.
     if check_input_buffer
-        return all(x-> length(node.input_buffer[x.label]) > 0 || !x.required || x.kind != :normal, node.spec.input_ports) && validate_node(node)
-    else
-        return validate_node(node)
+        for ps in node.spec.input_ports
+            ps.kind == :normal || continue
+            ps.required        || continue
+            isempty(node.input_buffer[ps.label]) && return false
+        end
     end
+    return validate_node(node)
 end
 """
     validate_settings(node::AbstractDataNode)

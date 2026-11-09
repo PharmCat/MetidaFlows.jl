@@ -2,9 +2,37 @@
 #
 #  КАТЕГОРИЯ: ЗООПАРК АЛГОРИТМОВ
 #
-#  Назначение: показать, что на графе собирается настоящий алгоритм — не
-#  обёртка вокруг готовой функции, а разложение на элементарные операции,
-#  где каждая операция это отдельный узел.
+#  Первый алгоритм — пузырьковая сортировка. Движок ABW, цикл замкнут
+#
+#  ГРАФ
+#
+#   ConstArray ─┬─▶ ArrayLength ──┐
+#               └─────────────────┤
+#                                 ├─▶ LoopState ─▶ MoreWork ─▶ LoopGate ──▶ :sorted
+#   ConstOne ─────────────────────┘        ▲                       │
+#                                          │                       ▼
+#                                          │                   ReadLeft
+#                                          │                       │
+#     ConstOne ────────────────────────────┼──────────────▶  NextIndex
+#                                          │                       │
+#                                          │                   ReadRight
+#                                          │                       │
+#                                          │                  ComparePair
+#                                          │                       │
+#                                          │                  AssignLeft
+#                                          │                       │
+#                                          │                  AssignRight
+#                                          │                       │
+#                                          │                  ChooseArray
+#                                          │                       │
+#                                          │                    PassEnd
+#                                          │                       │
+#     ConstOne ────────────────────────────┼──────────────▶ AdvanceIndex
+#                                          │                       │
+#     ConstOne ────────────────────────────┼──────────────▶  LowerLimit
+#                                          │                       │
+#                                          └─── :feedback ─── ShrinkLimit
+#
 #
 ############################################################################
 
@@ -1016,6 +1044,7 @@ include(joinpath(TEST_DIR, "algo_insertion.jl"))
 include(joinpath(TEST_DIR, "algo_newton.jl"))
 include(joinpath(TEST_DIR, "algo_horner.jl"))
 include(joinpath(TEST_DIR, "algo_edit.jl"))
+include(joinpath(TEST_DIR, "algo_power.jl"))
 
 end # @testset "ЗООПАРК АЛГОРИТМОВ"
 

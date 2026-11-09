@@ -184,6 +184,164 @@ Low-level buffer access - [`setinputbuffer!`](@ref),
 drive execution manually, but note that writing a buffer by hand bypasses
 invalidation.
 
+### A port that was not published to
+
+A node need not publish every output port, and every gate in this package
+relies on that. The question is what the consumer of a port that was *not*
+published to sees — and the answer has to be "nothing", not "whatever was
+there last turn". [`execute!`](@ref) therefore calls
+[`invalidate_unpublished!`](@ref) right after [`push_buffer!`](@ref): the
+consumer buffers of `:normal` connections leaving an unpublished port are
+cleared.
+
+`:feedback` connections are left alone, because their buffers *are* the state
+of a loop — a gate that ends a run publishes only its `:terminal` ports, and
+the loop head's feedback buffers have to survive that. `:error` connections
+are left alone too: they latch a diagnosis until a handler reads it.
+
+### Conditional evaluation
+
+A graph has no short-circuit *inside* a turn: both operands of a condition are
+nodes, and both are computed — [insertion
+sort](examples_insertion_sort.md) shows what that costs. But a computation can
+be made conditional, in two ways, and both rest on a producer publishing
+nothing:
+
+**Through `nothing`.** The consumer declares the guarded port
+`required = false` and branches on its absence:
+
+```julia
+spec = NodeSpec("Maybe",
+    [PortSpec("P", Int, :p; required = false), PortSpec("Q", Int, :q)],
+    [PortSpec("Out", Int, :out)])
+
+function MetidaFlows.execute_unsafe!(n::DataNode{Maybe})
+    p = getinputdata(n, :p)
+    setdata!(n, :out, isnothing(p) ? getinputdata(n, :q) : p)
+    return [:out]
+end
+```
+
+The node still runs; what it does changes. This is the cheap form, and the one
+to use when the guarded work is a choice rather than an expense.
+
+**Through a guard.** Route everything the guarded subgraph needs through one
+node that either passes it on or publishes nothing:
+
+```julia
+MetidaFlows.execute_unsafe!(n::DataNode{Guard}) =
+    getinputdata(n, :pass) ?
+        (setdata!(n, :value, getinputdata(n, :value)); [:value]) : Symbol[]
+```
+
+Then the guarded node has no fed input at all: in `ABW` nothing enqueues it
+and in `DAW` it is not ready, so in both it ends the run `:dirty`, never
+executed. This is the form that actually *saves* the work — at the price of
+relaying, and on two conditions: the guarded node must have no other producer
+that keeps publishing, and **nothing may consume its output** unless the run
+is told to release such a consumer. By default a consumer of a node that never
+runs waits for a producer that stays `:dirty`, and waits forever — even
+through an optional port, because waiting is about the producer's *status*, not
+about the value. So the guard form suits a dead end: a `:terminal` port, a side
+effect, a branch whose result is read out of band. To merge a guarded branch
+back in, see
+[`release_optional`](@ref Releasing-a-node-blocked-only-by-an-optional-port)
+below.
+
+When the result has to come back into the computation — into a loop state, or
+a merge — the other way is to put the conditional *inside* the node that does
+the expensive work:
+
+```julia
+function MetidaFlows.execute_unsafe!(n::DataNode{MulIf})
+    getinputdata(n, :pass) || return Symbol[]      # the multiplication is skipped
+    setdata!(n, :out, getinputdata(n, :a) * getinputdata(n, :b))
+    return [:out]
+end
+```
+
+The node runs — which costs a flag check — and the operation does not. Its
+consumer reads `nothing` and knows the work was skipped.
+[Modular exponentiation](examples_power.md) is built this way and measures what
+it saves.
+
+!!! note "Why the wait cannot simply be dropped"
+    It is tempting to let [`isready`](@ref) not wait for the producer of an
+    optional port at all. It is not sound in `ABW`: the queue order is not the
+    author's to choose, so a consumer could run *before* the producer decides,
+    read `nothing`, and be wrong on a turn where the value was coming.
+    Measured on the exponentiation graph, `3^5 mod 7` comes out as `1` instead
+    of `5`, with no multiplication performed at all. The wait is what makes
+    "the producer published nothing" distinguishable from "the producer has not
+    run yet". What *can* be dropped is the wait for a producer that has already
+    had its chance to run, which is what `release_optional` does, below.
+
+Those two cases are what `required` distinguishes, and both schedulers now
+answer them the same way:
+
+| the port | what happens |
+|:---|:---|
+| `required`, producer published nothing | not ready — the node does not run, stays `:dirty` |
+| `required`, **no connection at all** | a structural error — `:invalid_node`, see [`execution_node_validation`](@ref) |
+| `required = false`, no value for any reason | the node runs and reads `nothing` |
+
+The middle row used to differ: `ABW` did not consult `required` at all, so it
+ran the node and handed its body `nothing`.
+
+### Releasing a node blocked only by an optional port
+
+The last row of that table is about a port with no value. It says nothing about
+*when* a run may conclude there is none — and by default a run concludes it
+only when the producer ran and stayed silent. A producer that was never
+executed at all leaves its consumer waiting, which is what confines the guard
+form to dead ends.
+
+`release_optional`, off by default on both schedulers, adds the missing
+conclusion. A node held back **only** by `required = false` ports is run,
+reading `nothing` there:
+
+```julia
+scheduler!(w; release_optional = true)
+```
+
+The flag is not "stop waiting". It is "stop waiting *where the producer has
+already had its chance*", and each scheduler has exactly one place that
+guarantees that:
+
+| scheduler | the guarantee |
+|:---|:---|
+| `DAW` | topological order — when the traversal reaches the consumer, its producer has already run, failed, or been skipped |
+| `ABW` | an empty queue — nothing will execute again by itself, so a producer that is not `:clean` now never will be |
+
+So in `ABW` the ordinary turn still waits, and the release happens only when
+the queue has run dry, after which the queue is served again; see
+[`release_optional_blocked!`](@ref). A `required` port never releases a node.
+
+Releasing is half of it. The other half is that the consumer's buffer may still
+hold an earlier turn's value: [`invalidate_unpublished!`](@ref) covers a
+producer that ran and published nothing, but nothing clears the buffer of a
+producer that did not run — [`mark_dirty_downstream!`](@ref) deliberately
+leaves input buffers alone, because in a cycle they are the loop state. So a
+released node has its stale optional buffers dropped first, by
+[`invalidate_stale_optional!`](@ref). Measured on a guarded accumulator loop:
+without that step the sum comes out 26 instead of 18, because the previous
+turn's value is added a second time.
+
+What the flag buys is a conditional **branch** rather than a conditional
+operation — a guarded subgraph whose result merges back in:
+
+```julia
+scheduler!(w)                              # the consumer waits forever: no result, no error
+scheduler!(w; release_optional = true)     # the branch is skipped and the merge happens
+```
+
+On the [exponentiation graph](examples_power.md) the guard form then becomes
+the cheaper of the two idioms: for `n = 1024` the multiplication node is
+executed **once** instead of on all 12 turns, and the answer is the same. What
+it costs is that "no value" now also covers "the producer failed", so a failure
+upstream of an optional port becomes a `nothing` the consumer must handle
+rather than a node that does not run. That is why it is opt-in.
+
 ---
 
 ## Schedulers
@@ -580,7 +738,8 @@ the producer.
 Four places in the engine read the kind:
 
 * [`isready`](@ref) waits only for producers connected through `:normal`
-  ports. Anything else is not waited for.
+  ports — and, for a `required` one, also for that producer to have actually
+  published to the port in question. Anything else is not waited for.
 * [`execution_node_validation`](@ref) requires a filled input buffer only for
   `:normal` ports, so a feedback port may be empty on the first pass.
 * cycle detection ([`makegraph`](@ref)) does not follow `:feedback` or

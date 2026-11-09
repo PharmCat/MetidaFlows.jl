@@ -181,25 +181,44 @@ end
     @test getstatus(getnode(w, u)) == :dirty
     @test getdata(w, u, :out) === nothing
 
-    # ABW не проверяет заполненность обязательных входов, поэтому нода
-    # с одним подключённым входом из двух всё же исполнится.
-    w2 = Workflow(0; type = :ABW)
-    s  = add_node!(w2, DataNode(ConstNode, spec_const()))
-    j  = add_node!(w2, DataNode(AddNode, spec_add()))
-    add_connection!(w2, s, :out, j, :a)          # порт :b не подключён
-    setsettings!(w2, s, Dict(:value => 9))
-    @test scheduler!(w2) === true
-    @test getstatus(getnode(w2, j)) == :clean
-    @test getdata(w2, j, :out) == 9
+    # ОБЯЗАТЕЛЬНЫЙ ПОРТ БЕЗ СВЯЗИ — структурная ошибка, и оба движка
+    # отвечают одинаково. Раньше ABW проверку заполненности обязательных
+    # входов не делал вовсе (планировщик звал execute! с
+    # ExecuteSettings(false)), поэтому узел исполнялся и выдавал 9: флаг
+    # `required` в ABW не значил ничего.
+    for type in (:ABW, :DAW)
+        w2 = Workflow(0; type = type)
+        s  = add_node!(w2, DataNode(ConstNode, spec_const()))
+        j  = add_node!(w2, DataNode(AddNode, spec_add()))
+        add_connection!(w2, s, :out, j, :a)      # порт :b не подключён
+        setsettings!(w2, s, Dict(:value => 9))
+        @test scheduler!(w2) === true            # прогон завершён
+        @test getstatus(getnode(w2, j)) == :invalid_node
+        @test getnode(w2, j).state.exec_n == 0   # тело не вызывалось
+        @test getdata(w2, j, :out) === nothing
+    end
 
-    # DAW в том же графе отвергает ноду.
-    w3 = Workflow(0)
-    s3 = add_node!(w3, DataNode(ConstNode, spec_const()))
-    j3 = add_node!(w3, DataNode(AddNode, spec_add()))
-    add_connection!(w3, s3, :out, j3, :a)
-    setsettings!(w3, s3, Dict(:value => 9))
-    @test scheduler!(w3) === true
-    @test getstatus(getnode(w3, j3)) == :invalid_node
+    # А НЕОБЯЗАТЕЛЬНЫЙ порт без связи исполнению не мешает: в этом и
+    # разница между required = true и required = false.
+    for type in (:ABW, :DAW)
+        w4 = Workflow(0; type = type)
+        s4 = add_node!(w4, DataNode(ConstNode,    spec_const()))
+        o4 = add_node!(w4, DataNode(OptionalNode, spec_optional()))
+        setsettings!(w4, s4, Dict(:value => 9))
+        add_connection!(w4, s4, :out, o4, :maybe)
+        @test scheduler!(w4) === true
+        @test getstatus(getnode(w4, o4)) == :clean
+        # и вовсе без связи — тоже исполняется, только в очередь его
+        # ничто не ставит, поэтому отдельным графом с источником-рядом
+        w5 = Workflow(0; type = type)
+        s5 = add_node!(w5, DataNode(ConstNode,    spec_const()))
+        o5 = add_node!(w5, DataNode(OptionalNode, spec_optional()))
+        setsettings!(w5, s5, Dict(:value => 9))
+        if type == :DAW
+            @test scheduler!(w5) === true
+            @test getstatus(getnode(w5, o5)) == :clean   # обошли весь граф
+        end
+    end
 end
 
 # --------------------------------------------------------------------------
