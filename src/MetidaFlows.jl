@@ -46,7 +46,9 @@ getinputdata,
 getmeta,
 getinputmeta,
 isnodeexist,
-isportexist
+isportexist,
+failed_nodes,
+check_failed_nodes
 #=
 # In publick API, but not exported:
 # Execution:
@@ -490,8 +492,55 @@ struct DataNode{T <: AbstractNodeType, SettingsT, DataT, StateT, BufferT} <: Abs
     end
 end
 
+"""
+    NODE_REGISTER::Dict{String, Tuple{Type, NodeSpec}}
+ 
+Node types that can be restored from a snapshot: `nodetypestr` => (node type,
+node specification).
+ 
+A snapshot names a node type with [`nodetypestr`](@ref), and this table is what
+turns that name back into a type. A type that is not registered cannot be
+loaded, and nothing from a snapshot is ever resolved as a Julia name - which is
+why loading an untrusted file cannot execute anything.
+ 
+See [`register_node!`](@ref), [`isregistered`](@ref),
+[`getregnodeinfo`](@ref), [`unregister_all!`](@ref).
+"""
 const NODE_REGISTER = Dict{String, Tuple{Type, NodeSpec}}()
 
+"""
+    register_node!(node::DataNode; overwrite = false, skipmode = false) -> String | Nothing
+    register_node!(model::Workflow; skipmode = false) -> Vector{String}
+ 
+Register the type and the specification of a node in [`NODE_REGISTER`](@ref),
+so that a snapshot naming it can be restored. Returns the key, which is
+[`nodetypestr`](@ref) of the node.
+ 
+Registering a different type under a key already taken raises; `overwrite`
+replaces the entry, `skipmode` returns `nothing` instead of raising. The
+`Workflow` form walks every node of a graph and returns the keys it added - a
+graph normally holds several nodes of one type, so `skipmode = true` is
+what you want there.
+ 
+!!! warning "Register from `__init__`, not at top level"
+    A package that registers its nodes in top-level code loses the
+    registration: the call runs while that package is precompiled, and a
+    mutation of another module's global state is not captured in the
+    precompiled image. At load time top-level code no longer runs, so the
+    register stays empty - with no error at all.
+ 
+    ```julia
+    module AcmeNodes
+    using MetidaFlows
+    struct FancyFilter <: MetidaFlows.AbstractNodeType end
+    fancy_spec() = NodeSpec("Fancy filter", PortSpec[], PortSpec[], [:column])
+ 
+    function __init__()
+        MetidaFlows.register_node!(DataNode(FancyFilter, fancy_spec()))
+    end
+    end
+    ```
+"""
 function register_node!(node::DataNode{T}; overwrite = false, skipmode = false) where T
     typestr = nodetypestr(node)
     if isregistered(node) && !overwrite 
@@ -505,6 +554,13 @@ function register_node!(node::DataNode{T}; overwrite = false, skipmode = false) 
     typestr
 end
 
+"""
+    unregister_node!(typestr::AbstractString) -> Bool
+    unregister_node!(node::DataNode) -> Bool
+ 
+Remove one node type from [`NODE_REGISTER`](@ref). Returns whether it was
+there.
+"""
 function unregister_node!(typestr::AbstractString)
     key = String(typestr)
     haskey(NODE_REGISTER, key) || return false
@@ -513,18 +569,37 @@ function unregister_node!(typestr::AbstractString)
 end
 unregister_node!(node::T) where T <: DataNode = unregister_node!(nodetypestr(node))
 
+"""
+    getregnodeinfo(typestr::String) -> Tuple{Type, NodeSpec}
+ 
+Registered type and specification of a node. Raises, naming the type, when it
+is not registered - that name is what tells a user which package is missing.
+"""
 function getregnodeinfo(typestr::String)
     isregistered(typestr) ||
         error("Node \"$(typestr)\" is not registered, call `register_node!` before deserialization")
     NODE_REGISTER[typestr]
 end
 
+"""
+    isregistered(node::DataNode) -> Bool
+    isregistered(typestr::String) -> Bool
+ 
+Whether a node type is in [`NODE_REGISTER`](@ref).
+"""
 function isregistered(node::T) where T <: DataNode
     return haskey(NODE_REGISTER, nodetypestr(node))
 end
 function isregistered(typestr::String)
     return haskey(NODE_REGISTER, typestr)
 end
+
+"""
+    unregister_all!() -> Bool
+ 
+Empty [`NODE_REGISTER`](@ref). Mostly useful in tests, to start from a known
+register.
+"""
 function unregister_all!()
     empty!(NODE_REGISTER)
     true
@@ -588,6 +663,11 @@ function Workflow(id::Int; type::Symbol = :DAW)
     end
 end
 
+"""
+    workflowtypestr(w::Workflow) -> String
+ 
+`"DAW"` or `"ABW"`, as written into a snapshot under the `"type"` key.
+"""
 workflowtypestr(::Workflow{DAW}) = "DAW"
 workflowtypestr(::Workflow{ABW}) = "ABW"
 
@@ -805,7 +885,7 @@ function add_connection!(model::Workflow, c::NodeConnection)::Int
     if getstatus(output_node) == :clean 
         output_data = getdata(output_node, c.output_port)
         input_node  = getnode(model, c.input_id)
-        # записываем в буде
+        # записываем в буфер
         setinputbuffer!(input_node, c.input_port, id, output_data) # id - connection id 
     end
     # Add index
@@ -818,6 +898,15 @@ function add_connection!(model::Workflow, id_out::Int, port_out::Symbol, id_in::
     return add_connection!(model, connection)
 end
 
+"""
+    refreshind!(model::Workflow) -> Workflow
+ 
+Rebuild the `incoming`/`outgoing` indices from `model.connections`.
+ 
+Cheaper than keeping them in a snapshot and safer: the indices cannot disagree
+with the connections they index. Used by [`dict_to_workflow`](@ref) after the
+nodes and connections are in place.
+"""
 function refreshind!(model::Workflow)
     empty!(model.incoming)
     empty!(model.outgoing)

@@ -233,6 +233,15 @@ For a [`SinglePort`](@ref), [`getinputdata`](@ref) returns the single value, or
 `nothing` if the buffer is empty. A specific connection can always be read with
 `getinputdata(node, label, connection_id)`.
 
+The keys are connection ids and nothing else, so a node reading a `MultiPort`
+cannot tell which parent a value came from — the order in which the
+connections were made is knowledge the node does not have. That makes
+`MultiPort` the right tool for a variable number of **equivalent** inputs, a
+sum or a minimum over however many producers are attached, and the wrong one
+when the inputs mean different things: three named ports can report *which* of
+them won, one `MultiPort` of three cannot. [Edit
+distance](examples_edit_distance.md) builds both and compares them.
+
 ---
 
 ## Serialization and schemas
@@ -568,15 +577,112 @@ Declaring `kind = :feedback` on an output port is rejected by the
 [`NodeSpec`](@ref) constructor: a delay is a property of the consumer, not of
 the producer.
 
-Two engine functions read the kind:
+Four places in the engine read the kind:
 
 * [`isready`](@ref) waits only for producers connected through `:normal`
   ports. Anything else is not waited for.
 * [`execution_node_validation`](@ref) requires a filled input buffer only for
   `:normal` ports, so a feedback port may be empty on the first pass.
+* cycle detection ([`makegraph`](@ref)) does not follow `:feedback` or
+  `:error` edges, which is what lets a cyclic `ABW` graph exist at all — and
+  also means an `:error` edge can close a cycle in a `DAW` graph without being
+  rejected.
+* [`getinputmeta`](@ref) and [`getmeta`](@ref) skip the same two kinds when
+  walking upstream.
 
-Everything else — buffering, invalidation, serialization — is identical for
-all kinds.
+The `ABW` scheduler marks the whole downstream cone `:dirty` along `:normal`
+edges and stops at `:feedback` ones. Buffering and serialization are identical
+for all kinds.
+
+### What a failure does to the rest of the run
+
+When [`execute_unsafe!`](@ref) raises, [`execute!`](@ref) gives the node the
+status `:failed`, appends an `:error` record to `workflow.log` and returns an
+empty list of ready ports. **A failure stops exactly the dependent subtree.**
+Nothing below the failed node executes — in either scheduler such a node is
+skipped and ends the run `:dirty` — while branches that do not depend on it run
+to completion as usual.
+
+Skipping matters for more than tidiness. Input buffers are not cleared between
+runs, they are overwritten as producers publish, so a consumer of a failed node
+may still hold a value from an earlier run; the required-buffer check would
+accept it and the node would report `:clean` with a result computed from stale
+input. Both schedulers therefore consult [`isready`](@ref) before executing.
+
+By default the run returns normally and the only trace is that log record, so
+there are three ways to finish a run that had a failure:
+
+```julia
+scheduler!(w)                       # the failure is in w.log and in the statuses
+scheduler!(w; throw_error = true)   # raise at the first failure, abandon the rest
+scheduler!(w; strict = true)        # finish everything that can, then raise with the list
+```
+
+`throw_error` aborts the traversal where the failure happened, so whatever had
+not run yet is lost — and *which* branches those are depends on the traversal
+order, not on the dependency structure. `strict` has no such dependence: every
+branch that can finish does, and the error then names every failed node at
+once, with the workflow left in its post-run state for inspection.
+
+To decide without raising, ask [`failed_nodes`](@ref) — it knows which statuses
+count as a failure (`:failed` and the three `:invalid_*`) and which do not.
+`:dirty` is not one of them: a node ends a run `:dirty` whenever it was not
+recomputed, whether because an ancestor failed, because a gate took the other
+branch, or because a cyclic workflow finished its last turn.
+
+### Error routing with `:error` ports
+
+All of the above is what happens to a failure the node did **not** anticipate.
+An `:error` port is for one it did — and it is a **convention, not a
+mechanism**: the engine never writes to such a port, and a raised exception is
+not routed anywhere.
+
+So a node that can fail catches its own failure and publishes it to its own
+`:error` output port instead of the normal one:
+
+```julia
+function MetidaFlows.execute_unsafe!(node::DataNode{NStep})
+    f, df = getinputdata(node, :f), getinputdata(node, :df)
+    if abs(df) < getinputdata(node, :eps)
+        setdata!(node, :err, NewtonStall(f, df))     # an :error output port
+        return [:err]
+    end
+    setdata!(node, :out, f / df)
+    return [:out]
+end
+```
+
+Routing is then the ordinary selective publishing every gate uses: the
+scheduler enqueues only the children of the ports the node returned. A handler
+whose **only** input is an `:error` port therefore runs when, and only when,
+the error fires — `isready` does not hold it back, but nothing enqueues it on a
+normal turn either, so it stays `:dirty` and is never executed.
+
+**An error path cannot rejoin the normal path.** Suppose the handler should
+repair the step and let the turn continue. It would have to hand a value to the
+gate through a normal input, and a normal input requires a `:clean` producer —
+but on the failing turn the normal branch never ran, so its nodes are still
+`:dirty` and the gate can never become ready. A feedback port on the loop head
+is no way around it either: with `SinglePort` arity it is already taken by the
+gate, and a `MultiPort` would accumulate values from both producers with
+nothing to say which is fresher.
+
+Error routing in MetidaFlows is therefore **stop with a diagnosis**, not
+*recover and continue*. Recovery belongs to the caller: the handler publishes
+what it knows — where it failed, at which iteration, and a point worth
+restarting from — into `:terminal` ports, and whoever ran the graph decides.
+
+Two things follow for a graph with an error path:
+
+* **a finished run may leave nodes `:dirty` with stale data.** On a failing
+  turn everything downstream of the failure keeps the values of the previous
+  turn, so neither "all nodes are `:clean`" nor "the gate published a result"
+  means the run succeeded. Read the handler's `:terminal` ports, or `exec_n`;
+* **instrumentation inside the gate does not see the failing turn.** The gate
+  does not run then, so a trace it collects stops one step short. The point of
+  failure exists only in the exception the handler receives.
+
+[Newton's method](examples_newton.md) is a worked example of all of this.
 
 ---
 

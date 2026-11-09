@@ -243,8 +243,7 @@ end
     @test rp == Symbol[]
     @test getstatus(ln) == :invalid_node
 
-    # Предупреждение о возможном переполнении стека при подтягивании
-    # родителей в очень большом графе.
+    # Предупреждение о возможном переполнении стека при подтягивании родителей в очень большом графе.
     wl = Workflow(0)
     for _ in 1:1001
         nid = add_node!(wl, DataNode(ConstNode, spec_const()))
@@ -255,3 +254,5 @@ end
 end
 
 end # @testset "ОШИБКИ"
+
+include(joinpath(TEST_DIR, "errors_run.jl"))

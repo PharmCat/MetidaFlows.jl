@@ -4,8 +4,62 @@
 # --------------------------------------------------------
 
 """
+    failed_nodes(model::Workflow) -> Vector{Pair{Int, Symbol}}
+
+Nodes a run refused to execute, as `id => status` pairs ordered by id.
+
+A node counts as failed when its status is `:failed` - its
+[`execute_unsafe!`](@ref) raised - or one of `:invalid_node`,
+`:invalid_settings`, `:invalid_result`, where a validation step refused it.
+The result is empty when every node the run attempted finished.
+
+`:dirty` is **not** a failure. A node downstream of a failure ends the run
+`:dirty` because it was never attempted, and so does a node below a branch
+a gate did not take, or the body of a cyclic workflow after its last turn.
+Those are consequences; the cause is in this list.
+
+See also [`check_failed_nodes`](@ref), [`getstatus`](@ref).
+"""
+function failed_nodes(model::Workflow)
+    bad = Pair{Int, Symbol}[]
+    for (id, node) in model.nodes
+        st = getstatus(node)
+        st in (:failed, :invalid_node, :invalid_settings, :invalid_result) || continue
+        push!(bad, id => st)
+    end
+    sort!(bad; by = first)
+    return bad
+end
+
+"""
+    check_failed_nodes(model::Workflow; throw_error::Bool = true) -> Bool
+
+`true` when [`failed_nodes`](@ref) is empty.
+
+With `throw_error` - the default - a non-empty list raises instead, naming
+every node and its status; what each one raised is in `model.log`. Without it
+the function only reports, returning `false`.
+
+This is what `scheduler!(model; strict = true)` calls once the traversal is
+over, and it works by hand after an ordinary run just as well:
+
+```julia
+scheduler!(w)            # let everything that can finish, finish
+check_failed_nodes(w)    # then fail with the list
+```
+"""
+function check_failed_nodes(model::Workflow; throw_error::Bool = true)
+    bad = failed_nodes(model)
+    isempty(bad) && return true
+    throw_error || return false
+    error("$(length(bad)) node(s) did not execute: " *
+          join(("node $(id) ($(st))" for (id, st) in bad), ", ") *
+          ". See `workflow.log` for what each one raised.")
+end
+
+"""
     scheduler!(model::Workflow{DAW}; reset_mode::Symbol = :full,
-               throw_error::Bool = false)
+               throw_error::Bool = false, strict::Bool = false)
  
 Execute entire data analysis workflow (DAW) using topological ordering.
  
@@ -24,10 +78,22 @@ This scheduler is designed for deterministic acyclic data-analysis workflows.
   the cache; `:none` leaves statuses untouched, so nodes that are already
   `:clean` are not recomputed. Any other value raises an error.
 - `throw_error`: forwarded to [`execute!`](@ref); aborts the run on the first
-  node that raises instead of recording the failure.
+  node that raises instead of recording the failure, which also leaves every
+  node after it in the order unexecuted.
+- `strict`: once the traversal is over, raise if any node failed - see
+  [`check_failed_nodes`](@ref). Unlike `throw_error` this lets every branch
+  that can finish, finish, and then reports every failure at once; the
+  workflow is left in its post-run state. `throw_error` wins: if it raised,
+  this check is never reached.
  
 # Notes
 - Nodes are executed at most once per scheduler run.
+- A node is skipped when [`isready`](@ref) reports that a producer connected
+  through a `:normal` port is not `:clean`. In an acyclic graph traversed in
+  topological order that happens only below a node that failed, and skipping
+  is what keeps such a node from reading an input buffer still holding a value
+  from an earlier run - which `check_input_buffer` would accept. A skipped
+  node ends the run `:dirty`, as it does in [`ABW`](@ref).
 - Upstream execution and downstream invalidation are disabled
   because execution order is already guaranteed by topology.
 - Required input ports are enforced (`check_input_buffer` stays on).
@@ -47,7 +113,7 @@ scheduler!(workflow)
 result = getdata(workflow, output_id, :result)
 ```
 """
-function scheduler!(model::Workflow{DAW}; reset_mode::Symbol = :full, throw_error::Bool = false)
+function scheduler!(model::Workflow{DAW}; reset_mode::Symbol = :full, throw_error::Bool = false, strict::Bool = false)
     g = makegraph(model)
     if is_cyclic(g) error("workflow is cyclic") end
     if reset_mode ∉ (:full, :soft, :none) error("Wrong reset mode: $reset_mode , only :full, :soft, :none availabel.") end
@@ -59,13 +125,17 @@ function scheduler!(model::Workflow{DAW}; reset_mode::Symbol = :full, throw_erro
 
     order = topological_sort(g)
     for id in order
+        #  A node whose producer failed must not be executed
+        isready(model, id) || continue
         execute!(model, id; settings = ExecuteSettings(;execute_upstream = false, invalidate_downstream = false, check_cyclic = false), throw_error = throw_error) 
     end
+    strict && check_failed_nodes(model)
     return true
 end
 """
     scheduler!(model::Workflow{ABW}; reset_mode::Symbol = :full, maxiter = 1000,
-               throw_error::Bool = false, throw_warn::Bool = true)
+               throw_error::Bool = false, throw_warn::Bool = true,
+               strict::Bool = false)
  
 Execute workflow using queue-based agent/event scheduling.
  
@@ -99,7 +169,14 @@ several times during one call.
 - `maxiter`: maximum number of scheduler iterations before aborting execution.
   For a cyclic workflow this is the backstop against a loop that never
   converges.
-- `throw_error`: forwarded to [`execute!`](@ref).
+- `throw_error`: forwarded to [`execute!`](@ref). Aborts the run on the first
+  node that raises, which also leaves every branch that had not run yet
+  unexecuted.
+- `strict`: once the traversal is over, raise if any node failed - see
+  [`check_failed_nodes`](@ref). Unlike `throw_error` this lets everything that
+  can finish, finish, and then reports every failure at once; the workflow is
+  left in its post-run state, so it can be inspected after the error is
+  caught. `throw_error` wins: if it raised, this check is never reached.
 - `throw_warn`: warn when the seed queue is empty. Nothing is executed in that
   case and the nodes stay `:dirty`, which is otherwise silent.
  
@@ -149,7 +226,7 @@ scheduler!(w; maxiter = 10_000)           # long-running iteration
 scheduler!(w; throw_warn = false)         # a deliberately unseeded graph
 ```
 """
-function scheduler!(model::Workflow{ABW}; reset_mode::Symbol = :full, maxiter = 1000, throw_error::Bool = false, throw_warn::Bool = true)
+function scheduler!(model::Workflow{ABW}; reset_mode::Symbol = :full, maxiter = 1000, throw_error::Bool = false, throw_warn::Bool = true, strict::Bool = false)
     if reset_mode ∉ (:full, :soft, :none) error("Wrong reset mode: $reset_mode , only :full, :soft, :none availabel.") end
     soft_reset = false
     # change to thread safe
@@ -186,7 +263,7 @@ function scheduler!(model::Workflow{ABW}; reset_mode::Symbol = :full, maxiter = 
             for port in ready_ports
                 cons = getportconnections(model, id, port; direction = :output)
                 for con in cons
-                    #  Помечаем :dirty потомка И весь его конус вниз по обычным рёбрам (данные в буферах не трогаем)
+                    #  Помечаем :dirty потомка И весь его конус вниз по обычным ребрам (данные в буферах не трогаем)
                     mark_dirty_downstream!(model, con.input_id)
                     # добавляем только если нет в очереди
                     if !(con.input_id in queued)
@@ -198,5 +275,6 @@ function scheduler!(model::Workflow{ABW}; reset_mode::Symbol = :full, maxiter = 
         end
         iter += 1
     end
+    strict && check_failed_nodes(model)
     return true
 end

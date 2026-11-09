@@ -6,49 +6,6 @@
 #  обёртка вокруг готовой функции, а разложение на элементарные операции,
 #  где каждая операция это отдельный узел.
 #
-#  Первый алгоритм — пузырьковая сортировка. Движок ABW, цикл замкнут
-#  обратным ребром. Один виток графа = одно сравнение пары соседей.
-#
-#
-#  ГРАФ
-#
-#   ConstArray ─┬─▶ ArrayLength ──┐
-#               └─────────────────┤
-#                                 ├─▶ LoopState ─▶ MoreWork ─▶ LoopGate ──▶ :sorted
-#   ConstOne ─────────────────────┘        ▲                       │
-#                                          │                       ▼
-#                                          │                   ReadLeft
-#                                          │                       │
-#     ConstOne ────────────────────────────┼──────────────▶  NextIndex
-#                                          │                       │
-#                                          │                   ReadRight
-#                                          │                       │
-#                                          │                  ComparePair
-#                                          │                       │
-#                                          │                  AssignLeft
-#                                          │                       │
-#                                          │                  AssignRight
-#                                          │                       │
-#                                          │                  ChooseArray
-#                                          │                       │
-#                                          │                    PassEnd
-#                                          │                       │
-#     ConstOne ────────────────────────────┼──────────────▶ AdvanceIndex
-#                                          │                       │
-#     ConstOne ────────────────────────────┼──────────────▶  LowerLimit
-#                                          │                       │
-#                                          └─── :feedback ─── ShrinkLimit
-#
-#  Тело — прямая цепочка: каждая ступень получает всё от предыдущей.
-#  ConstOne (одна нода, показана четыре раза) питает те четыре ступени,
-#  которым нужна литеральная единица.
-#
-#  Состояние цикла — тройка (array, index, limit): массив, текущий индекс
-#  и граница текущего прохода. Цикл с предпроверкой: `MoreWork` считает
-#  `limit > 1`, и `LoopGate` либо пускает виток в тело, либо публикует
-#  результат в терминальный порт. Поэтому массив из нуля и одного
-#  элемента обрабатывается без обращения к a[j+1].
-#
 ############################################################################
 
 import MetidaFlows: PortSpec, SinglePort, DAW, ABW, NodeState, NodeProperties,
@@ -1055,6 +1012,10 @@ end
 end
 
 include(joinpath(TEST_DIR, "algo_descent.jl"))
+include(joinpath(TEST_DIR, "algo_insertion.jl"))
+include(joinpath(TEST_DIR, "algo_newton.jl"))
+include(joinpath(TEST_DIR, "algo_horner.jl"))
+include(joinpath(TEST_DIR, "algo_edit.jl"))
 
 end # @testset "ЗООПАРК АЛГОРИТМОВ"
 

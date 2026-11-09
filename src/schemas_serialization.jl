@@ -230,8 +230,13 @@ Keys: `"id"`, `"name"`, `"n_iter"`, `"c_iter"`, `"nodes"`, `"connections"`,
 # Notes
 - `"nodes"` and `"connections"` are keyed by *stringified* identifiers, while
   `"incoming"` and `"outgoing"` keep integer node ids.
-- Execution state - `run_id`, logs, cached output data and settings values -
-  is not included, so the result describes structure only.
+- Execution state - `run_id`, logs, cached output data, `exec_n`, the contents
+  of input buffers and settings *values* - is not included, so the result
+  describes structure only. `"settings"` inside a node holds the settings
+  SCHEMA ([`settings_schema`](@ref)), not the values.
+- A workflow restored from this dictionary cannot run until its settings are
+  set again, and a cyclic one cannot be resumed: the state of the last turn
+  lives in the buffer of a `:feedback` port. See [`dict_to_workflow`](@ref).
 """
 function workflow_to_dict(w::Workflow)
     d                = Dict{String, Any}()
@@ -263,6 +268,49 @@ function workflow_to_dict(w::Workflow)
     return d
 end
 
+"""
+    dict_to_workflow(d::Dict{String}; check_connection::Bool = true,
+                     check_connection_throw_error::Bool = true) -> Workflow
+
+Rebuild a workflow from a dictionary produced by [`workflow_to_dict`](@ref).
+
+Node types come from [`NODE_REGISTER`](@ref): a snapshot names a type with
+[`nodetypestr`](@ref), and a name that is not registered raises, naming it.
+Nothing in the dictionary is evaluated or resolved as a Julia name - the
+specification comes from the register, not from the file - so loading an
+untrusted snapshot cannot execute anything. Loading never runs a node either.
+
+Node keys must match the `"id"` inside their `"properties"`, ids must be
+unique, and `n_iter` is raised to cover every id in use, so the next
+[`add_node!`](@ref) cannot overwrite a restored node.
+
+# What is restored, and what is not
+Restored: the workflow type and name, the nodes with their types,
+specifications and positions, the connections, and the `incoming`/`outgoing`
+indices (rebuilt by [`refreshind!`](@ref) rather than read from the file).
+
+**Not** restored: setting *values*, the contents of input buffers, cached
+output data, `exec_n`, and the log. Every node comes back `:dirty`.
+
+A loaded workflow therefore **cannot run as it stands**: nodes that read
+`node.settings` fail. And a cyclic workflow cannot be resumed, because the
+state of the last turn lives in the buffer of a `:feedback` port, which is not
+part of a snapshot. See *Serialization* in the guide.
+
+# Connections
+With `check_connection` every connection goes through
+[`check_connection_validity`](@ref), which rejects a port that is not in the
+specification, a reference to a node that is not in the snapshot, and
+mismatched port datatypes. With `check_connection_throw_error = false` such a
+connection is dropped instead of raising, and the workflow loads without it.
+
+!!! warning "The single-port check does not fire here"
+    [`check_connection_validity`](@ref) looks for an occupied port in
+    `model.incoming`, and that index is only filled by [`refreshind!`](@ref)
+    after the loop over connections. A snapshot holding two connections into
+    the same `SinglePort` is therefore loaded, although
+    [`add_connection!`](@ref) would reject it.
+"""
 function dict_to_workflow(d::Dict{String}; check_connection::Bool = true, check_connection_throw_error::Bool = true)
     haskey(d, "id") || error("No `id` field")
     haskey(d, "type") || error("No `type` field")
@@ -289,12 +337,29 @@ function dict_to_workflow(d::Dict{String}; check_connection::Bool = true, check_
             ccv || continue
         end
         w.connections[id] = con
+        push!(get!(w.incoming, con.input_id, Int[]), id)
+        push!(get!(w.outgoing, con.output_id, Int[]), id)
     end
     # w.audit_log # technical debt
     refreshind!(w)
     return w
 end
 
+"""
+    dict_to_node(d::Dict{String}; usermode = false) -> DataNode
+
+Rebuild one node from its dictionary.
+
+The node type and the specification come from [`NODE_REGISTER`](@ref) by the
+`"type"` key of the dictionary. The node is created `:dirty` whatever status
+the snapshot holds: cached output data is not part of a snapshot, so a node
+must not claim to be up to date without it. Setting values are not restored
+either - the node starts with empty settings.
+
+`usermode` is accepted for a future path where the specification is rebuilt by
+[`dict_to_spec`](@ref) instead of being taken from the register, which a node
+with settings-dependent ports needs. It is not wired up yet.
+"""
 function dict_to_node(d::Dict{String}; usermode = false)
     id                = d["id"] 
     properties        = dict_to_properties(d["properties"])
@@ -304,18 +369,38 @@ function dict_to_node(d::Dict{String}; usermode = false)
     return DataNode(type, properties, spec; settings = Dict{Symbol, Any}(), data = Dict{Symbol, Any}(), state = NodeState(), input_buffer = Dict{Symbol, Dict{Int, Any}}())
 end
 
+"""
+    dict_to_connection(d::Dict{String}) -> NodeConnection
+
+Rebuild one connection. Port labels are accepted both as `Symbol` - what
+[`connection_to_dict`](@ref) writes - and as the strings a JSON reader returns.
+"""
 function dict_to_connection(d::Dict{String})
     sym(x) = x isa Symbol ? x : Symbol(x)
     return NodeConnection(Int(d["output_id"]), sym(d["output_port"]),
                           Int(d["input_id"]),  sym(d["input_port"]))
 end
 
+"""
+    dict_to_properties(d::Dict{String}) -> NodeProperties
+
+Rebuild node properties. Accepts both what [`node_properties_to_dict`](@ref)
+writes (a `Symbol` status, a `Tuple` position) and what survives a JSON round
+trip (a string status, a two-element array).
+"""
 function dict_to_properties(d::Dict{String})
     status = d["status"] isa Symbol ? d["status"] : Symbol(d["status"])
     p      = d["position"]
     return NodeProperties(Int(d["id"]), status, (Int(p[1]), Int(p[2])))
 end
 
+"""
+    dict_to_spec(d::Dict{String}) -> NodeSpec
+
+Rebuild a node specification from a dictionary. Not defined by default: a
+specification normally comes from [`NODE_REGISTER`](@ref). Define it for a node
+type whose ports depend on its settings.
+"""
 dict_to_spec(d) = error("Define `dict_to_spec(d::Dict{String})::NodeSpec` function to use user serialization mode.")
 
 
