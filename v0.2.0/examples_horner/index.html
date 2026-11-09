@@ -1,0 +1,153 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="UTF-8"/><meta name="viewport" content="width=device-width, initial-scale=1.0"/><meta name="referrer" content="no-referrer"/><title>Horner&#39;s scheme on DAW · MetidaFlows.jl</title><meta name="title" content="Horner&#39;s scheme on DAW · MetidaFlows.jl"/><meta property="og:title" content="Horner&#39;s scheme on DAW · MetidaFlows.jl"/><meta property="twitter:title" content="Horner&#39;s scheme on DAW · MetidaFlows.jl"/><meta name="description" content="Documentation for MetidaFlows.jl."/><meta property="og:description" content="Documentation for MetidaFlows.jl."/><meta property="twitter:description" content="Documentation for MetidaFlows.jl."/><meta property="og:url" content="https://PharmCat.github.io/MetidaFlows.jl/examples_horner/"/><meta property="twitter:url" content="https://PharmCat.github.io/MetidaFlows.jl/examples_horner/"/><link rel="canonical" href="https://PharmCat.github.io/MetidaFlows.jl/examples_horner/"/><script data-outdated-warner src="../assets/warner.js"></script><link href="https://cdnjs.cloudflare.com/ajax/libs/lato-font/3.0.0/css/lato-font.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/juliamono/0.63.2/juliamono.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/fontawesome.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/solid.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/brands.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.8/katex.min.css" rel="stylesheet" type="text/css"/><script>documenterBaseURL=".."</script><script src="https://cdnjs.cloudflare.com/ajax/libs/require.js/2.3.6/require.min.js" data-main="../assets/documenter.js"></script><script src="../search_index.js"></script><script src="../siteinfo.js"></script><script src="../../versions.js"></script><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../assets/themes/catppuccin-mocha.css" data-theme-name="catppuccin-mocha"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../assets/themes/catppuccin-macchiato.css" data-theme-name="catppuccin-macchiato"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../assets/themes/catppuccin-frappe.css" data-theme-name="catppuccin-frappe"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../assets/themes/catppuccin-latte.css" data-theme-name="catppuccin-latte"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../assets/themes/documenter-dark.css" data-theme-name="documenter-dark" data-theme-primary-dark/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../assets/themes/documenter-light.css" data-theme-name="documenter-light" data-theme-primary/><script src="../assets/themeswap.js"></script></head><body><div id="documenter"><nav class="docs-sidebar"><div class="docs-package-name"><span class="docs-autofit"><a href="../">MetidaFlows.jl</a></span></div><button class="docs-search-query input is-rounded is-small is-clickable my-2 mx-auto py-1 px-2" id="documenter-search-query">Search docs (Ctrl + /)</button><ul class="docs-menu"><li><a class="tocitem" href="../">Home</a></li><li><a class="tocitem" href="../guide/">Guide</a></li><li><span class="tocitem">Examples</span><ul><li><a class="tocitem" href="../examples_abw_cycle/">AWB cycle</a></li><li><a class="tocitem" href="../examples_abw_two_node/">AWB two node cycle</a></li><li><a class="tocitem" href="../examples_settings_query/">Querying settings</a></li><li><a class="tocitem" href="../examples_bubble_sort/">Bubble sort as a graph</a></li><li><a class="tocitem" href="../examples_insertion_sort/">Insertion sort: nested loops</a></li><li><a class="tocitem" href="../examples_gradient_descent/">Gradient descent on a graph</a></li><li><a class="tocitem" href="../examples_newton/">Newton&#39;s method and :error ports</a></li><li class="is-active"><a class="tocitem" href>Horner&#39;s scheme on DAW</a><ul class="internal"><li><a class="tocitem" href="#Horner&#39;s-scheme:-a-DAW-algorithm-with-the-loop-unrolled"><span>Horner&#39;s scheme: a <code>DAW</code> algorithm with the loop unrolled</span></a></li></ul></li><li><a class="tocitem" href="../examples_edit_distance/">Edit distance: dynamic programming</a></li><li><a class="tocitem" href="../examples_power/">Modular exponentiation: skipping work</a></li></ul></li><li><a class="tocitem" href="../api/">API</a></li></ul><div class="docs-version-selector field has-addons"><div class="control"><span class="docs-label button is-static is-size-7">Version</span></div><div class="docs-selector control is-expanded"><div class="select is-fullwidth is-size-7"><select id="documenter-version-selector"></select></div></div></div></nav><div class="docs-main"><header class="docs-navbar"><a class="docs-sidebar-button docs-navbar-link fa-solid fa-bars is-hidden-desktop" id="documenter-sidebar-button" href="#"></a><nav class="breadcrumb"><ul class="is-hidden-mobile"><li><a class="is-disabled">Examples</a></li><li class="is-active"><a href>Horner&#39;s scheme on DAW</a></li></ul><ul class="is-hidden-tablet"><li class="is-active"><a href>Horner&#39;s scheme on DAW</a></li></ul></nav><div class="docs-right"><a class="docs-navbar-link" href="https://github.com/PharmCat/MetidaFlows.jl" title="View the repository on GitHub"><span class="docs-icon fa-brands"></span><span class="docs-label is-hidden-touch">GitHub</span></a><a class="docs-navbar-link" href="https://github.com/PharmCat/MetidaFlows.jl/blob/main/docs/src/examples_horner.md" title="Edit source on GitHub"><span class="docs-icon fa-solid"></span></a><a class="docs-settings-button docs-navbar-link fa-solid fa-gear" id="documenter-settings-button" href="#" title="Settings"></a><a class="docs-article-toggle-button fa-solid fa-chevron-up" id="documenter-article-toggle-button" href="javascript:;" title="Collapse all docstrings"></a></div></header><article class="content" id="documenter-page"><h2 id="Horner&#39;s-scheme:-a-DAW-algorithm-with-the-loop-unrolled"><a class="docs-heading-anchor" href="#Horner&#39;s-scheme:-a-DAW-algorithm-with-the-loop-unrolled">Horner&#39;s scheme: a <code>DAW</code> algorithm with the loop unrolled</a><a id="Horner&#39;s-scheme:-a-DAW-algorithm-with-the-loop-unrolled-1"></a><a class="docs-heading-anchor-permalink" href="#Horner&#39;s-scheme:-a-DAW-algorithm-with-the-loop-unrolled" title="Permalink"></a></h2><p>Every other algorithm in these examples is an <code>ABW</code> workflow: one flat loop, all state in <code>:feedback</code> ports, and a graph whose size says nothing about the size of the problem. Horner&#39;s scheme is the opposite.</p><pre><code class="language-julia hljs">value = a[n]
+for k in n-1:-1:0
+    value = value * x + a[k]
+end</code></pre><p>Here the loop is <strong>unrolled into the structure</strong>. Every iteration is a separate pair of nodes — one multiplication, one addition — so the degree of the polynomial is visible in the size of the graph. There are no feedback ports, no state, no turns, and every node executes exactly once per run.</p><table><tr><th style="text-align: left"></th><th style="text-align: left"><code>ABW</code> (sorting, descent, Newton)</th><th style="text-align: left"><code>DAW</code> (Horner)</th></tr><tr><td style="text-align: left">the loop</td><td style="text-align: left">turns through a cycle</td><td style="text-align: left">unrolled into nodes</td></tr><tr><td style="text-align: left">state between steps</td><td style="text-align: left"><code>:feedback</code> buffers</td><td style="text-align: left">none</td></tr><tr><td style="text-align: left">graph size</td><td style="text-align: left">fixed</td><td style="text-align: left">grows with the problem</td></tr><tr><td style="text-align: left">executions per node</td><td style="text-align: left">many</td><td style="text-align: left">exactly one</td></tr></table><h3 id="Value-and-derivative-from-one-scheme"><a class="docs-heading-anchor" href="#Value-and-derivative-from-one-scheme">Value and derivative from one scheme</a><a id="Value-and-derivative-from-one-scheme-1"></a><a class="docs-heading-anchor-permalink" href="#Value-and-derivative-from-one-scheme" title="Permalink"></a></h3><p>The same scheme yields <code>p&#39;(x)</code> if a second sum is carried alongside:</p><pre><code class="language-julia hljs">b = a[n];  d = 0
+for k in n-1:-1:0
+    d = d * x + b        # the PREVIOUS b, before it is updated
+    b = b * x + a[k]
+end
+# p(x) = b, p&#39;(x) = d</code></pre><p>In the graph that means the output of every <code>b</code> stage goes to <strong>two</strong> consumers: the next <code>b</code> stage and the matching <code>d</code> stage. The result is a diamond at every stage — a real branching DAG rather than a chain.</p><h3 id="The-nodes"><a class="docs-heading-anchor" href="#The-nodes">The nodes</a><a id="The-nodes-1"></a><a class="docs-heading-anchor-permalink" href="#The-nodes" title="Permalink"></a></h3><pre><code class="language-julia hljs">using MetidaFlows
+import MetidaFlows: PortSpec, getstatus, getnode, get_children
+
+struct HConstF &lt;: AbstractNodeType end  # a Float64 source
+struct HMul    &lt;: AbstractNodeType end  # a * b
+struct HAdd    &lt;: AbstractNodeType end  # a + b
+struct HResult &lt;: AbstractNodeType end  # collects the result
+
+spec_hconstf() = NodeSpec(&quot;H const float&quot;, PortSpec[],
+    [PortSpec(&quot;Out&quot;, Float64, :out)], [:value])
+spec_hmul() = NodeSpec(&quot;H mul&quot;,
+    [PortSpec(&quot;A&quot;, Float64, :a), PortSpec(&quot;B&quot;, Float64, :b)],
+    [PortSpec(&quot;Out&quot;, Float64, :out)])
+spec_hadd() = NodeSpec(&quot;H add&quot;,
+    [PortSpec(&quot;A&quot;, Float64, :a), PortSpec(&quot;B&quot;, Float64, :b)],
+    [PortSpec(&quot;Out&quot;, Float64, :out)])
+
+spec_hresult() = NodeSpec(&quot;H result&quot;,
+    [PortSpec(&quot;Value&quot;,      Float64, :value),
+     PortSpec(&quot;Derivative&quot;, Float64, :derivative)],
+    [PortSpec(&quot;Value&quot;,      Float64, :value;      kind = :terminal),
+     PortSpec(&quot;Derivative&quot;, Float64, :derivative; kind = :terminal)])
+
+MetidaFlows.execute_unsafe!(n::DataNode{HConstF}) =
+    (setdata!(n, :out, Float64(n.settings[:value])); [:out])
+MetidaFlows.execute_unsafe!(n::DataNode{HMul}) =
+    (setdata!(n, :out, getinputdata(n, :a) * getinputdata(n, :b)); [:out])
+MetidaFlows.execute_unsafe!(n::DataNode{HAdd}) =
+    (setdata!(n, :out, getinputdata(n, :a) + getinputdata(n, :b)); [:out])
+function MetidaFlows.execute_unsafe!(node::DataNode{HResult})
+    setdata!(node, :value,      getinputdata(node, :value))
+    setdata!(node, :derivative, getinputdata(node, :derivative))
+    return [:value, :derivative]
+end</code></pre><p><code>HResult</code> looks redundant — it only passes two values through. It exists because <strong>a port kind lives in the spec, and a spec is shared by every node of its type.</strong> The output of the last <code>HAdd</code> is connected to nothing, so it is terminal by intent; but marking it <code>kind = :terminal</code> would mark the output of every intermediate stage too, and those <em>are</em> connected. A dedicated node type is the only way to give a particular place in the graph a terminal port.</p><h3 id="The-graph"><a class="docs-heading-anchor" href="#The-graph">The graph</a><a id="The-graph-1"></a><a class="docs-heading-anchor-permalink" href="#The-graph" title="Permalink"></a></h3><pre><code class="nohighlight hljs"> HConstF(x) ──────┬─────────────┬──────────────┬─────────────┐
+                  │             │              │             │
+ HConstF(a3) ─▶ HMul ─▶ HAdd ─▶ HMul ─▶ HAdd ─▶ HMul ─▶ HAdd ─▶ HResult
+      │           ▲  b1    ▲      ▲  b2    ▲      ▲  b3    ▲   :value
+ HConstF(a2) ─────┘        │      │        │      │        │
+ HConstF(a1) ──────────────┼──────┘        │      │        │
+ HConstF(a0) ──────────────┼───────────────┼──────┘        │
+                           │               │               │
+ HConstF(0) ─▶ HMul ─▶ HAdd ─▶ HMul ─▶ HAdd ─▶ HMul ─▶ HAdd ─▶ HResult
+                  ▲     ▲ d1      ▲     ▲ d2     ▲     ▲ d3   :derivative
+                  └── x │         └── x │        └── x │
+    b stages ──────────┴───────────────┴──────────────┘</code></pre><pre><code class="language-julia hljs">function build_horner(coeffs::Vector{Float64}, x::Float64)
+    n      = length(coeffs) - 1
+    w      = Workflow(0; type = :DAW)
+    w.name = &quot;Horner&#39;s scheme&quot;
+
+    cx    = add_node!(w, DataNode(HConstF, spec_hconstf()))
+    czero = add_node!(w, DataNode(HConstF, spec_hconstf()))
+    setsettings!(w, cx,    Dict(:value =&gt; x))
+    setsettings!(w, czero, Dict(:value =&gt; 0.0))
+
+    ca = Int[]
+    for c in coeffs
+        id = add_node!(w, DataNode(HConstF, spec_hconstf()))
+        setsettings!(w, id, Dict(:value =&gt; c))
+        push!(ca, id)
+    end
+
+    bmul = Int[]; badd = Int[]; dmul = Int[]; dadd = Int[]
+    bprev = ca[1]; dprev = czero
+
+    for k in 2:length(coeffs)
+        dm = add_node!(w, DataNode(HMul, spec_hmul()))    # d = d·x + b
+        da = add_node!(w, DataNode(HAdd, spec_hadd()))
+        add_connection!(w, dprev, :out, dm, :a)
+        add_connection!(w, cx,    :out, dm, :b)
+        add_connection!(w, dm,    :out, da, :a)
+        add_connection!(w, bprev, :out, da, :b)
+        push!(dmul, dm); push!(dadd, da); dprev = da
+
+        bm = add_node!(w, DataNode(HMul, spec_hmul()))    # b = b·x + a[k]
+        ba = add_node!(w, DataNode(HAdd, spec_hadd()))
+        add_connection!(w, bprev, :out, bm, :a)
+        add_connection!(w, cx,    :out, bm, :b)
+        add_connection!(w, bm,    :out, ba, :a)
+        add_connection!(w, ca[k], :out, ba, :b)
+        push!(bmul, bm); push!(badd, ba); bprev = ba
+    end
+
+    res = add_node!(w, DataNode(HResult, spec_hresult()))
+    add_connection!(w, bprev, :out, res, :value)
+    add_connection!(w, dprev, :out, res, :derivative)
+
+    (w = w, cx = cx, czero = czero, ca = ca, bmul = bmul, badd = badd,
+     dmul = dmul, dadd = dadd, res = res, n = n)
+end
+
+function horner(coeffs::Vector{Float64}, x::Float64)
+    g = build_horner(coeffs, x)
+    scheduler!(g.w)
+    (value = getdata(g.w, g.res, :value),
+     derivative = getdata(g.w, g.res, :derivative), g = g)
+end
+
+# 2x³ − 3x² + x + 5 at x = 2
+r = horner([2.0, -3.0, 1.0, 5.0], 2.0)
+(value = r.value, derivative = r.derivative,
+ nodes = length(r.g.w.nodes), connections = length(r.g.w.connections))</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi">(value = 11.0, derivative = 13.0, nodes = 19, connections = 26)</code></pre><p>For degree <code>n</code> the graph has <code>5n + 4</code> nodes and <code>8n + 2</code> connections:</p><pre><code class="language-julia hljs">using Printf
+for n in 0:6
+    g = build_horner(Float64.(collect(1:(n + 1))), 2.0)
+    @printf(&quot;degree %d: %2d nodes, %2d connections, %d stages per chain\n&quot;,
+            n, length(g.w.nodes), length(g.w.connections), length(g.badd))
+end</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi">degree 0:  4 nodes,  2 connections, 0 stages per chain
+degree 1:  9 nodes, 10 connections, 1 stages per chain
+degree 2: 14 nodes, 18 connections, 2 stages per chain
+degree 3: 19 nodes, 26 connections, 3 stages per chain
+degree 4: 24 nodes, 34 connections, 4 stages per chain
+degree 5: 29 nodes, 42 connections, 5 stages per chain
+degree 6: 34 nodes, 50 connections, 6 stages per chain</code></pre><p>Every node runs exactly once, which is the <code>DAW</code> guarantee:</p><pre><code class="language-julia hljs">(all_once  = all(n -&gt; n.state.exec_n == 1, values(r.g.w.nodes)),
+ all_clean = all(n -&gt; getstatus(n) === :clean, values(r.g.w.nodes)))</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi">(all_once = true, all_clean = true)</code></pre><h3 id="Pull:-only-what-the-question-needs"><a class="docs-heading-anchor" href="#Pull:-only-what-the-question-needs">Pull: only what the question needs</a><a id="Pull:-only-what-the-question-needs-1"></a><a class="docs-heading-anchor-permalink" href="#Pull:-only-what-the-question-needs" title="Permalink"></a></h3><p><a href="../api/#MetidaFlows.scheduler!-Tuple{Workflow{MetidaFlows.ABW}}"><code>scheduler!</code></a> computes the whole graph. <a href="../api/#MetidaFlows.execute!-Tuple{Workflow, Int64}"><code>execute!</code></a> computes only what the node you asked for depends on — so asking for the value does not touch the derivative chain at all:</p><pre><code class="language-julia hljs">g = build_horner([2.0, -3.0, 1.0, 5.0], 2.0)
+execute!(g.w, last(g.badd))
+
+(value        = getdata(g.w, last(g.badd), :out),
+ b_chain      = unique(getstatus(getnode(g.w, id)) for id in g.badd),
+ d_chain      = unique(getstatus(getnode(g.w, id)) for id in g.dadd),
+ d_executions = sum(getnode(g.w, id).state.exec_n for id in g.dmul),
+ zero_source  = getnode(g.w, g.czero).state.exec_n)</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi">(value = 11.0, b_chain = [:clean], d_chain = [:dirty], d_executions = 0, zero_source = 0)</code></pre><p>Ask for the result afterwards and only the missing part is computed — the value chain is already cached:</p><pre><code class="language-julia hljs">before = [getnode(g.w, id).state.exec_n for id in g.badd]
+execute!(g.w, g.res)
+(derivative = getdata(g.w, g.res, :derivative),
+ b_chain_reran = [getnode(g.w, id).state.exec_n for id in g.badd] != before,
+ d_chain_ran   = all(id -&gt; getnode(g.w, id).state.exec_n == 1, g.dadd))</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi">(derivative = 13.0, b_chain_reran = false, d_chain_ran = true)</code></pre><h3 id="Invalidation-knows-which-coefficient-you-changed"><a class="docs-heading-anchor" href="#Invalidation-knows-which-coefficient-you-changed">Invalidation knows which coefficient you changed</a><a id="Invalidation-knows-which-coefficient-you-changed-1"></a><a class="docs-heading-anchor-permalink" href="#Invalidation-knows-which-coefficient-you-changed" title="Permalink"></a></h3><p>This is what computing in pieces is <em>for</em>. The constant term enters only the last <code>b</code> stage, so changing it dirties three nodes out of nineteen:</p><pre><code class="language-julia hljs">r = horner([2.0, -3.0, 1.0, 5.0], 2.0)
+setsettings!(r.g.w, last(r.g.ca), Dict(:value =&gt; 99.0))
+
+dirty = [id for (id, n) in r.g.w.nodes if getstatus(n) === :dirty]
+(dirty_count = length(dirty), total = length(r.g.w.nodes),
+ which = Set(dirty) == Set([last(r.g.ca), last(r.g.badd), r.g.res]))</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi">(dirty_count = 3, total = 19, which = true)</code></pre><pre><code class="language-julia hljs">execute!(r.g.w, r.g.res)
+# the derivative does not depend on the constant term and was not recomputed
+(value = getdata(r.g.w, r.g.res, :value),
+ derivative = getdata(r.g.w, r.g.res, :derivative),
+ derivative_chain_runs = unique(getnode(r.g.w, id).state.exec_n for id in r.g.dadd))</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi">(value = 105.0, derivative = 13.0, derivative_chain_runs = [1])</code></pre><p>Changing <code>x</code>, by contrast, dirties everything except the sources:</p><pre><code class="language-julia hljs">r2 = horner([2.0, -3.0, 1.0, 5.0], 2.0)
+setsettings!(r2.g.w, r2.g.cx, Dict(:value =&gt; 3.0))
+clean = [id for (id, n) in r2.g.w.nodes if getstatus(n) === :clean]
+(clean_count = length(clean),
+ only_sources = Set(clean) == Set([r2.g.czero; r2.g.ca]))</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi">(clean_count = 5, only_sources = true)</code></pre><h3 id="One-node-per-operation-means-no-fused-multiply-add"><a class="docs-heading-anchor" href="#One-node-per-operation-means-no-fused-multiply-add">One node per operation means no fused multiply-add</a><a id="One-node-per-operation-means-no-fused-multiply-add-1"></a><a class="docs-heading-anchor-permalink" href="#One-node-per-operation-means-no-fused-multiply-add" title="Permalink"></a></h3><p>The graph reproduces the textbook scheme bit for bit. It does <strong>not</strong> always reproduce Julia&#39;s <code>evalpoly</code>, and the reason is worth knowing: <code>evalpoly</code> computes each stage with <code>muladd</code>, one instruction with a single rounding. In the graph the multiplication and the addition are <em>different nodes</em>, so there is nothing to fuse.</p><pre><code class="language-julia hljs">coeffs = [1.0, -6.0, 15.0, -20.0, 15.0, -6.0, 1.0]   # (x-1)^6
+
+separate(c, x) = (b = c[1]; for k in 2:length(c); b = b * x + c[k]; end; b)
+fused(c, x)    = (b = c[1]; for k in 2:length(c); b = muladd(b, x, c[k]); end; b)
+
+g = horner(copy(coeffs), 0.1)
+(graph = g.value, separate = separate(coeffs, 0.1),
+ fused = fused(coeffs, 0.1), evalpoly = evalpoly(0.1, reverse(coeffs)))</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi">(graph = 0.531441, separate = 0.531441, fused = 0.5314409999999999, evalpoly = 0.5314409999999999)</code></pre><p>The divergence is rare — one case in forty-two over a spread of polynomials and points — but it is not noise: it is the cost of decomposing an algorithm into elementary nodes. Anything a compiler would have fused, a graph cannot.</p><h3 id="Things-to-watch"><a class="docs-heading-anchor" href="#Things-to-watch">Things to watch</a><a id="Things-to-watch-1"></a><a class="docs-heading-anchor-permalink" href="#Things-to-watch" title="Permalink"></a></h3><ul><li><p><strong>The degenerate first stage is a real node.</strong> The derivative chain starts from <code>d = 0</code>, so its first multiplication computes <code>0 · x</code>. Unrolling a loop into structure means even a trivial iteration costs a node — and that node depends on nothing but <code>x</code>, so it stays <code>:clean</code> when any coefficient changes.</p></li><li><p><strong><code>DAW</code> resets before every run.</strong> Two calls to <a href="../api/#MetidaFlows.scheduler!-Tuple{Workflow{MetidaFlows.ABW}}"><code>scheduler!</code></a> leave every <code>exec_n</code> at <code>1</code>, not <code>2</code>. To take advantage of the cache, call <a href="../api/#MetidaFlows.execute!-Tuple{Workflow, Int64}"><code>execute!</code></a> on the node you want instead.</p></li><li><p><strong>Cancellation is not the engine&#39;s problem.</strong> Near a root of high multiplicity both Horner and naive summation lose everything; the graph faithfully reproduces whichever scheme you wired.</p></li></ul></article><nav class="docs-footer"><a class="docs-footer-prevpage" href="../examples_newton/">« Newton&#39;s method and :error ports</a><a class="docs-footer-nextpage" href="../examples_edit_distance/">Edit distance: dynamic programming »</a><div class="flexbox-break"></div><p class="footer-message">Powered by <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> and the <a href="https://julialang.org/">Julia Programming Language</a>.</p></nav></div><div class="modal" id="documenter-settings"><div class="modal-background"></div><div class="modal-card"><header class="modal-card-head"><p class="modal-card-title">Settings</p><button class="delete"></button></header><section class="modal-card-body"><p><label class="label">Theme</label><div class="select"><select id="documenter-themepicker"><option value="auto">Automatic (OS)</option><option value="documenter-light">documenter-light</option><option value="documenter-dark">documenter-dark</option><option value="catppuccin-latte">catppuccin-latte</option><option value="catppuccin-frappe">catppuccin-frappe</option><option value="catppuccin-macchiato">catppuccin-macchiato</option><option value="catppuccin-mocha">catppuccin-mocha</option></select></div></p><hr/><p>This document was generated with <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> version 1.20.0 on <span class="colophon-date" title="Monday 9 November 2026 22:57">Monday 9 November 2026</span>. Using Julia version 1.13.3.</p></section><footer class="modal-card-foot"></footer></div></div></div></body></html>
