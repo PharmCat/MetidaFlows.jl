@@ -91,7 +91,7 @@ nothing # hide
                                   ▼
  dp[i-1][j-1] ─────────────▶ EdStep (diag) ──┐
  dp[i-1][j]   ─┬───────────▶ EdStep (up)   ──┼─▶ EdCell(i,j) ─▶ :cost
- dp[i][j-1]   ─┼───────────▶ EdStep (left) ──┘        └──────▶ :choice
+ dp[i][j-1]   ─┼───────────▶ EdStep (left) ──┘        └───────▶ :choice
  EdConst(1) ───┘
 ```
 

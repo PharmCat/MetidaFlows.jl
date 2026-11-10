@@ -1045,6 +1045,7 @@ include(joinpath(TEST_DIR, "algo_newton.jl"))
 include(joinpath(TEST_DIR, "algo_horner.jl"))
 include(joinpath(TEST_DIR, "algo_edit.jl"))
 include(joinpath(TEST_DIR, "algo_power.jl"))
+include(joinpath(TEST_DIR, "algo_intervals.jl"))
 
 end # @testset "ЗООПАРК АЛГОРИТМОВ"
 

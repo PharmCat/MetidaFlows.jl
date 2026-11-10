@@ -128,6 +128,18 @@ end
 """
 abstract type AbstractNodeType end
 #
+"""
+    AbstractAuditEvent
+
+Supertype of audit records in `Workflow.audit_log`.
+
+!!! warning "Reserved, with no implementation"
+    The package defines no concrete subtype and writes nothing to
+    `audit_log`: the field exists and stays empty for the lifetime of a
+    workflow. Whether it becomes a real change log of a graph - nodes and
+    connections added, settings changed - or is removed is an open question
+    for the next breaking release. Do not build on it yet.
+"""
 abstract type AbstractAuditEvent end
 #
 """
@@ -187,35 +199,130 @@ end
 #
 """
     AbstractNodeFields
- 
-Supertype of the node field containers: [`NodeState`](@ref) and the reserved
-`AbstractNodeSettings`, `AbstractNodeData`, `AbstractNodeInputBuffer`.
- 
-Subtypes get a `Dict`-like interface over their fields, so a node can be
-backed either by plain `Dict`s (the default) or by purpose-built structs:
- 
+
+Supertype of the node field containers: [`NodeState`](@ref),
+[`AbstractNodeSettings`](@ref), [`AbstractNodeData`](@ref),
+[`AbstractNodeState`](@ref), [`AbstractNodeInputBuffer`](@ref).
+
+A node's `settings`, `data` and `state` can be plain `Dict`s - the default - or
+purpose-built **structs**, so a workflow can be fully typed with no `Dict`
+anywhere. Subtypes of this type get the `Dict`-like interface the engine uses,
+over their own fields:
+
 ```julia
-state = NodeState()
-state[:exec_n]         # getindex  -> getfield
-state[:exec_n] = 1     # setindex! -> setfield! (mutable subtypes only)
-keys(state)            # (:exec_n, :ready_ports, :execution_id, :log)
+mutable struct FilterSettings <: MetidaFlows.AbstractNodeSettings
+    column::Symbol
+    threshold::Float64
+    FilterSettings() = new(:none, 0.0)      # see `empty!` below
+end
+
+s = FilterSettings()
+s[:threshold]           # getindex  -> getfield
+s[:threshold] = 1.5     # setindex! -> setfield!  (mutable subtypes only)
+keys(s)                 # (:column, :threshold)  -> fieldnames
+haskey(s, :column)      # -> hasfield
+get(s, :missing, nothing)
+empty!(s)               # back to FilterSettings()
 ```
- 
-`setindex!` raises an error for immutable subtypes.
+
+# The protocol
+These five methods are what the engine calls on a container, and all five come
+from this type:
+
+| method | meaning | needed by |
+|:---|:---|:---|
+| `getindex(obj, f)` | `getfield` | [`getdata`](@ref), node bodies |
+| `setindex!(obj, v, f)` | `setfield!`, mutable only | [`setdata!`](@ref), [`setsettings!`](@ref) |
+| `keys(obj)` | `fieldnames` | error messages, introspection |
+| `haskey(obj, f)` | `hasfield` | [`settings_to_dict`](@ref) |
+| `get(obj, f, default)` | field or `default` | [`getdata`](@ref) |
+| `empty!(obj)` | every field back to what the zero-argument constructor gives | [`mark_dirty!`](@ref), [`reset!`](@ref) |
+
+`empty!` is the only one with a condition: a struct has no "empty" state of its
+own, so the generic method rebuilds one with `T()` and copies its fields over.
+**Give the struct a zero-argument constructor**, or define `Base.empty!`
+yourself - [`NodeState`](@ref) does the latter. Without either, `empty!` raises
+and names the type, because the engine clears cached output data on every
+invalidation and cannot proceed.
+
+Which container a node gets is decided by [`nodesettings`](@ref),
+[`nodedata`](@ref), [`nodestate`](@ref) and [`nodebuffer`](@ref) - specialize
+those on the node type and both hand-built and loaded graphs come out typed.
+
+See also [`DataNode`](@ref).
 """
 abstract type AbstractNodeFields end
+
+"""
+    AbstractNodeSettings <: AbstractNodeFields
+
+Supertype for a node's **settings** container when it is a struct rather than a
+`Dict`. See [`AbstractNodeFields`](@ref) for the protocol and
+[`nodesettings`](@ref) for how a node gets one.
+"""
 abstract type AbstractNodeSettings <: AbstractNodeFields end
+
+"""
+    AbstractNodeData <: AbstractNodeFields
+
+Supertype for a node's **output data** container when it is a struct rather
+than a `Dict`. See [`AbstractNodeFields`](@ref) for the protocol and
+[`nodedata`](@ref) for how a node gets one.
+
+A `Dict` is emptied by invalidation; a struct is reset instead, so it needs a
+zero-argument constructor or its own `Base.empty!`.
+"""
 abstract type AbstractNodeData  <: AbstractNodeFields end
+
+"""
+    AbstractNodeState <: AbstractNodeFields
+
+Supertype of node execution state. The package ships [`NodeState`](@ref).
+[`request_stop!`](@ref) needs a `stop` field and so works on `NodeState` only;
+[`isstoprequested`](@ref) reports `false` for any other subtype.
+"""
 abstract type AbstractNodeState  <: AbstractNodeFields end
+
+"""
+    AbstractNodeInputBuffer <: AbstractNodeFields
+
+Supertype reserved for an input-buffer container.
+
+!!! warning "Not reachable yet"
+    `DataNode.input_buffer` is declared as
+    `Dict{Symbol, Dict{Int, BufferT}}`, so the *container* is fixed and only
+    the **value type** `BufferT` is a type parameter - see
+    [`nodebuffer`](@ref), which is where that type is chosen. A subtype of this
+    type cannot be passed to a node, and making it possible means changing the
+    `DataNode` struct.
+"""
 abstract type AbstractNodeInputBuffer  <: AbstractNodeFields end
 
 # Обеспечивает Dict совместимое поведение AbstractNodeFields (NodeState)
 Base.getindex(obj::AbstractNodeFields, f::Symbol) = getfield(obj, f)
 function Base.setindex!(obj::T, val, f::Symbol) where T <: AbstractNodeFields
-    ismutabletype(T) || error("immutable")
+    ismutabletype(T) || error("$(T) is immutable: a node container that the engine writes to must be a `mutable struct`")
     setfield!(obj, f, val)
 end
-Base.keys(obj::AbstractNodeFields) = fieldnames(typeof(obj))
+Base.keys(obj::AbstractNodeFields)                   = fieldnames(typeof(obj))
+Base.haskey(obj::AbstractNodeFields, f::Symbol)      = hasfield(typeof(obj), f)
+Base.get(obj::AbstractNodeFields, f::Symbol, default) =
+    hasfield(typeof(obj), f) ? getfield(obj, f) : default
+#  «Опустошения» у структуры с фиксированными полями нет, поэтому за эталон
+#  берётся свежесозданный экземпляр. Это и позволяет не требовать от автора
+#  ничего, кроме конструктора без аргументов.
+function Base.empty!(obj::T) where T <: AbstractNodeFields
+    ismutabletype(T) ||
+        error("$(T) is immutable: `empty!` cannot reset it; make it a `mutable struct`")
+    hasmethod(T, Tuple{}) ||
+        error("$(T) has no zero-argument constructor, so `empty!` has nothing to reset it to: " *
+              "add `$(nameof(T))() = ...` or define `Base.empty!(::$(T))`")
+    fresh = T()
+    for f in fieldnames(T)
+        setfield!(obj, f, getfield(fresh, f))
+    end
+    return obj
+end
 
 """
     ExecuteSettings(; execute_upstream = true, invalidate_downstream = true,
@@ -512,16 +619,76 @@ struct DataNode{T <: AbstractNodeType, SettingsT, DataT, StateT, BufferT} <: Abs
         end
         new{T, SettingsT, DataT, StateT, BufferT}(properties, spec, settings, data, state, input_buffer)
     end
-    function DataNode(type::Type, id, status, position, spec::NodeSpec; settings = Dict{Symbol, Any}(), data = Dict{Symbol, Any}(), state = NodeState(), input_buffer = Dict{Symbol, Dict{Int, Any}}())
+    #  Умолчания берутся из nodesettings / nodedata / nodestate / nodebuffer:
+    #  Julia вычисляет выражение умолчания только когда аргумент не передан,
+    #  поэтому лишних контейнеров не создаётся.
+    function DataNode(type::Type, id, status, position, spec::NodeSpec; settings = nodesettings(type), data = nodedata(type), state = nodestate(type), input_buffer = nodebuffer(type))
         DataNode(type,  NodeProperties(id, status, position), spec, settings, data, state, input_buffer)
     end
-    function DataNode(type::Type, properties::NodeProperties, spec::NodeSpec; settings = Dict{Symbol, Any}(), data = Dict{Symbol, Any}(), state = NodeState(), input_buffer = Dict{Symbol, Dict{Int, Any}}())
+    function DataNode(type::Type, properties::NodeProperties, spec::NodeSpec; settings = nodesettings(type), data = nodedata(type), state = nodestate(type), input_buffer = nodebuffer(type))
         DataNode(type,  properties, spec, settings, data, state, input_buffer)
     end
-    function DataNode(type::Type, spec::NodeSpec; settings = Dict{Symbol, Any}(), data = Dict{Symbol, Any}(), state = NodeState(), input_buffer = Dict{Symbol, Dict{Int, Any}}())
+    function DataNode(type::Type, spec::NodeSpec; settings = nodesettings(type), data = nodedata(type), state = nodestate(type), input_buffer = nodebuffer(type))
         DataNode(type,  NodeProperties(), spec, settings, data, state, input_buffer)
     end
 end
+
+"""
+    nodesettings(::Type) -> container
+    nodedata(::Type)     -> container
+    nodestate(::Type)    -> container
+    nodebuffer(::Type)   -> Dict{Symbol, Dict{Int, T}}
+
+Fresh containers for a node of the given node type. These are the defaults of
+the [`DataNode`](@ref) keyword constructors and what [`dict_to_node`](@ref)
+builds a loaded node with, so **one method here types a node everywhere** - by
+hand, in a graph, and after a round trip through a snapshot.
+
+Default: `Dict{Symbol, Any}()` for settings and data, [`NodeState`](@ref) for
+state, `Dict{Symbol, Dict{Int, Any}}()` for the input buffer. Each is called
+once per node, and only when the corresponding keyword is not given, so a
+container is never built and thrown away.
+
+```julia
+mutable struct ScaleSettings <: MetidaFlows.AbstractNodeSettings
+    factor::Float64
+    ScaleSettings() = new(1.0)
+end
+mutable struct ScaleData <: MetidaFlows.AbstractNodeData
+    out::Union{Float64, Nothing}
+    ScaleData() = new(nothing)
+end
+
+struct Scale <: AbstractNodeType end
+MetidaFlows.nodesettings(::Type{Scale}) = ScaleSettings()
+MetidaFlows.nodedata(::Type{Scale})     = ScaleData()
+MetidaFlows.nodebuffer(::Type{Scale})   = Dict{Symbol, Dict{Int, Float64}}()
+
+node = DataNode(Scale, spec_scale())
+# DataNode{Scale, ScaleSettings, ScaleData, NodeState, Float64}
+```
+
+Specialize them independently: typed settings with `Dict` data is a perfectly
+good combination.
+
+`nodebuffer` chooses the buffer's **value type**, not its container: the
+`input_buffer` field is declared `Dict{Symbol, Dict{Int, BufferT}}`, so a
+custom container cannot be substituted - see
+[`AbstractNodeInputBuffer`](@ref). A value type narrower than `Any` is checked
+on every write, which is how a port carrying the wrong type is caught early.
+
+See [`AbstractNodeFields`](@ref) for what a container struct has to provide.
+"""
+nodesettings(::Type) = Dict{Symbol, Any}()
+
+@doc (@doc nodesettings)
+nodedata(::Type)     = Dict{Symbol, Any}()
+
+@doc (@doc nodesettings)
+nodestate(::Type)    = NodeState()
+
+@doc (@doc nodesettings)
+nodebuffer(::Type)   = Dict{Symbol, Dict{Int, Any}}()
 
 """
     NODE_REGISTER::Dict{String, Tuple{Type, NodeSpec}}

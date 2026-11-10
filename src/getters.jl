@@ -107,15 +107,17 @@ end
     getportspec(node::AbstractDataNode, l::Symbol, direction::Symbol)
 
 Return the [`PortSpec`](@ref) of the port labelled `l` (`direction` is `:input` or `:output`).
+
+Any other `direction` raises a `KeyError`: the specification's port map holds
+`(:input, label)` and `(:output, label)` keys and nothing else, so
+[`getportnumber`](@ref) fails before the direction is read here.
 """
 function  getportspec(node::AbstractDataNode, l::Symbol, direction::Symbol)
-    i = getportnumber(node, l, direction) 
+    i = getportnumber(node, l, direction)
     if direction == :input
         return node.spec.input_ports[i]
-    elseif direction == :output
-        return node.spec.output_ports[i]
     end
-    error("Wrong direction")
+    return node.spec.output_ports[i]
 end
 
 """
@@ -128,10 +130,12 @@ instance after [`mark_dirty!`](@ref). Raises an error when `l` is not an
 output port of the node specification.
 """
 function getdata(node::AbstractDataNode, l::Symbol)
-    if isportexist(node, l, :output) 
+    if isportexist(node, l, :output)
         return get(node.data, l, nothing)
     end
-    error("Wrong port label, available ports: $(collect(keys(node.data)))")
+    #  Порты берутся из спецификации
+    error("Wrong output port label `:$(l)`, ports of this node: " *
+          "$([ps.label for ps in node.spec.output_ports])")
 end
 """
     getdata(model::Workflow, id::Int, l::Symbol)

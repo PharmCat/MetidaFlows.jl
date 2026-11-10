@@ -12,7 +12,7 @@ worker runs under a different criterion.
 
 ```
 LoadData ──:table──▶ Trim ──:state──▶ Control ──:next──▶ Trim (:previous, feedback)
-                       ▲                          ├──:result      ▶ (terminal)
+                       ▲                          ├──:result        ▶ (terminal)
                        └──────────────────────────┘  └──:iterations ▶ (terminal)
 ```
 

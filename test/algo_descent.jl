@@ -7,12 +7,12 @@
 #
 #  ГРАФ
 #
-#   ConstFloat(x0) ─┐                     ┌─▶ AddFloat(x,h) ─▶ Sub ─▶ Mul ─┐
-#   ConstInt(0) ────┼─▶ DescentState ─────┤      (x+h)        (−c)   (²)   │
-#                   │        ▲            └─▶ SubFloat(x,h) ─▶ Sub ─▶ Mul ─┤
-#                   │        │                  (x−h)         (−c)   (²)   │
-#   ConstFloat(h) ──┼────────┼───▶ AddFloat(h,h) ─────┐                    │
-#                   │        │                        │      SubFloat(fp,fm)
+#   ConstFloat(x0) ─┐                     ┌─▶ AddFloat(x,h) ─▶ Sub ─▶ Mul  ─┐
+#   ConstInt(0) ────┼─▶ DescentState ─────┤      (x+h)        (−c)   (²)    │
+#                   │        ▲            └─▶ SubFloat(x,h) ─▶ Sub ─▶ Mul  ─┤
+#                   │        │                  (x−h)         (−c)   (²)    │
+#   ConstFloat(h) ──┼────────┼───▶ AddFloat(h,h) ─────┐                     │
+#                   │        │                        │    SubFloat(fp,fm)  │
 #                   │        │                        └──────▶ DivFloat ──▶ grad
 #                   │        │                                              │
 #   ConstFloat(rate)┼────────┼──────────────────▶ MulFloat(rate, grad) ─────┤
@@ -25,9 +25,9 @@
 #                   │        │          │                │
 #                   │        │          │           OrBool(conv, exh)
 #                   │        │          ▼                ▼
-#                   │        └── :feedback ───── DescentGate ──▶ :minimum
+#                   │        └── :feedback ───── DescentGate  ──▶ :minimum
 #                   │                                         ──▶ :iterations
-#                   └─────────────────────────────────────────  ──▶ :reason
+#                   └───────────────────────────────────────────▶ :reason
 #
 ############################################################################
 

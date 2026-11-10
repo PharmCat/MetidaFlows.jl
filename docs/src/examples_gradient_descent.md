@@ -36,18 +36,18 @@ central difference of a quadratic is its derivative, with no truncation error.
 ### The graph
 
 ```
- ConstFloat(x0) ─┐                   ┌─▶ AddFloat(x,h) ─▶ Sub(−c) ─▶ Mul(²) ─┐
- ConstInt(0) ────┼─▶ DescentState ───┤                                       │
-                 │        ▲          └─▶ SubFloat(x,h) ─▶ Sub(−c) ─▶ Mul(²) ─┤
- ConstFloat(c) ──┼────────┼──────────────────▶ ↑               ↑              │
-                 │        │                                   SubFloat(fp,fm)
+ ConstFloat(x0) ─┐                   ┌─▶ AddFloat(x,h) ─▶ Sub(−c) ─▶ Mul(²) ───┐
+ ConstInt(0) ────┼─▶ DescentState ───┤                                         │
+                 │        ▲          └─▶ SubFloat(x,h) ─▶ Sub(−c) ─▶ Mul(²) ───┤
+ ConstFloat(c) ──┼────────┼──────────────────▶ ↑               ↑               │
+                 │        │                                  SubFloat(fp,fm)   │
  ConstFloat(h) ──┼────────┼──▶ AddFloat(h,h) ──────────────────▶ DivFloat ──▶ grad
-                 │        │                                                   │
- ConstFloat(rate)┼────────┼───────────────────▶ MulFloat(rate, grad) ─────────┤
-                 │        │                             │                     │
-                 │        │                      SubFloat(x, step) ─▶ x'      │
-                 │        │                                                   ▼
- ConstFloat(tol) ┼────────┼───────────────────▶ LessFloat ◀── AbsFloat(grad) ─┘
+                 │        │                                                    │
+ ConstFloat(rate)┼────────┼───────────────────▶ MulFloat(rate, grad) ──────────┤
+                 │        │                             │                      │
+                 │        │                      SubFloat(x, step) ─▶ x'       │
+                 │        │                                                    ▼
+ ConstFloat(tol) ┼────────┼───────────────────▶ LessFloat ◀── AbsFloat(grad) ──┘
                  │        │                         │
  ConstInt(1) ────┼────────┼──▶ AddInt(iter,1) ─▶ NotLessInt ◀── ConstInt(maxiter)
                  │        │             │              │
@@ -55,7 +55,7 @@ central difference of a quadratic is its derivative, with no truncation error.
                  │        │             ▼              ▼
                  │        └─ :feedback ──── DescentGate ──▶ :minimum
                  │                                      ──▶ :iterations
-                 └──────────────────────────────────────  ──▶ :reason
+                 └────────────────────────────────────────▶ :reason
 ```
 
 Twenty-six nodes of thirteen types. Every node takes exactly the inputs it

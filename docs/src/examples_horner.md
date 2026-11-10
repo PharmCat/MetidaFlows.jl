@@ -93,20 +93,40 @@ is the only way to give a particular place in the graph a terminal port.
 
 ### The graph
 
+One stage is a pair of nodes, and the two chains differ only in what the
+addition takes as its second operand:
+
 ```
- HConstF(x) ──────┬─────────────┬──────────────┬─────────────┐
-                  │             │              │             │
- HConstF(a3) ─▶ HMul ─▶ HAdd ─▶ HMul ─▶ HAdd ─▶ HMul ─▶ HAdd ─▶ HResult
-      │           ▲  b1    ▲      ▲  b2    ▲      ▲  b3    ▲   :value
- HConstF(a2) ─────┘        │      │        │      │        │
- HConstF(a1) ──────────────┼──────┘        │      │        │
- HConstF(a0) ──────────────┼───────────────┼──────┘        │
-                           │               │               │
- HConstF(0) ─▶ HMul ─▶ HAdd ─▶ HMul ─▶ HAdd ─▶ HMul ─▶ HAdd ─▶ HResult
-                  ▲     ▲ d1      ▲     ▲ d2     ▲     ▲ d3   :derivative
-                  └── x │         └── x │        └── x │
-    b stages ──────────┴───────────────┴──────────────┘
+ b-chain (the value)                 d-chain (the derivative)
+ ───────────────────                 ────────────────────────
+ bmul(k) ·a ← b(k-1)                 dmul(k) ·a ← d(k-1)
+         ·b ← x                              ·b ← x
+ badd(k) ·a ← bmul(k)                dadd(k) ·a ← dmul(k)
+         ·b ← a(n-k)                         ·b ← b(k-1)   ← b BEFORE this stage
 ```
+
+Unrolled for `coeffs = [a3, a2, a1, a0]`, which is exactly what
+`build_horner` connects below:
+
+```
+ bmul1 = a3 · x           dmul1 = 0 · x
+ badd1 = bmul1 + a2       dadd1 = dmul1 + a3
+ bmul2 = badd1 · x        dmul2 = dadd1 · x
+ badd2 = bmul2 + a1       dadd2 = dmul2 + badd1
+ bmul3 = badd2 · x        dmul3 = dadd2 · x
+ badd3 = bmul3 + a0       dadd3 = dmul3 + badd2
+
+ HResult :value ← badd3    HResult :derivative ← dadd3
+```
+
+So `x` reaches six multiplications and nothing else, each coefficient reaches
+exactly one addition, and `a3` is special: it both starts the `b` chain and is
+the `b(k-1)` that the first `d` addition needs.
+
+The diamond is in the last line of each pair. The output of `badd1` has **two**
+consumers — `bmul2.a` in its own chain and `dadd2.b` in the other, which is
+what makes this a branching acyclic graph rather than two chains. It is
+printed from the finished graph [below](#The-diamond,-read-off-the-graph).
 
 ```@example horner
 function build_horner(coeffs::Vector{Float64}, x::Float64)
@@ -184,6 +204,38 @@ Every node runs exactly once, which is the `DAW` guarantee:
 ```@example horner
 (all_once  = all(n -> n.state.exec_n == 1, values(r.g.w.nodes)),
  all_clean = all(n -> getstatus(n) === :clean, values(r.g.w.nodes)))
+```
+
+### The diamond, read off the graph
+
+The claim above — that each `b` stage feeds two consumers, one in each chain —
+is a property of the connections, so let the graph state it. Every line below
+is read from `w.connections`, not written by hand:
+
+```@example horner
+g = build_horner([3.0, -2.0, 0.5, 7.0], 2.0)
+name(id) = id == g.cx ? "x" : id == g.czero ? "0" :
+    (i = findfirst(==(id), g.ca);   i !== nothing) ? "a$(g.n - i + 1)" :
+    (j = findfirst(==(id), g.bmul); j !== nothing) ? "bmul$j" :
+    (j = findfirst(==(id), g.badd); j !== nothing) ? "badd$j" :
+    (j = findfirst(==(id), g.dmul); j !== nothing) ? "dmul$j" :
+    (j = findfirst(==(id), g.dadd); j !== nothing) ? "dadd$j" : "node$id"
+
+[name(c.input_id) * "." * String(c.input_port)
+ for (_, c) in sort(collect(g.w.connections); by = first)
+ if c.output_id == g.badd[1]]
+```
+
+And the whole recurrence, printed the same way:
+
+```@example horner
+src(id, port) = only(c.output_id for (_, c) in g.w.connections
+                     if c.input_id == id && c.input_port == port)
+join([ "bmul$k = $(name(src(g.bmul[k], :a))) · $(name(src(g.bmul[k], :b)))\t" *
+       "dmul$k = $(name(src(g.dmul[k], :a))) · $(name(src(g.dmul[k], :b)))\n" *
+       "badd$k = $(name(src(g.badd[k], :a))) + $(name(src(g.badd[k], :b)))\t" *
+       "dadd$k = $(name(src(g.dadd[k], :a))) + $(name(src(g.dadd[k], :b)))"
+      for k in 1:length(g.bmul)], "\n") |> println
 ```
 
 ### Pull: only what the question needs

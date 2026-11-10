@@ -543,4 +543,41 @@ end
     @test getstate(getnode(lin.w, lin.src), :execution_id) == lin.w.run_id
 end
 
+# --------------------------------------------------------------------------
+@testset "состав экспорта: снимок                         " begin
+    #  Экспорт — это то, что замораживается в 1.0, поэтому он не должен
+    #  меняться молча. Снимок ниже обязан обновляться ВМЕСТЕ со сменой
+    #  экспорта, то есть осознанно: упавший тест здесь означает не ошибку,
+    #  а незадокументированное изменение публичной поверхности.
+    EXPORTED = [
+        :AbstractNodeType, :DataNode, :ExecuteSettings, :NodeConnection,
+        :NodeSpec, :PortSpec, :Workflow,
+        :add_connection!, :add_node!, :check_failed_nodes,
+        :delete_connection!, :delete_node!, :execute!, :failed_nodes,
+        :getdata, :getinputdata, :getinputmeta, :getmeta, :getstatus,
+        :isnodeexist, :isportexist, :scheduler!, :setdata!, :setsettings!,
+    ]
+    actual = filter(n -> n !== :MetidaFlows, names(MetidaFlows))
+    @test sort(actual) == sort(EXPORTED)
+    @test length(actual) == 24
+    @test allunique(actual)
+    #  Каждое экспортируемое имя определено и документировано: `api.md`
+    #  идёт через @autodocs, а он берёт имена из словаря докстрингов
+    #  модуля, поэтому недокументированное имя в справочник не попадёт.
+    documented = Set(string(k.var) for k in keys(Base.Docs.meta(MetidaFlows)))
+    for n in EXPORTED
+        @test isdefined(MetidaFlows, n)
+        @test string(n) in documented
+    end
+    #  Ключевое слово `public` пока не используется: граница «публично, но не
+    #  экспортировано» держится документацией, а не компилятором. Тест
+    #  фиксирует текущее положение — а заодно и то, что проверить его можно
+    #  не везде: `Base.ispublic` появился только в 1.11, а минимум по compat
+    #  — 1.10, где самого ключевого слова тоже нет и проверять нечего.
+    if isdefined(Base, :ispublic)
+        @test isempty(filter(n -> Base.ispublic(MetidaFlows, n) && !(n in actual) &&
+                                  n !== :MetidaFlows, names(MetidaFlows; all = true)))
+    end
+end
+
 end # @testset "API"

@@ -400,6 +400,48 @@ when the inputs mean different things: three named ports can report *which* of
 them won, one `MultiPort` of three cannot. [Edit
 distance](examples_edit_distance.md) builds both and compares them.
 
+!!! warning "The dictionary is the buffer itself"
+    For a `MultiPort`, [`getinputdata`](@ref) hands back `node.input_buffer`'s
+    own dictionary, not a copy. Read it, iterate it, sum it - but do not
+    `delete!` from it or assign into it, or the node is editing the engine's
+    buffer. The same rule as for values, below.
+
+### A value you receive is not yours
+
+A node's output is cached in the node and pushed into the buffers of its
+consumers **by reference**. Nothing is copied, which is what makes passing a
+large frame between nodes cheap - and what makes mutating a received value a
+mistake that is not reported.
+
+Measured on a three-node graph: a source publishing `[1, 2, 3]` into two
+consumers, the first of which does `a = getinputdata(node, :in); a[1] += 100`
+without copying:
+
+```
+источник отдал               [1, 2, 3]
+mutating node returned       [101, 2, 3]
+the producer's cache became  [101, 2, 3]
+the second consumer's sum    106          (6 is correct)
+```
+
+Two separate things went wrong: the producer's cached output was overwritten,
+so a later `getdata` on it reports a value it never produced, and the other
+consumer computed on corrupted input. Neither raises.
+
+So: **copy before you mutate**, or do not mutate.
+
+```julia
+a = copy(getinputdata(node, :in))      # now it is yours
+a[1] += 100
+setdata!(node, :out, a)
+```
+
+Mutating in place is safe only when the producer's port has exactly one
+consumer and the producer's own cache is of no further interest - and the
+engine has no way to tell you that is the case, so the rule is stated rather
+than enforced. `get_children(model, id)` answers it from outside a node, if
+you want to assert it in a test.
+
 ---
 
 ## Serialization and schemas

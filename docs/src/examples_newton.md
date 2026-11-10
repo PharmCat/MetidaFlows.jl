@@ -235,13 +235,13 @@ nothing # hide
                            │           ├──▶ NAddInt (iter + 1)         │     NNotLessI ────┘        │
                            │           │        ConstI(1) ─────────────┘                            │
                            │           │                                                            │
-                           │           └──▶ NStep (f/f', ConstF(eps)) ──▶ NSub (x − step) ──┐       │
-                           │                      │                                         │       │
+                           │           └──▶ NStep (f/f', ConstF(eps)) ──▶ NSub (x − step)──┐        │
+                           │                      │                                        │        │
                            │                      │ :error                         NewtonGate ◀─────┘
-                           │                      ▼                                    │
-                           │                NewtonRescue ──▶ :reason, :x, :iterations,  │
-                           │                                 :derivative, :restart      │
-                           └───────────── :feedback (x, iter) ────────────────────────────┘
+                           │                      ▼                                        │
+                           │                NewtonRescue ──▶ :reason, :x, :iterations,     │
+                           │                                 :derivative, :restart         │
+                           └───────────── :feedback (x, iter) ─────────────────────────────┘
 ```
 
 Twenty-one nodes, thirty-three connections, exactly one `:error` edge.

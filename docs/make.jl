@@ -16,6 +16,7 @@ makedocs(;
     pages=[
         "Home" => "index.md",
         "Guide" => "guide.md",
+        "Typed containers" => "typed_containers.md",
         "Examples" => [
             "AWB cycle" => "examples_abw_cycle.md",
             "AWB two node cycle" => "examples_abw_two_node.md",
@@ -26,9 +27,18 @@ makedocs(;
             "Newton's method and :error ports" => "examples_newton.md",
             "Horner's scheme on DAW" => "examples_horner.md",
             "Edit distance: dynamic programming" => "examples_edit_distance.md",
+            "Interval arithmetic: metadata" => "examples_intervals.md",
             "Modular exponentiation: skipping work" => "examples_power.md",
         ],
-        "API" => "api.md",
+        "API" => [
+            "Overview" => "api.md",
+            "Types" => "api_types.md",
+            "Graph and nodes" => "api_core.md",
+            "Reading and writing a node" => "api_access.md",
+            "Execution" => "api_execution.md",
+            "Port metadata" => "api_meta.md",
+            "Serialization and schemas" => "api_serialization.md",
+        ],
     ],
 )
 

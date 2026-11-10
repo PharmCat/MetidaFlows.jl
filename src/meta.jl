@@ -117,6 +117,25 @@ raises a `KeyError`, because the dictionary passed there is empty — the
 mismatch is loud on purpose, as with [`validate_settings`](@ref) and
 [`execute_unsafe!`](@ref).
 
+The mirror half is as easy to get wrong: [`getmeta_unsafe`](@ref) is called on
+the **not a source** branch too, and there the settings it would like may be
+missing. A node that is a source only once configured therefore needs a method
+that answers for *both* states - usually `nothing` for the unconfigured one:
+
+```julia
+MetidaFlows.ismetasource(n::DataNode{Range}, ::Symbol) =
+    haskey(n.settings, :lo) && haskey(n.settings, :hi)
+
+function MetidaFlows.getmeta_unsafe(n::DataNode{Range}, ::Symbol, inmeta)
+    (haskey(n.settings, :lo) && haskey(n.settings, :hi)) || return nothing
+    (lo = n.settings[:lo], hi = n.settings[:hi])
+end
+```
+
+Without that guard an unconfigured node raises `KeyError` from inside the walk
+instead of reporting "unknown", and the error surfaces far from its cause. Make
+the method **total**, not merely consistent with the predicate.
+
 # Example
 ```julia
 # the schema is known only once the file path is set

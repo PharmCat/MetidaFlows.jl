@@ -120,7 +120,11 @@ end
 
 Direct mutation of node settings without invalidation. Can be re-implemented for every node type.
 
-Default implementation copies all provided key-value pairs into `node.settings`.
+Default implementation copies all provided key-value pairs into `node.settings`,
+one key at a time, so a container that is a struct rather than a `Dict` - see
+[`AbstractNodeFields`](@ref) - is written through `setindex!` and keeps its
+field types. A key it refuses, because the type does not match the field or
+because the field does not exist, raises an error naming the node and the key.
 
 # Warning
 This function does NOT invalidate cached execution results or downstream nodes.
@@ -129,7 +133,14 @@ Use [`setsettings!`](@ref) for normal workflow operation
 """
 function setsettings_unsafe!(node::AbstractDataNode, settings::Dict{Symbol, <: Any})
     for (k, v) in settings
-        node.settings[k] = v
+        #  Присваивание в типизированный контейнер отказывает на чужом типе
+        #  или на незнакомом поле, и без контекста наружу выходит голый
+        #  `TypeError: in setfield!, expected Int64, got ... String`.
+        try
+            node.settings[k] = v
+        catch e
+            error("Node $(getid(node)) setting `:$(k)`: $(sprint(showerror, e))")
+        end
     end
     node
 end

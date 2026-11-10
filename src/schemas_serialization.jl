@@ -629,6 +629,12 @@ present - see [`dict_to_settings!`](@ref) and [`dict_to_node_state!`](@ref).
 The node comes back `:dirty` whatever status the file carries, and without
 cached output data.
 
+Its containers come from [`nodesettings`](@ref), [`nodedata`](@ref),
+[`nodestate`](@ref) and [`nodebuffer`](@ref), so a node built from typed
+structs is loaded as the same typed node rather than falling back to `Dict`s.
+Nothing about the containers is read from the file: like the type and the spec,
+they are decided by the running code.
+
 With `usermode = true` the spec is rebuilt from the file by `dict_to_spec`,
 which you define yourself; the type still comes from the register. This lets a
 snapshot carry a spec the register does not have.
@@ -644,7 +650,8 @@ function dict_to_node(d::Dict{String}; usermode = false)
     #  by `dict_to_spec`, so a snapshot can carry a spec the register lacks.
     type, spec        = getregnodeinfo(typestr)
     usermode && (spec = dict_to_spec(d["spec"]))
-    node = DataNode(type, properties, spec; settings = Dict{Symbol, Any}(), data = Dict{Symbol, Any}(), state = NodeState(), input_buffer = Dict{Symbol, Dict{Int, Any}}())
+    #  Контейнеры берутся из точек расширения, а не из литералов
+    node = DataNode(type, properties, spec)
     haskey(d, "settings_values") && dict_to_settings!(node, d["settings_values"])
     haskey(d, "state")           && dict_to_node_state!(node, d["state"])
     return node
