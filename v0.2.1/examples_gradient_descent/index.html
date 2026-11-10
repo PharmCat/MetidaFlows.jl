@@ -1,0 +1,248 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="UTF-8"/><meta name="viewport" content="width=device-width, initial-scale=1.0"/><meta name="referrer" content="no-referrer"/><title>Gradient descent on a graph · MetidaFlows.jl</title><meta name="title" content="Gradient descent on a graph · MetidaFlows.jl"/><meta property="og:title" content="Gradient descent on a graph · MetidaFlows.jl"/><meta property="twitter:title" content="Gradient descent on a graph · MetidaFlows.jl"/><meta name="description" content="Documentation for MetidaFlows.jl."/><meta property="og:description" content="Documentation for MetidaFlows.jl."/><meta property="twitter:description" content="Documentation for MetidaFlows.jl."/><meta property="og:url" content="https://PharmCat.github.io/MetidaFlows.jl/examples_gradient_descent/"/><meta property="twitter:url" content="https://PharmCat.github.io/MetidaFlows.jl/examples_gradient_descent/"/><link rel="canonical" href="https://PharmCat.github.io/MetidaFlows.jl/examples_gradient_descent/"/><script data-outdated-warner src="../assets/warner.js"></script><link href="https://cdnjs.cloudflare.com/ajax/libs/lato-font/3.0.0/css/lato-font.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/juliamono/0.63.2/juliamono.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/fontawesome.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/solid.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/brands.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.8/katex.min.css" rel="stylesheet" type="text/css"/><script>documenterBaseURL=".."</script><script src="https://cdnjs.cloudflare.com/ajax/libs/require.js/2.3.6/require.min.js" data-main="../assets/documenter.js"></script><script src="../search_index.js"></script><script src="../siteinfo.js"></script><script src="../../versions.js"></script><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../assets/themes/catppuccin-mocha.css" data-theme-name="catppuccin-mocha"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../assets/themes/catppuccin-macchiato.css" data-theme-name="catppuccin-macchiato"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../assets/themes/catppuccin-frappe.css" data-theme-name="catppuccin-frappe"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../assets/themes/catppuccin-latte.css" data-theme-name="catppuccin-latte"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../assets/themes/documenter-dark.css" data-theme-name="documenter-dark" data-theme-primary-dark/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../assets/themes/documenter-light.css" data-theme-name="documenter-light" data-theme-primary/><script src="../assets/themeswap.js"></script></head><body><div id="documenter"><nav class="docs-sidebar"><div class="docs-package-name"><span class="docs-autofit"><a href="../">MetidaFlows.jl</a></span></div><button class="docs-search-query input is-rounded is-small is-clickable my-2 mx-auto py-1 px-2" id="documenter-search-query">Search docs (Ctrl + /)</button><ul class="docs-menu"><li><a class="tocitem" href="../">Home</a></li><li><a class="tocitem" href="../guide/">Guide</a></li><li><a class="tocitem" href="../typed_containers/">Typed containers</a></li><li><span class="tocitem">Examples</span><ul><li><a class="tocitem" href="../examples_abw_cycle/">AWB cycle</a></li><li><a class="tocitem" href="../examples_abw_two_node/">AWB two node cycle</a></li><li><a class="tocitem" href="../examples_settings_query/">Querying settings</a></li><li><a class="tocitem" href="../examples_bubble_sort/">Bubble sort as a graph</a></li><li><a class="tocitem" href="../examples_insertion_sort/">Insertion sort: nested loops</a></li><li class="is-active"><a class="tocitem" href>Gradient descent on a graph</a><ul class="internal"><li><a class="tocitem" href="#Gradient-descent-on-a-graph"><span>Gradient descent on a graph</span></a></li></ul></li><li><a class="tocitem" href="../examples_newton/">Newton&#39;s method and :error ports</a></li><li><a class="tocitem" href="../examples_horner/">Horner&#39;s scheme on DAW</a></li><li><a class="tocitem" href="../examples_edit_distance/">Edit distance: dynamic programming</a></li><li><a class="tocitem" href="../examples_intervals/">Interval arithmetic: metadata</a></li><li><a class="tocitem" href="../examples_power/">Modular exponentiation: skipping work</a></li></ul></li><li><span class="tocitem">API</span><ul><li><a class="tocitem" href="../api/">Overview</a></li><li><a class="tocitem" href="../api_types/">Types</a></li><li><a class="tocitem" href="../api_core/">Graph and nodes</a></li><li><a class="tocitem" href="../api_access/">Reading and writing a node</a></li><li><a class="tocitem" href="../api_execution/">Execution</a></li><li><a class="tocitem" href="../api_meta/">Port metadata</a></li><li><a class="tocitem" href="../api_serialization/">Serialization and schemas</a></li></ul></li></ul><div class="docs-version-selector field has-addons"><div class="control"><span class="docs-label button is-static is-size-7">Version</span></div><div class="docs-selector control is-expanded"><div class="select is-fullwidth is-size-7"><select id="documenter-version-selector"></select></div></div></div></nav><div class="docs-main"><header class="docs-navbar"><a class="docs-sidebar-button docs-navbar-link fa-solid fa-bars is-hidden-desktop" id="documenter-sidebar-button" href="#"></a><nav class="breadcrumb"><ul class="is-hidden-mobile"><li><a class="is-disabled">Examples</a></li><li class="is-active"><a href>Gradient descent on a graph</a></li></ul><ul class="is-hidden-tablet"><li class="is-active"><a href>Gradient descent on a graph</a></li></ul></nav><div class="docs-right"><a class="docs-navbar-link" href="https://github.com/PharmCat/MetidaFlows.jl" title="View the repository on GitHub"><span class="docs-icon fa-brands"></span><span class="docs-label is-hidden-touch">GitHub</span></a><a class="docs-navbar-link" href="https://github.com/PharmCat/MetidaFlows.jl/blob/main/docs/src/examples_gradient_descent.md" title="Edit source on GitHub"><span class="docs-icon fa-solid"></span></a><a class="docs-settings-button docs-navbar-link fa-solid fa-gear" id="documenter-settings-button" href="#" title="Settings"></a><a class="docs-article-toggle-button fa-solid fa-chevron-up" id="documenter-article-toggle-button" href="javascript:;" title="Collapse all docstrings"></a></div></header><article class="content" id="documenter-page"><h2 id="Gradient-descent-on-a-graph"><a class="docs-heading-anchor" href="#Gradient-descent-on-a-graph">Gradient descent on a graph</a><a id="Gradient-descent-on-a-graph-1"></a><a class="docs-heading-anchor-permalink" href="#Gradient-descent-on-a-graph" title="Permalink"></a></h2><p>The second algorithm of the zoo, after <a href="../examples_bubble_sort/">bubble sort</a>. It adds four things that example did not have:</p><ul><li>the loop stops on a <strong>floating-point criterion</strong> rather than a counter, and there are <strong>two</strong> stop conditions — converged or out of iterations — so the gate chooses between three outcomes and reports which one fired;</li><li>the loop is <strong>post-tested</strong>: you need a step to have a gradient, so the body always runs at least once;</li><li>the <strong>objective function is a subgraph, not a node</strong>. Evaluating <code>f</code> at two points means two copies of its subgraph, and changing the objective is a setting or a rewiring rather than an edit to any node&#39;s code;</li><li>the central difference is a real <strong>diamond inside the cycle</strong>: two branches compute <code>f(x+h)</code> and <code>f(x-h)</code> and meet at the gradient.</li></ul><p>The arithmetic nodes are generic — <code>SubFloat</code> appears five times in the graph, <code>MulFloat</code> three times. The algorithm lives in the wiring.</p><h3 id="The-state-that-travels-around-the-loop"><a class="docs-heading-anchor" href="#The-state-that-travels-around-the-loop">The state that travels around the loop</a><a id="The-state-that-travels-around-the-loop-1"></a><a class="docs-heading-anchor-permalink" href="#The-state-that-travels-around-the-loop" title="Permalink"></a></h3><table><tr><th style="text-align: right">Value</th><th style="text-align: right">Meaning</th></tr><tr><td style="text-align: right"><code>x</code></td><td style="text-align: right">the current point</td></tr><tr><td style="text-align: right"><code>iter</code></td><td style="text-align: right">how many steps have been taken</td></tr></table><p>One turn computes the gradient at <code>x</code> by a central difference, steps to <code>x - rate * grad</code>, increments <code>iter</code>, and then tests both stop conditions. The objective is <code>f(y) = (y - c)²</code>, so the gradient is exactly <code>2(x - c)</code> — the central difference of a quadratic is its derivative, with no truncation error.</p><h3 id="The-graph"><a class="docs-heading-anchor" href="#The-graph">The graph</a><a id="The-graph-1"></a><a class="docs-heading-anchor-permalink" href="#The-graph" title="Permalink"></a></h3><pre><code class="nohighlight hljs"> ConstFloat(x0) ─┐                   ┌─▶ AddFloat(x,h) ─▶ Sub(−c) ─▶ Mul(²) ───┐
+ ConstInt(0) ────┼─▶ DescentState ───┤                                         │
+                 │        ▲          └─▶ SubFloat(x,h) ─▶ Sub(−c) ─▶ Mul(²) ───┤
+ ConstFloat(c) ──┼────────┼──────────────────▶ ↑               ↑               │
+                 │        │                                  SubFloat(fp,fm)   │
+ ConstFloat(h) ──┼────────┼──▶ AddFloat(h,h) ──────────────────▶ DivFloat ──▶ grad
+                 │        │                                                    │
+ ConstFloat(rate)┼────────┼───────────────────▶ MulFloat(rate, grad) ──────────┤
+                 │        │                             │                      │
+                 │        │                      SubFloat(x, step) ─▶ x&#39;       │
+                 │        │                                                    ▼
+ ConstFloat(tol) ┼────────┼───────────────────▶ LessFloat ◀── AbsFloat(grad) ──┘
+                 │        │                         │
+ ConstInt(1) ────┼────────┼──▶ AddInt(iter,1) ─▶ NotLessInt ◀── ConstInt(maxiter)
+                 │        │             │              │
+                 │        │             │        OrBool(conv, exh)
+                 │        │             ▼              ▼
+                 │        └─ :feedback ──── DescentGate ──▶ :minimum
+                 │                                      ──▶ :iterations
+                 └────────────────────────────────────────▶ :reason</code></pre><p>Twenty-six nodes of thirteen types. Every node takes exactly the inputs it needs, from whatever depth: there are no pass-through rails, because <a href="../api_core/#MetidaFlows.isready-Tuple{Workflow, Int64}"><code>isready</code></a> holds a node back until all of its <code>:normal</code> ancestors have been recomputed during the turn — see <em>Rule 3</em> in the guide.</p><div class="admonition is-info" id="This-graph-needs-that-guarantee-1c172a23ee0e796"><header class="admonition-header">This graph needs that guarantee<a class="admonition-anchor" href="#This-graph-needs-that-guarantee-1c172a23ee0e796" title="Permalink"></a></header><div class="admonition-body"><p><code>SubFloat(x, step)</code> has one input straight from the loop head and the other eight nodes downstream of it, and no order of connection creation can save it: the node is always queued on the first wave. Bubble sort&#39;s natural wiring happened to survive without the guarantee; this one cannot.</p></div></div><h3 id="The-node-types"><a class="docs-heading-anchor" href="#The-node-types">The node types</a><a id="The-node-types-1"></a><a class="docs-heading-anchor-permalink" href="#The-node-types" title="Permalink"></a></h3><pre><code class="language-julia hljs">using MetidaFlows
+
+struct ConstFloat   &lt;: AbstractNodeType end   # вещественная константа
+struct ConstInt     &lt;: AbstractNodeType end
+struct DescentState &lt;: AbstractNodeType end   # loop state (x, iter)
+struct AddFloat     &lt;: AbstractNodeType end
+struct SubFloat     &lt;: AbstractNodeType end
+struct MulFloat     &lt;: AbstractNodeType end
+struct DivFloat     &lt;: AbstractNodeType end
+struct AbsFloat     &lt;: AbstractNodeType end
+struct LessFloat    &lt;: AbstractNodeType end
+struct AddInt       &lt;: AbstractNodeType end
+struct NotLessInt   &lt;: AbstractNodeType end
+struct OrBool       &lt;: AbstractNodeType end
+struct DescentGate  &lt;: AbstractNodeType end   # branch: another step, or the answer</code></pre><h3 id="Interfaces"><a class="docs-heading-anchor" href="#Interfaces">Interfaces</a><a id="Interfaces-1"></a><a class="docs-heading-anchor-permalink" href="#Interfaces" title="Permalink"></a></h3><p>The loop head is the only node with <code>:feedback</code> ports. Its normal inputs are the starting point and the starting counter; the feedback inputs carry the state of the previous iteration and are not <code>required</code>, because their buffers are empty on the first one.</p><pre><code class="language-julia hljs">state_spec = NodeSpec(&quot;Descent state&quot;,
+    [PortSpec(&quot;Initial x&quot;,    Float64, :init_x),
+     PortSpec(&quot;Initial iter&quot;, Int,     :init_iter),
+     PortSpec(&quot;X&quot;,            Float64, :x;    kind = :feedback, required = false),
+     PortSpec(&quot;Iteration&quot;,    Int,     :iter; kind = :feedback, required = false)],
+    [PortSpec(&quot;X&quot;,         Float64, :x),
+     PortSpec(&quot;Iteration&quot;, Int,     :iter)])</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi">     Name: Descent state
+     Input ports: 
+        #1 Port name: Initial x; label: &quot;init_x&quot;; datatype: Float64 (required, normal).
+        #2 Port name: Initial iter; label: &quot;init_iter&quot;; datatype: Int64 (required, normal).
+        #3 Port name: X; label: &quot;x&quot;; datatype: Float64 (optional, feedback).
+        #4 Port name: Iteration; label: &quot;iter&quot;; datatype: Int64 (optional, feedback).
+     Output ports: 
+        #1 Port name: X; label: &quot;x&quot;; datatype: Float64 (required, normal).
+        #2 Port name: Iteration; label: &quot;iter&quot;; datatype: Int64 (required, normal).
+     Available settings: Symbol[]
+</code></pre><p>The gate publishes the state onward while the loop runs, and three terminal ports when it stops — the point, the iteration count, and the reason:</p><pre><code class="language-julia hljs">gate_spec = NodeSpec(&quot;Descent gate&quot;,
+    [PortSpec(&quot;Stop&quot;,      Bool,    :stop),
+     PortSpec(&quot;Converged&quot;, Bool,    :converged),
+     PortSpec(&quot;X&quot;,         Float64, :x),
+     PortSpec(&quot;Iteration&quot;, Int,     :iter)],
+    [PortSpec(&quot;X&quot;,          Float64, :x),
+     PortSpec(&quot;Iteration&quot;,  Int,     :iter),
+     PortSpec(&quot;Minimum&quot;,    Float64, :minimum;    kind = :terminal),
+     PortSpec(&quot;Iterations&quot;, Int,     :iterations; kind = :terminal),
+     PortSpec(&quot;Reason&quot;,     Symbol,  :reason;     kind = :terminal)])</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi">     Name: Descent gate
+     Input ports: 
+        #1 Port name: Stop; label: &quot;stop&quot;; datatype: Bool (required, normal).
+        #2 Port name: Converged; label: &quot;converged&quot;; datatype: Bool (required, normal).
+        #3 Port name: X; label: &quot;x&quot;; datatype: Float64 (required, normal).
+        #4 Port name: Iteration; label: &quot;iter&quot;; datatype: Int64 (required, normal).
+     Output ports: 
+        #1 Port name: X; label: &quot;x&quot;; datatype: Float64 (required, normal).
+        #2 Port name: Iteration; label: &quot;iter&quot;; datatype: Int64 (required, normal).
+        #3 Port name: Minimum; label: &quot;minimum&quot;; datatype: Float64 (required, terminal).
+        #4 Port name: Iterations; label: &quot;iterations&quot;; datatype: Int64 (required, terminal).
+        #5 Port name: Reason; label: &quot;reason&quot;; datatype: Symbol (required, terminal).
+     Available settings: Symbol[]
+</code></pre><p>The arithmetic is generic — two inputs, one output:</p><pre><code class="language-julia hljs">binary(name, out) = NodeSpec(name,
+    [PortSpec(&quot;A&quot;, Float64, :a), PortSpec(&quot;B&quot;, Float64, :b)],
+    [PortSpec(&quot;Out&quot;, out, :out)])
+
+add_spec  = binary(&quot;Add float&quot;,  Float64)
+sub_spec  = binary(&quot;Sub float&quot;,  Float64)
+mul_spec  = binary(&quot;Mul float&quot;,  Float64)
+div_spec  = binary(&quot;Div float&quot;,  Float64)
+less_spec = binary(&quot;Less float&quot;, Bool)
+
+abs_spec = NodeSpec(&quot;Abs float&quot;,
+    [PortSpec(&quot;A&quot;, Float64, :a)], [PortSpec(&quot;Out&quot;, Float64, :out)])
+addint_spec = NodeSpec(&quot;Add int&quot;,
+    [PortSpec(&quot;A&quot;, Int, :a), PortSpec(&quot;B&quot;, Int, :b)], [PortSpec(&quot;Out&quot;, Int, :out)])
+notless_spec = NodeSpec(&quot;Not less int&quot;,
+    [PortSpec(&quot;A&quot;, Int, :a), PortSpec(&quot;B&quot;, Int, :b)], [PortSpec(&quot;Out&quot;, Bool, :out)])
+or_spec = NodeSpec(&quot;Or bool&quot;,
+    [PortSpec(&quot;A&quot;, Bool, :a), PortSpec(&quot;B&quot;, Bool, :b)], [PortSpec(&quot;Out&quot;, Bool, :out)])
+float_spec = NodeSpec(&quot;Const float&quot;, PortSpec[],
+    [PortSpec(&quot;Value&quot;, Float64, :out)], [:value])
+int_spec = NodeSpec(&quot;Const int&quot;, PortSpec[],
+    [PortSpec(&quot;Value&quot;, Int, :out)], [:value])</code></pre><h3 id="Behaviour"><a class="docs-heading-anchor" href="#Behaviour">Behaviour</a><a id="Behaviour-1"></a><a class="docs-heading-anchor-permalink" href="#Behaviour" title="Permalink"></a></h3><p>The generic nodes are one line each, so they are written in a loop — which is the point: none of them knows anything about gradient descent.</p><pre><code class="language-julia hljs">for (T, op) in ((AddFloat, +), (SubFloat, -), (MulFloat, *), (DivFloat, /))
+    @eval MetidaFlows.execute_unsafe!(n::DataNode{$T}) =
+        (setdata!(n, :out, $op(getinputdata(n, :a), getinputdata(n, :b))); [:out])
+end
+
+MetidaFlows.execute_unsafe!(n::DataNode{ConstFloat}) =
+    (setdata!(n, :out, Float64(n.settings[:value])); [:out])
+MetidaFlows.execute_unsafe!(n::DataNode{ConstInt}) =
+    (setdata!(n, :out, Int(n.settings[:value])); [:out])
+MetidaFlows.execute_unsafe!(n::DataNode{AbsFloat}) =
+    (setdata!(n, :out, abs(getinputdata(n, :a))); [:out])
+MetidaFlows.execute_unsafe!(n::DataNode{LessFloat}) =
+    (setdata!(n, :out, getinputdata(n, :a) &lt; getinputdata(n, :b)); [:out])
+MetidaFlows.execute_unsafe!(n::DataNode{AddInt}) =
+    (setdata!(n, :out, getinputdata(n, :a) + getinputdata(n, :b)); [:out])
+MetidaFlows.execute_unsafe!(n::DataNode{NotLessInt}) =
+    (setdata!(n, :out, getinputdata(n, :a) &gt;= getinputdata(n, :b)); [:out])
+MetidaFlows.execute_unsafe!(n::DataNode{OrBool}) =
+    (setdata!(n, :out, getinputdata(n, :a) || getinputdata(n, :b)); [:out])</code></pre><p>The head starts from the initial values while the feedback buffer is empty, and from the loop state once it is not:</p><pre><code class="language-julia hljs">function MetidaFlows.execute_unsafe!(node::DataNode{DescentState})
+    back = getinputdata(node, :x)
+    if back === nothing                       # first iteration
+        setdata!(node, :x,    getinputdata(node, :init_x))
+        setdata!(node, :iter, getinputdata(node, :init_iter))
+    else
+        setdata!(node, :x,    back)
+        setdata!(node, :iter, getinputdata(node, :iter))
+    end
+    return [:x, :iter]
+end</code></pre><p>The gate ends the run by publishing only terminal ports, so nothing reaches the body and the queue drains:</p><pre><code class="language-julia hljs">function MetidaFlows.execute_unsafe!(node::DataNode{DescentGate})
+    x    = getinputdata(node, :x)
+    iter = getinputdata(node, :iter)
+    if !getinputdata(node, :stop)
+        setdata!(node, :x,    x)
+        setdata!(node, :iter, iter)
+        return [:x, :iter]                    # one more step
+    end
+    setdata!(node, :minimum,    x)
+    setdata!(node, :iterations, iter)
+    setdata!(node, :reason, getinputdata(node, :converged) ? :converged : :exhausted)
+    return [:minimum, :iterations, :reason]
+end</code></pre><h3 id="Building-the-graph"><a class="docs-heading-anchor" href="#Building-the-graph">Building the graph</a><a id="Building-the-graph-1"></a><a class="docs-heading-anchor-permalink" href="#Building-the-graph" title="Permalink"></a></h3><pre><code class="language-julia hljs">function descent_graph(; x0 = 0.0, rate = 0.1, tol = 1e-6, h = 1e-5,
+                         c = 3.0, maxiter = 1000)
+    w = Workflow(0; type = :ABW)
+    w.name = &quot;Gradient descent&quot;
+
+    cx0   = add_node!(w, DataNode(ConstFloat, float_spec))
+    crate = add_node!(w, DataNode(ConstFloat, float_spec))
+    ctol  = add_node!(w, DataNode(ConstFloat, float_spec))
+    ch    = add_node!(w, DataNode(ConstFloat, float_spec))
+    cc    = add_node!(w, DataNode(ConstFloat, float_spec))
+    ci0   = add_node!(w, DataNode(ConstInt,   int_spec))
+    cone  = add_node!(w, DataNode(ConstInt,   int_spec))
+    cmax  = add_node!(w, DataNode(ConstInt,   int_spec))
+
+    head  = add_node!(w, DataNode(DescentState, state_spec))
+
+    xp    = add_node!(w, DataNode(AddFloat,  add_spec))     # x + h
+    xm    = add_node!(w, DataNode(SubFloat,  sub_spec))     # x - h
+    dp    = add_node!(w, DataNode(SubFloat,  sub_spec))     # (x+h) - c
+    fp    = add_node!(w, DataNode(MulFloat,  mul_spec))     # dp * dp
+    dm    = add_node!(w, DataNode(SubFloat,  sub_spec))     # (x-h) - c
+    fm    = add_node!(w, DataNode(MulFloat,  mul_spec))     # dm * dm
+    twoh  = add_node!(w, DataNode(AddFloat,  add_spec))     # h + h
+    diff  = add_node!(w, DataNode(SubFloat,  sub_spec))     # fp - fm
+    grad  = add_node!(w, DataNode(DivFloat,  div_spec))     # diff / 2h
+    step  = add_node!(w, DataNode(MulFloat,  mul_spec))     # rate * grad
+    nextx = add_node!(w, DataNode(SubFloat,  sub_spec))     # x - step
+    agrad = add_node!(w, DataNode(AbsFloat,  abs_spec))
+    conv  = add_node!(w, DataNode(LessFloat, less_spec))    # |grad| &lt; tol
+    nexti = add_node!(w, DataNode(AddInt,    addint_spec))
+    exh   = add_node!(w, DataNode(NotLessInt, notless_spec))
+    stop  = add_node!(w, DataNode(OrBool,    or_spec))
+    gate  = add_node!(w, DataNode(DescentGate, gate_spec))
+
+    add_connection!(w, cx0, :out, head, :init_x)
+    add_connection!(w, ci0, :out, head, :init_iter)
+
+    # two points for the central difference
+    add_connection!(w, head, :x, xp, :a); add_connection!(w, ch, :out, xp, :b)
+    add_connection!(w, head, :x, xm, :a); add_connection!(w, ch, :out, xm, :b)
+
+    # the objective, twice: f(y) = (y - c)^2
+    add_connection!(w, xp, :out, dp, :a); add_connection!(w, cc, :out, dp, :b)
+    add_connection!(w, dp, :out, fp, :a); add_connection!(w, dp, :out, fp, :b)
+    add_connection!(w, xm, :out, dm, :a); add_connection!(w, cc, :out, dm, :b)
+    add_connection!(w, dm, :out, fm, :a); add_connection!(w, dm, :out, fm, :b)
+
+    # the gradient
+    add_connection!(w, ch,   :out, twoh, :a); add_connection!(w, ch,   :out, twoh, :b)
+    add_connection!(w, fp,   :out, diff, :a); add_connection!(w, fm,   :out, diff, :b)
+    add_connection!(w, diff, :out, grad, :a); add_connection!(w, twoh, :out, grad, :b)
+
+    # the step
+    add_connection!(w, crate, :out, step,  :a); add_connection!(w, grad, :out, step, :b)
+    add_connection!(w, head,  :x,   nextx, :a); add_connection!(w, step, :out, nextx, :b)
+
+    # the two stop conditions
+    add_connection!(w, grad,  :out,  agrad, :a)
+    add_connection!(w, agrad, :out,  conv,  :a); add_connection!(w, ctol, :out, conv, :b)
+    add_connection!(w, head,  :iter, nexti, :a); add_connection!(w, cone, :out, nexti, :b)
+    add_connection!(w, nexti, :out,  exh,   :a); add_connection!(w, cmax, :out, exh,  :b)
+    add_connection!(w, conv,  :out,  stop,  :a); add_connection!(w, exh,  :out, stop, :b)
+
+    # the gate and the feedback edges
+    add_connection!(w, stop,  :out, gate, :stop)
+    add_connection!(w, conv,  :out, gate, :converged)
+    add_connection!(w, nextx, :out, gate, :x)
+    add_connection!(w, nexti, :out, gate, :iter)
+    add_connection!(w, gate, :x,    head, :x)
+    add_connection!(w, gate, :iter, head, :iter)
+
+    for (id, value) in ((cx0, x0), (crate, rate), (ctol, tol), (ch, h), (cc, c))
+        setsettings!(w, id, Dict(:value =&gt; value))
+    end
+    setsettings!(w, ci0,  Dict(:value =&gt; 0))
+    setsettings!(w, cone, Dict(:value =&gt; 1))
+    setsettings!(w, cmax, Dict(:value =&gt; maxiter))
+
+    return (w = w, gate = gate, cc = cc, diff = diff, fp = fp, fm = fm)
+end</code></pre><h3 id="Running-it"><a class="docs-heading-anchor" href="#Running-it">Running it</a><a id="Running-it-1"></a><a class="docs-heading-anchor-permalink" href="#Running-it" title="Permalink"></a></h3><pre><code class="language-julia hljs">g = descent_graph(x0 = 0.0, rate = 0.1, tol = 1e-6, h = 1e-5, c = 3.0)
+scheduler!(g.w; maxiter = 200_000)
+
+(minimum    = getdata(g.w, g.gate, :minimum),
+ iterations = getdata(g.w, g.gate, :iterations),
+ reason     = getdata(g.w, g.gate, :reason))</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi">(minimum = 2.9999996050789064, iterations = 71, reason = :converged)</code></pre><p>The step contracts the error by <code>1 - 2 * rate</code> every iteration, so seventy-one of them bring <code>|x - 3|</code> under <code>5e-7</code>, which is where <code>|grad| &lt; tol</code> fires.</p><p>Hit the iteration limit instead and the reason changes:</p><pre><code class="language-julia hljs">g2 = descent_graph(x0 = 0.0, rate = 0.1, c = 3.0, maxiter = 10)
+scheduler!(g2.w; maxiter = 200_000)
+
+(minimum    = getdata(g2.w, g2.gate, :minimum),
+ iterations = getdata(g2.w, g2.gate, :iterations),
+ reason     = getdata(g2.w, g2.gate, :reason))</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi">(minimum = 2.6778774528050944, iterations = 10, reason = :exhausted)</code></pre><h3 id="Changing-the-objective"><a class="docs-heading-anchor" href="#Changing-the-objective">Changing the objective</a><a id="Changing-the-objective-1"></a><a class="docs-heading-anchor-permalink" href="#Changing-the-objective" title="Permalink"></a></h3><p>The point of the minimum is a setting of one node:</p><pre><code class="language-julia hljs">g3 = descent_graph(x0 = 0.0, rate = 0.1, c = 7.0)
+scheduler!(g3.w; maxiter = 200_000)
+getdata(g3.w, g3.gate, :minimum)</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi">6.999999622560746</code></pre><p>The <em>shape</em> of the objective is wiring. Scaling it by two — <code>f(y) = 2(y-c)²</code> — is two more nodes and a rewiring of the gradient&#39;s difference, after which the same learning rate converges in thirty-three iterations instead of seventy-one:</p><pre><code class="language-julia hljs">using MetidaFlows: delete_connection!, getconnection
+
+g4 = descent_graph(x0 = 0.0, rate = 0.1, tol = 1e-6, h = 1e-5, c = 3.0)
+cs  = add_node!(g4.w, DataNode(ConstFloat, float_spec))
+sp  = add_node!(g4.w, DataNode(MulFloat,   mul_spec))
+sm  = add_node!(g4.w, DataNode(MulFloat,   mul_spec))
+setsettings!(g4.w, cs, Dict(:value =&gt; 2.0))
+
+for cid in collect(keys(g4.w.connections))          # detach the difference
+    getconnection(g4.w, cid).input_id == g4.diff &amp;&amp; delete_connection!(g4.w, cid)
+end
+add_connection!(g4.w, g4.fp, :out, sp, :a); add_connection!(g4.w, cs, :out, sp, :b)
+add_connection!(g4.w, g4.fm, :out, sm, :a); add_connection!(g4.w, cs, :out, sm, :b)
+add_connection!(g4.w, sp, :out, g4.diff, :a)
+add_connection!(g4.w, sm, :out, g4.diff, :b)
+
+scheduler!(g4.w; maxiter = 200_000)
+(minimum = getdata(g4.w, g4.gate, :minimum),
+ iterations = getdata(g4.w, g4.gate, :iterations))</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi">(minimum = 2.9999998567441, iterations = 33)</code></pre><p>No node&#39;s code changed. The objective is a part of the graph, so it is edited like the rest of the graph.</p><h3 id="Things-to-watch"><a class="docs-heading-anchor" href="#Things-to-watch">Things to watch</a><a id="Things-to-watch-1"></a><a class="docs-heading-anchor-permalink" href="#Things-to-watch" title="Permalink"></a></h3><ul><li><p><strong>A step that is too large does not just fail to converge — it reports success.</strong> With <code>rate = 1.5</code> the error doubles every iteration, and after thirty-seven of them the point is at about <code>-3.8e11</code>. There <code>eps(x) ≈ 6.1e-5</code> is larger than <code>h = 1e-5</code>, so <code>x + h == x</code> bit for bit, <code>f(x+h) - f(x-h)</code> is exactly zero, and <code>|grad| &lt; tol</code> fires:</p><pre><code class="language-julia hljs">g5 = descent_graph(x0 = 0.0, rate = 1.5, tol = 1e-6, h = 1e-5, c = 3.0,
+                   maxiter = 50)
+scheduler!(g5.w; maxiter = 200_000)
+x = getdata(g5.w, g5.gate, :minimum)
+(minimum = x, reason = getdata(g5.w, g5.gate, :reason),
+ h_vanishes = x + 1e-5 === x, eps_x = eps(x))</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi">(minimum = -3.786529841129359e11, reason = :converged, h_vanishes = true, eps_x = 6.103515625e-5)</code></pre><p>A criterion built on <code>|grad|</code> alone cannot tell &quot;flat because we are at the optimum&quot; from &quot;flat because the difference underflowed&quot;. A real implementation scales the step with the point — <code>h = h₀ * max(1, |x|)</code> — or also requires that <code>f</code> decreased. This is a property of the numerical derivative, not of the engine, and the plain Julia version of the same arithmetic reproduces it exactly.</p></li><li><p><strong><code>maxiter</code> of the scheduler is not <code>maxiter</code> of the algorithm.</strong> The algorithm&#39;s limit is the <code>ConstInt</code> feeding <code>NotLessInt</code>; the scheduler&#39;s limit counts queue operations and needs to be large enough for all of them — roughly twenty per iteration here.</p></li><li><p><strong>The loop is post-tested.</strong> Starting exactly at the minimum still costs one iteration, of zero length, because the gradient is only known after a step.</p></li><li><p><strong>A full reset starts over.</strong> <code>reset_mode = :full</code> clears the feedback buffers, so a second <a href="../api_execution/#MetidaFlows.scheduler!-Tuple{Workflow{MetidaFlows.ABW}}"><code>scheduler!</code></a> call repeats the descent; <code>:soft</code> keeps the loop state and continues from the last point.</p></li></ul></article><nav class="docs-footer"><a class="docs-footer-prevpage" href="../examples_insertion_sort/">« Insertion sort: nested loops</a><a class="docs-footer-nextpage" href="../examples_newton/">Newton&#39;s method and :error ports »</a><div class="flexbox-break"></div><p class="footer-message">Powered by <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> and the <a href="https://julialang.org/">Julia Programming Language</a>.</p></nav></div><div class="modal" id="documenter-settings"><div class="modal-background"></div><div class="modal-card"><header class="modal-card-head"><p class="modal-card-title">Settings</p><button class="delete"></button></header><section class="modal-card-body"><p><label class="label">Theme</label><div class="select"><select id="documenter-themepicker"><option value="auto">Automatic (OS)</option><option value="documenter-light">documenter-light</option><option value="documenter-dark">documenter-dark</option><option value="catppuccin-latte">catppuccin-latte</option><option value="catppuccin-frappe">catppuccin-frappe</option><option value="catppuccin-macchiato">catppuccin-macchiato</option><option value="catppuccin-mocha">catppuccin-mocha</option></select></div></p><hr/><p>This document was generated with <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> version 1.20.0 on <span class="colophon-date" title="Tuesday 10 November 2026 13:40">Tuesday 10 November 2026</span>. Using Julia version 1.13.3.</p></section><footer class="modal-card-foot"></footer></div></div></div></body></html>

@@ -1,0 +1,316 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="UTF-8"/><meta name="viewport" content="width=device-width, initial-scale=1.0"/><meta name="referrer" content="no-referrer"/><title>Insertion sort: nested loops · MetidaFlows.jl</title><meta name="title" content="Insertion sort: nested loops · MetidaFlows.jl"/><meta property="og:title" content="Insertion sort: nested loops · MetidaFlows.jl"/><meta property="twitter:title" content="Insertion sort: nested loops · MetidaFlows.jl"/><meta name="description" content="Documentation for MetidaFlows.jl."/><meta property="og:description" content="Documentation for MetidaFlows.jl."/><meta property="twitter:description" content="Documentation for MetidaFlows.jl."/><meta property="og:url" content="https://PharmCat.github.io/MetidaFlows.jl/examples_insertion_sort/"/><meta property="twitter:url" content="https://PharmCat.github.io/MetidaFlows.jl/examples_insertion_sort/"/><link rel="canonical" href="https://PharmCat.github.io/MetidaFlows.jl/examples_insertion_sort/"/><script data-outdated-warner src="../assets/warner.js"></script><link href="https://cdnjs.cloudflare.com/ajax/libs/lato-font/3.0.0/css/lato-font.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/juliamono/0.63.2/juliamono.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/fontawesome.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/solid.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/brands.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.8/katex.min.css" rel="stylesheet" type="text/css"/><script>documenterBaseURL=".."</script><script src="https://cdnjs.cloudflare.com/ajax/libs/require.js/2.3.6/require.min.js" data-main="../assets/documenter.js"></script><script src="../search_index.js"></script><script src="../siteinfo.js"></script><script src="../../versions.js"></script><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../assets/themes/catppuccin-mocha.css" data-theme-name="catppuccin-mocha"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../assets/themes/catppuccin-macchiato.css" data-theme-name="catppuccin-macchiato"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../assets/themes/catppuccin-frappe.css" data-theme-name="catppuccin-frappe"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../assets/themes/catppuccin-latte.css" data-theme-name="catppuccin-latte"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../assets/themes/documenter-dark.css" data-theme-name="documenter-dark" data-theme-primary-dark/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../assets/themes/documenter-light.css" data-theme-name="documenter-light" data-theme-primary/><script src="../assets/themeswap.js"></script></head><body><div id="documenter"><nav class="docs-sidebar"><div class="docs-package-name"><span class="docs-autofit"><a href="../">MetidaFlows.jl</a></span></div><button class="docs-search-query input is-rounded is-small is-clickable my-2 mx-auto py-1 px-2" id="documenter-search-query">Search docs (Ctrl + /)</button><ul class="docs-menu"><li><a class="tocitem" href="../">Home</a></li><li><a class="tocitem" href="../guide/">Guide</a></li><li><a class="tocitem" href="../typed_containers/">Typed containers</a></li><li><span class="tocitem">Examples</span><ul><li><a class="tocitem" href="../examples_abw_cycle/">AWB cycle</a></li><li><a class="tocitem" href="../examples_abw_two_node/">AWB two node cycle</a></li><li><a class="tocitem" href="../examples_settings_query/">Querying settings</a></li><li><a class="tocitem" href="../examples_bubble_sort/">Bubble sort as a graph</a></li><li class="is-active"><a class="tocitem" href>Insertion sort: nested loops</a><ul class="internal"><li><a class="tocitem" href="#Insertion-sort:-nested-loops-on-a-graph"><span>Insertion sort: nested loops on a graph</span></a></li></ul></li><li><a class="tocitem" href="../examples_gradient_descent/">Gradient descent on a graph</a></li><li><a class="tocitem" href="../examples_newton/">Newton&#39;s method and :error ports</a></li><li><a class="tocitem" href="../examples_horner/">Horner&#39;s scheme on DAW</a></li><li><a class="tocitem" href="../examples_edit_distance/">Edit distance: dynamic programming</a></li><li><a class="tocitem" href="../examples_intervals/">Interval arithmetic: metadata</a></li><li><a class="tocitem" href="../examples_power/">Modular exponentiation: skipping work</a></li></ul></li><li><span class="tocitem">API</span><ul><li><a class="tocitem" href="../api/">Overview</a></li><li><a class="tocitem" href="../api_types/">Types</a></li><li><a class="tocitem" href="../api_core/">Graph and nodes</a></li><li><a class="tocitem" href="../api_access/">Reading and writing a node</a></li><li><a class="tocitem" href="../api_execution/">Execution</a></li><li><a class="tocitem" href="../api_meta/">Port metadata</a></li><li><a class="tocitem" href="../api_serialization/">Serialization and schemas</a></li></ul></li></ul><div class="docs-version-selector field has-addons"><div class="control"><span class="docs-label button is-static is-size-7">Version</span></div><div class="docs-selector control is-expanded"><div class="select is-fullwidth is-size-7"><select id="documenter-version-selector"></select></div></div></div></nav><div class="docs-main"><header class="docs-navbar"><a class="docs-sidebar-button docs-navbar-link fa-solid fa-bars is-hidden-desktop" id="documenter-sidebar-button" href="#"></a><nav class="breadcrumb"><ul class="is-hidden-mobile"><li><a class="is-disabled">Examples</a></li><li class="is-active"><a href>Insertion sort: nested loops</a></li></ul><ul class="is-hidden-tablet"><li class="is-active"><a href>Insertion sort: nested loops</a></li></ul></nav><div class="docs-right"><a class="docs-navbar-link" href="https://github.com/PharmCat/MetidaFlows.jl" title="View the repository on GitHub"><span class="docs-icon fa-brands"></span><span class="docs-label is-hidden-touch">GitHub</span></a><a class="docs-navbar-link" href="https://github.com/PharmCat/MetidaFlows.jl/blob/main/docs/src/examples_insertion_sort.md" title="Edit source on GitHub"><span class="docs-icon fa-solid"></span></a><a class="docs-settings-button docs-navbar-link fa-solid fa-gear" id="documenter-settings-button" href="#" title="Settings"></a><a class="docs-article-toggle-button fa-solid fa-chevron-up" id="documenter-article-toggle-button" href="javascript:;" title="Collapse all docstrings"></a></div></header><article class="content" id="documenter-page"><h2 id="Insertion-sort:-nested-loops-on-a-graph"><a class="docs-heading-anchor" href="#Insertion-sort:-nested-loops-on-a-graph">Insertion sort: nested loops on a graph</a><a id="Insertion-sort:-nested-loops-on-a-graph-1"></a><a class="docs-heading-anchor-permalink" href="#Insertion-sort:-nested-loops-on-a-graph" title="Permalink"></a></h2><p>Insertion sort is two loops, one inside the other:</p><pre><code class="language-julia hljs">for i in 2:n                          # outer: which element we are inserting
+    j = i - 1
+    while j &gt;= 1 &amp;&amp; a[j] &gt; a[j + 1]   # inner: shift it left
+        a[j], a[j + 1] = a[j + 1], a[j]
+        j -= 1
+    end
+end</code></pre><p>A graph cannot nest one loop inside another. <code>execute_unsafe!</code> receives only the node: a node sees neither the model nor its neighbours&#39; buffers, so there is nothing inside a node to run a second scheduler on. The nesting has to be unrolled.</p><h3 id="The-epoch-pattern"><a class="docs-heading-anchor" href="#The-epoch-pattern">The epoch pattern</a><a id="The-epoch-pattern-1"></a><a class="docs-heading-anchor-permalink" href="#The-epoch-pattern" title="Permalink"></a></h3><p>Put <strong>both</strong> indices into the loop state and make one turn of the graph one elementary step of the <em>inner</em> loop:</p><pre><code class="language-julia hljs">i = 2; j = 1
+while i &lt;= n
+    if j &gt;= 1 &amp;&amp; a[j] &gt; a[j + 1]
+        a[j], a[j + 1] = a[j + 1], a[j];  j -= 1   # a step of the inner loop
+    else
+        i += 1;  j = i - 1                         # a NEW EPOCH
+    end
+end</code></pre><p>An <strong>epoch</strong> is one iteration of the outer loop — the insertion of one element. Within an epoch <code>j</code> walks down; at the end of an epoch <code>i</code> grows. There are no two loops in the graph. There is one flat loop and a gate that decides, on every turn, whether the current epoch continues or the next one begins. Which kind of step a turn is follows from the state, not from the shape of the graph.</p><p>That gives something you can measure from outside: <strong>the number of epochs does not depend on the data</strong> (it is always <code>n - 1</code>), while <strong>the number of turns does</strong> — from <code>n - 1</code> on sorted input to <code>n - 1 + n(n-1)/2</code> on reversed input. This is how you can tell the nesting is real.</p><h3 id="A-graph-has-no-short-circuit"><a class="docs-heading-anchor" href="#A-graph-has-no-short-circuit">A graph has no short-circuit</a><a id="A-graph-has-no-short-circuit-1"></a><a class="docs-heading-anchor-permalink" href="#A-graph-has-no-short-circuit" title="Permalink"></a></h3><p>In <code>j &gt;= 1 &amp;&amp; a[j] &gt; a[j + 1]</code> Julia does not evaluate the right-hand side when <code>j == 0</code>. A graph evaluates everything: <code>isready</code> lets a node run only once all of its normal parents are <code>:clean</code>, so both operands are computed on every turn — including turns whose result will be thrown away.</p><p>So <code>ReadAt</code> and <code>SwapAt</code> here are <strong>total</strong>: a read past the end returns <code>typemin(Int)</code> and a swap past the end does nothing. The gate discards such a turn anyway.</p><p><a href="../examples_bubble_sort/">Bubble sort</a> solves the same problem the other way, with a <strong>pre-tested</strong> loop: its gate sits right after the head, and a degenerate turn never enters the body at all. Both are valid, and the difference shows in the shape of the graph. With two indices a pre-test would need a three-way gate <em>before</em> the body and two paths back into the head — and a <code>:feedback</code> port with <code>SinglePort</code> arity accepts only one connection.</p><h3 id="The-nodes"><a class="docs-heading-anchor" href="#The-nodes">The nodes</a><a id="The-nodes-1"></a><a class="docs-heading-anchor-permalink" href="#The-nodes" title="Permalink"></a></h3><pre><code class="language-julia hljs">using MetidaFlows
+import MetidaFlows: PortSpec, getportspec
+
+struct InsConstArray &lt;: AbstractNodeType end  # the array source
+struct InsConstInt   &lt;: AbstractNodeType end  # an integer constant
+struct InsLength     &lt;: AbstractNodeType end  # n = length(a)
+struct InsertState   &lt;: AbstractNodeType end  # the loop state
+struct InsAdd        &lt;: AbstractNodeType end  # a + b
+struct InsSub        &lt;: AbstractNodeType end  # a - b
+struct InsGreater    &lt;: AbstractNodeType end  # a &gt; b
+struct InsNotLess    &lt;: AbstractNodeType end  # a &gt;= b
+struct InsAnd        &lt;: AbstractNodeType end  # a &amp;&amp; b
+struct InsReadAt     &lt;: AbstractNodeType end  # a[k], total
+struct InsSwapAt     &lt;: AbstractNodeType end  # swap a[k], a[k+1], total
+struct InsertGate    &lt;: AbstractNodeType end  # the branch of a turn
+
+InsVec = Vector{Int}</code></pre><p>The head of the loop carries all of the state and nothing else. Its normal inputs are the initial values; its <code>:feedback</code> inputs are the state of the previous turn, and they are not <code>required</code>, because on the first turn their buffers are empty.</p><pre><code class="language-julia hljs">spec_insconstarray() = NodeSpec(&quot;Ins const array&quot;, PortSpec[],
+    [PortSpec(&quot;Array&quot;, InsVec, :array)], [:values])
+
+spec_insconstint() = NodeSpec(&quot;Ins const int&quot;, PortSpec[],
+    [PortSpec(&quot;Out&quot;, Int, :out)], [:value])
+
+spec_inslength() = NodeSpec(&quot;Ins length&quot;,
+    [PortSpec(&quot;Array&quot;, InsVec, :array)],
+    [PortSpec(&quot;Length&quot;, Int, :length)])
+
+spec_insertstate() = NodeSpec(&quot;Insert state&quot;,
+    [PortSpec(&quot;Initial array&quot;,  InsVec, :init_array),
+     PortSpec(&quot;Initial i&quot;,      Int,    :init_i),
+     PortSpec(&quot;Initial j&quot;,      Int,    :init_j),
+     PortSpec(&quot;Initial epochs&quot;, Int,    :init_epochs),
+     PortSpec(&quot;Array&quot;,  InsVec, :array;  kind = :feedback, required = false),
+     PortSpec(&quot;I&quot;,      Int,    :i;      kind = :feedback, required = false),
+     PortSpec(&quot;J&quot;,      Int,    :j;      kind = :feedback, required = false),
+     PortSpec(&quot;Epochs&quot;, Int,    :epochs; kind = :feedback, required = false)],
+    [PortSpec(&quot;Array&quot;,  InsVec, :array),
+     PortSpec(&quot;I&quot;,      Int,    :i),
+     PortSpec(&quot;J&quot;,      Int,    :j),
+     PortSpec(&quot;Epochs&quot;, Int,    :epochs)])
+
+ins_binary_int(name)    = NodeSpec(name,
+    [PortSpec(&quot;A&quot;, Int, :a), PortSpec(&quot;B&quot;, Int, :b)],
+    [PortSpec(&quot;Out&quot;, Int, :out)])
+ins_predicate_int(name) = NodeSpec(name,
+    [PortSpec(&quot;A&quot;, Int, :a), PortSpec(&quot;B&quot;, Int, :b)],
+    [PortSpec(&quot;Out&quot;, Bool, :out)])
+
+spec_insadd()     = ins_binary_int(&quot;Ins add&quot;)
+spec_inssub()     = ins_binary_int(&quot;Ins sub&quot;)
+spec_insgreater() = ins_predicate_int(&quot;Ins greater&quot;)
+spec_insnotless() = ins_predicate_int(&quot;Ins not less&quot;)
+
+spec_insand() = NodeSpec(&quot;Ins and&quot;,
+    [PortSpec(&quot;A&quot;, Bool, :a), PortSpec(&quot;B&quot;, Bool, :b)],
+    [PortSpec(&quot;Out&quot;, Bool, :out)])
+
+spec_insreadat() = NodeSpec(&quot;Ins read at&quot;,
+    [PortSpec(&quot;Array&quot;, InsVec, :array), PortSpec(&quot;Index&quot;, Int, :index)],
+    [PortSpec(&quot;Out&quot;, Int, :out)])
+
+spec_insswapat() = NodeSpec(&quot;Ins swap at&quot;,
+    [PortSpec(&quot;Array&quot;, InsVec, :array), PortSpec(&quot;Index&quot;, Int, :index)],
+    [PortSpec(&quot;Out&quot;, InsVec, :out)])
+
+spec_insertgate() = NodeSpec(&quot;Insert gate&quot;,
+    [PortSpec(&quot;Done&quot;,        Bool,   :done),
+     PortSpec(&quot;Step&quot;,        Bool,   :step),
+     PortSpec(&quot;Array&quot;,       InsVec, :array),
+     PortSpec(&quot;Array swap&quot;,  InsVec, :array_swap),
+     PortSpec(&quot;I&quot;,           Int,    :i),
+     PortSpec(&quot;I next&quot;,      Int,    :i_next),
+     PortSpec(&quot;J dec&quot;,       Int,    :j_dec),
+     PortSpec(&quot;Epochs&quot;,      Int,    :epochs),
+     PortSpec(&quot;Epochs next&quot;, Int,    :epochs_next)],
+    [PortSpec(&quot;Array&quot;,  InsVec, :array),
+     PortSpec(&quot;I&quot;,      Int,    :i),
+     PortSpec(&quot;J&quot;,      Int,    :j),
+     PortSpec(&quot;Epochs&quot;, Int,    :epochs),
+     PortSpec(&quot;Sorted&quot;, InsVec, :sorted;       kind = :terminal),
+     PortSpec(&quot;Total epochs&quot;, Int, :total_epochs; kind = :terminal)])</code></pre><p>Each node is one elementary operation. The two total ones are marked.</p><pre><code class="language-julia hljs">MetidaFlows.execute_unsafe!(n::DataNode{InsConstArray}) =
+    (setdata!(n, :array, Vector{Int}(n.settings[:values])); [:array])
+MetidaFlows.execute_unsafe!(n::DataNode{InsConstInt}) =
+    (setdata!(n, :out, Int(n.settings[:value])); [:out])
+MetidaFlows.execute_unsafe!(n::DataNode{InsLength}) =
+    (setdata!(n, :length, length(getinputdata(n, :array))); [:length])
+
+MetidaFlows.execute_unsafe!(n::DataNode{InsAdd}) =
+    (setdata!(n, :out, getinputdata(n, :a) + getinputdata(n, :b)); [:out])
+MetidaFlows.execute_unsafe!(n::DataNode{InsSub}) =
+    (setdata!(n, :out, getinputdata(n, :a) - getinputdata(n, :b)); [:out])
+MetidaFlows.execute_unsafe!(n::DataNode{InsGreater}) =
+    (setdata!(n, :out, getinputdata(n, :a) &gt; getinputdata(n, :b)); [:out])
+MetidaFlows.execute_unsafe!(n::DataNode{InsNotLess}) =
+    (setdata!(n, :out, getinputdata(n, :a) &gt;= getinputdata(n, :b)); [:out])
+MetidaFlows.execute_unsafe!(n::DataNode{InsAnd}) =
+    (setdata!(n, :out, getinputdata(n, :a) &amp;&amp; getinputdata(n, :b)); [:out])
+
+# total: an index outside the array gives typemin(Int)
+function MetidaFlows.execute_unsafe!(node::DataNode{InsReadAt})
+    a = getinputdata(node, :array)
+    k = getinputdata(node, :index)
+    setdata!(node, :out, (1 &lt;= k &lt;= length(a)) ? a[k] : typemin(Int))
+    return [:out]
+end
+
+# total: with no pair at the index, the array comes back as it is
+function MetidaFlows.execute_unsafe!(node::DataNode{InsSwapAt})
+    a = copy(getinputdata(node, :array))
+    k = getinputdata(node, :index)
+    if 1 &lt;= k &lt; length(a)
+        a[k], a[k + 1] = a[k + 1], a[k]
+    end
+    setdata!(node, :out, a)
+    return [:out]
+end</code></pre><p>The head is a pure multiplexer: empty feedback buffers mean the first turn.</p><pre><code class="language-julia hljs">function MetidaFlows.execute_unsafe!(node::DataNode{InsertState})
+    back = getinputdata(node, :array)
+    if back === nothing                       # the first turn
+        setdata!(node, :array,  getinputdata(node, :init_array))
+        setdata!(node, :i,      getinputdata(node, :init_i))
+        setdata!(node, :j,      getinputdata(node, :init_j))
+        setdata!(node, :epochs, getinputdata(node, :init_epochs))
+    else                                      # the state of the previous turn
+        setdata!(node, :array,  back)
+        setdata!(node, :i,      getinputdata(node, :i))
+        setdata!(node, :j,      getinputdata(node, :j))
+        setdata!(node, :epochs, getinputdata(node, :epochs))
+    end
+    return [:array, :i, :j, :epochs]
+end</code></pre><p>The gate picks one of three outcomes. Both candidates arrive ready-made, because in a graph the branch is taken <em>after</em> both sides have been computed.</p><pre><code class="language-julia hljs">INS_BRANCH = Symbol[]
+
+function MetidaFlows.execute_unsafe!(node::DataNode{InsertGate})
+    array = getinputdata(node, :array)
+    if getinputdata(node, :done)              # i &gt; n, the outer loop is over
+        setdata!(node, :sorted,       array)
+        setdata!(node, :total_epochs, getinputdata(node, :epochs))
+        return [:sorted, :total_epochs]
+    end
+    if getinputdata(node, :step)              # a step of the inner loop
+        push!(INS_BRANCH, :swap)
+        setdata!(node, :array,  getinputdata(node, :array_swap))
+        setdata!(node, :i,      getinputdata(node, :i))
+        setdata!(node, :j,      getinputdata(node, :j_dec))
+        setdata!(node, :epochs, getinputdata(node, :epochs))
+    else                                      # a new epoch
+        push!(INS_BRANCH, :epoch)
+        setdata!(node, :array,  array)
+        setdata!(node, :i,      getinputdata(node, :i_next))
+        setdata!(node, :j,      getinputdata(node, :i))   # j = (i+1) - 1 = i
+        setdata!(node, :epochs, getinputdata(node, :epochs_next))
+    end
+    return [:array, :i, :j, :epochs]
+end</code></pre><h3 id="The-graph"><a class="docs-heading-anchor" href="#The-graph">The graph</a><a id="The-graph-1"></a><a class="docs-heading-anchor-permalink" href="#The-graph" title="Permalink"></a></h3><pre><code class="nohighlight hljs"> ConstArray ─┬─▶ ArrayLength ─────────────────┐
+             │                                │
+             └──▶ head.init_array             ▼
+ ConstTwo ──────▶ head.init_i      ┌───▶ InsGreater (done: i &gt; n) ────┐
+ ConstOne ──────▶ head.init_j      │                                 │
+ ConstZero ─────▶ head.init_epochs │                                 │
+                                   │                                 │
+                    InsertState ───┤                                 │
+                    (array,i,j,    ├───▶ InsNotLess (alive: j &gt;= 1) ──┤
+                     epochs)       │            │                    │
+                         ▲         ├───▶ InsAdd (jnext: j + 1)       │
+                         │         │            │                    │
+                         │         ├───▶ InsReadAt (left:  a[j])     │
+                         │         ├───▶ InsReadAt (right: a[jnext]) │
+                         │         │            │                    │
+                         │         │     InsGreater (greater) ───────┤
+                         │         │            │                    │
+                         │         │       InsAnd (step) ────────────┤
+                         │         │                                 │
+                         │         ├───▶ InsSwapAt (swapped) ────────┤
+                         │         ├───▶ InsAdd (inext: i + 1) ──────┤
+                         │         ├───▶ InsSub (jdec: j - 1) ───────┤
+                         │         └───▶ InsAdd (enext: eps + 1) ────┤
+                         │                                           │
+                         │                                    InsertGate
+                         │                                      │    │
+                         └────── :feedback ─────────────────────┘    ▼
+                            (array, i, j, epochs)          :sorted, :epochs</code></pre><pre><code class="language-julia hljs">function build_insertion_sort(values::Vector{Int})
+    w      = Workflow(0; type = :ABW)
+    w.name = &quot;Insertion sort&quot;
+
+    a0    = add_node!(w, DataNode(InsConstArray, spec_insconstarray()))
+    two   = add_node!(w, DataNode(InsConstInt,   spec_insconstint()))
+    one   = add_node!(w, DataNode(InsConstInt,   spec_insconstint()))
+    zero  = add_node!(w, DataNode(InsConstInt,   spec_insconstint()))
+    len   = add_node!(w, DataNode(InsLength,     spec_inslength()))
+    head  = add_node!(w, DataNode(InsertState,   spec_insertstate()))
+    done  = add_node!(w, DataNode(InsGreater,    spec_insgreater()))
+    alive = add_node!(w, DataNode(InsNotLess,    spec_insnotless()))
+    jnext = add_node!(w, DataNode(InsAdd,        spec_insadd()))
+    left  = add_node!(w, DataNode(InsReadAt,     spec_insreadat()))
+    right = add_node!(w, DataNode(InsReadAt,     spec_insreadat()))
+    gt    = add_node!(w, DataNode(InsGreater,    spec_insgreater()))
+    step  = add_node!(w, DataNode(InsAnd,        spec_insand()))
+    swap  = add_node!(w, DataNode(InsSwapAt,     spec_insswapat()))
+    inext = add_node!(w, DataNode(InsAdd,        spec_insadd()))
+    jdec  = add_node!(w, DataNode(InsSub,        spec_inssub()))
+    enext = add_node!(w, DataNode(InsAdd,        spec_insadd()))
+    gate  = add_node!(w, DataNode(InsertGate,    spec_insertgate()))
+
+    setsettings!(w, a0,   Dict(:values =&gt; copy(values)))
+    setsettings!(w, two,  Dict(:value  =&gt; 2))
+    setsettings!(w, one,  Dict(:value  =&gt; 1))
+    setsettings!(w, zero, Dict(:value  =&gt; 0))
+
+    add_connection!(w, a0,   :array, head, :init_array)
+    add_connection!(w, two,  :out,   head, :init_i)
+    add_connection!(w, one,  :out,   head, :init_j)
+    add_connection!(w, zero, :out,   head, :init_epochs)
+
+    # the length is taken from the source: swapping does not change it
+    add_connection!(w, a0,   :array,  len,  :array)
+
+    add_connection!(w, head, :i,      done, :a)
+    add_connection!(w, len,  :length, done, :b)
+
+    add_connection!(w, head,  :j,     alive, :a)
+    add_connection!(w, one,   :out,   alive, :b)
+    add_connection!(w, head,  :j,     jnext, :a)
+    add_connection!(w, one,   :out,   jnext, :b)
+    add_connection!(w, head,  :array, left,  :array)
+    add_connection!(w, head,  :j,     left,  :index)
+    add_connection!(w, head,  :array, right, :array)
+    add_connection!(w, jnext, :out,   right, :index)
+    add_connection!(w, left,  :out,   gt,    :a)
+    add_connection!(w, right, :out,   gt,    :b)
+    add_connection!(w, alive, :out,   step,  :a)
+    add_connection!(w, gt,    :out,   step,  :b)
+
+    add_connection!(w, head, :array,  swap,  :array)
+    add_connection!(w, head, :j,      swap,  :index)
+    add_connection!(w, head, :i,      inext, :a)
+    add_connection!(w, one,  :out,    inext, :b)
+    add_connection!(w, head, :j,      jdec,  :a)
+    add_connection!(w, one,  :out,    jdec,  :b)
+    add_connection!(w, head, :epochs, enext, :a)
+    add_connection!(w, one,  :out,    enext, :b)
+
+    add_connection!(w, done,  :out,    gate, :done)
+    add_connection!(w, step,  :out,    gate, :step)
+    add_connection!(w, head,  :array,  gate, :array)
+    add_connection!(w, swap,  :out,    gate, :array_swap)
+    add_connection!(w, head,  :i,      gate, :i)
+    add_connection!(w, inext, :out,    gate, :i_next)
+    add_connection!(w, jdec,  :out,    gate, :j_dec)
+    add_connection!(w, head,  :epochs, gate, :epochs)
+    add_connection!(w, enext, :out,    gate, :epochs_next)
+
+    add_connection!(w, gate, :array,  head, :array)
+    add_connection!(w, gate, :i,      head, :i)
+    add_connection!(w, gate, :j,      head, :j)
+    add_connection!(w, gate, :epochs, head, :epochs)
+
+    return (w = w, head = head, gate = gate, left = left, right = right)
+end
+
+function insertion_sort(values::Vector{Int})
+    empty!(INS_BRANCH)
+    g = build_insertion_sort(values)
+    scheduler!(g.w; maxiter = 100_000)
+    (sorted = getdata(g.w, g.gate, :sorted),
+     turns  = length(INS_BRANCH),
+     epochs = getdata(g.w, g.gate, :total_epochs),
+     g      = g)
+end
+
+r = insertion_sort([5, 2, 9, 1, 7, 3])
+(sorted = r.sorted, turns = r.turns, epochs = r.epochs)</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi">(sorted = [1, 2, 3, 5, 7, 9], turns = 13, epochs = 5)</code></pre><p>Eighteen nodes, forty connections, and the sorting happens because of how they are wired.</p><h3 id="Epochs-are-fixed,-turns-are-not"><a class="docs-heading-anchor" href="#Epochs-are-fixed,-turns-are-not">Epochs are fixed, turns are not</a><a id="Epochs-are-fixed,-turns-are-not-1"></a><a class="docs-heading-anchor-permalink" href="#Epochs-are-fixed,-turns-are-not" title="Permalink"></a></h3><p>The outer loop always runs <code>n - 1</code> times. The inner loop runs as much as the data demands, and that is what the turn count shows:</p><pre><code class="language-julia hljs">using Printf
+for n in 2:7
+    s = insertion_sort(collect(1:n))        # already sorted
+    r = insertion_sort(collect(n:-1:1))     # reversed
+    @printf(&quot;n = %d   sorted: %2d turns, %d epochs   reversed: %2d turns, %d epochs\n&quot;,
+            n, s.turns, s.epochs, r.turns, r.epochs)
+end</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi"><span class="sgr33"><span class="sgr1">┌ Warning: </span></span>Assignment to `r` in soft scope is ambiguous because a global variable by the same name exists: `r` will be treated as a new local. Disambiguate by using `local r` to suppress this warning or `global r` to assign to the existing global variable.
+<span class="sgr33"><span class="sgr1">└ </span></span><span class="sgr90">@ examples_insertion_sort.md:399</span>
+n = 2   sorted:  1 turns, 1 epochs   reversed:  2 turns, 1 epochs
+n = 3   sorted:  2 turns, 2 epochs   reversed:  5 turns, 2 epochs
+n = 4   sorted:  3 turns, 3 epochs   reversed:  9 turns, 3 epochs
+n = 5   sorted:  4 turns, 4 epochs   reversed: 14 turns, 4 epochs
+n = 6   sorted:  5 turns, 5 epochs   reversed: 20 turns, 5 epochs
+n = 7   sorted:  6 turns, 6 epochs   reversed: 27 turns, 6 epochs</code></pre><p>On reversed input every epoch does exactly one step more than the last:</p><pre><code class="language-julia hljs">function epoch_lengths(branch)
+    steps = Int[]; cur = 0
+    for b in branch
+        b === :swap ? (cur += 1) : (push!(steps, cur); cur = 0)
+    end
+    steps
+end
+
+r = insertion_sort(collect(6:-1:1))
+epoch_lengths(INS_BRANCH)</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi">5-element Vector{Int64}:
+ 1
+ 2
+ 3
+ 4
+ 5</code></pre><p>And <code>turns == epochs + swaps</code>, always — a turn is either one or the other:</p><pre><code class="language-julia hljs">r = insertion_sort([3, 1, 4, 1, 5, 9, 2, 6])
+(turns = r.turns, epochs = r.epochs,
+ swaps = count(==(:swap), INS_BRANCH),
+ sum_matches = r.turns == r.epochs + count(==(:swap), INS_BRANCH))</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi">(turns = 15, epochs = 7, swaps = 8, sum_matches = true)</code></pre><h3 id="Degenerate-input"><a class="docs-heading-anchor" href="#Degenerate-input">Degenerate input</a><a id="Degenerate-input-1"></a><a class="docs-heading-anchor-permalink" href="#Degenerate-input" title="Permalink"></a></h3><p>An array of zero or one element never enters the outer loop, so there are no turns at all. The body of the graph still runs once, and the read past the end happens — which is why <code>ReadAt</code> is total:</p><pre><code class="language-julia hljs">r = insertion_sort(Int[])
+(sorted = r.sorted, turns = r.turns,
+ left  = getdata(r.g.w, r.g.left,  :out) == typemin(Int),
+ right = getdata(r.g.w, r.g.right, :out) == typemin(Int))</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi">(sorted = Int64[], turns = 0, left = true, right = true)</code></pre><h3 id="Things-to-watch"><a class="docs-heading-anchor" href="#Things-to-watch">Things to watch</a><a id="Things-to-watch-1"></a><a class="docs-heading-anchor-permalink" href="#Things-to-watch" title="Permalink"></a></h3><ul><li><p><strong>The state in the feedback buffers is the one the loop stopped on</strong>, that is <code>i == n + 1</code>. The final turn read it, saw <code>done</code>, and wrote only the terminal ports, leaving the feedback buffers untouched.</p></li><li><p><strong>All loop state lives in <code>:feedback</code> ports, including the epoch counter.</strong> Anything that has to survive a turn boundary goes there; a node cannot keep it anywhere else, because it sees only its own inputs.</p></li><li><p><strong>The branch is taken after both sides are computed.</strong> This costs a swap and three additions per turn that may be discarded. A pre-tested loop avoids that at the price of a more complex gate placement — see <a href="../examples_bubble_sort/">bubble sort</a>.</p></li><li><p><strong><code>maxiter</code> of the scheduler is not the length of the sort.</strong> It counts queue operations: about eighteen per turn here.</p></li></ul></article><nav class="docs-footer"><a class="docs-footer-prevpage" href="../examples_bubble_sort/">« Bubble sort as a graph</a><a class="docs-footer-nextpage" href="../examples_gradient_descent/">Gradient descent on a graph »</a><div class="flexbox-break"></div><p class="footer-message">Powered by <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> and the <a href="https://julialang.org/">Julia Programming Language</a>.</p></nav></div><div class="modal" id="documenter-settings"><div class="modal-background"></div><div class="modal-card"><header class="modal-card-head"><p class="modal-card-title">Settings</p><button class="delete"></button></header><section class="modal-card-body"><p><label class="label">Theme</label><div class="select"><select id="documenter-themepicker"><option value="auto">Automatic (OS)</option><option value="documenter-light">documenter-light</option><option value="documenter-dark">documenter-dark</option><option value="catppuccin-latte">catppuccin-latte</option><option value="catppuccin-frappe">catppuccin-frappe</option><option value="catppuccin-macchiato">catppuccin-macchiato</option><option value="catppuccin-mocha">catppuccin-mocha</option></select></div></p><hr/><p>This document was generated with <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> version 1.20.0 on <span class="colophon-date" title="Tuesday 10 November 2026 13:40">Tuesday 10 November 2026</span>. Using Julia version 1.13.3.</p></section><footer class="modal-card-foot"></footer></div></div></div></body></html>

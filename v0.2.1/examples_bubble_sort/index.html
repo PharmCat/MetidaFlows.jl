@@ -1,0 +1,361 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="UTF-8"/><meta name="viewport" content="width=device-width, initial-scale=1.0"/><meta name="referrer" content="no-referrer"/><title>Bubble sort as a graph · MetidaFlows.jl</title><meta name="title" content="Bubble sort as a graph · MetidaFlows.jl"/><meta property="og:title" content="Bubble sort as a graph · MetidaFlows.jl"/><meta property="twitter:title" content="Bubble sort as a graph · MetidaFlows.jl"/><meta name="description" content="Documentation for MetidaFlows.jl."/><meta property="og:description" content="Documentation for MetidaFlows.jl."/><meta property="twitter:description" content="Documentation for MetidaFlows.jl."/><meta property="og:url" content="https://PharmCat.github.io/MetidaFlows.jl/examples_bubble_sort/"/><meta property="twitter:url" content="https://PharmCat.github.io/MetidaFlows.jl/examples_bubble_sort/"/><link rel="canonical" href="https://PharmCat.github.io/MetidaFlows.jl/examples_bubble_sort/"/><script data-outdated-warner src="../assets/warner.js"></script><link href="https://cdnjs.cloudflare.com/ajax/libs/lato-font/3.0.0/css/lato-font.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/juliamono/0.63.2/juliamono.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/fontawesome.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/solid.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/brands.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.8/katex.min.css" rel="stylesheet" type="text/css"/><script>documenterBaseURL=".."</script><script src="https://cdnjs.cloudflare.com/ajax/libs/require.js/2.3.6/require.min.js" data-main="../assets/documenter.js"></script><script src="../search_index.js"></script><script src="../siteinfo.js"></script><script src="../../versions.js"></script><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../assets/themes/catppuccin-mocha.css" data-theme-name="catppuccin-mocha"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../assets/themes/catppuccin-macchiato.css" data-theme-name="catppuccin-macchiato"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../assets/themes/catppuccin-frappe.css" data-theme-name="catppuccin-frappe"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../assets/themes/catppuccin-latte.css" data-theme-name="catppuccin-latte"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../assets/themes/documenter-dark.css" data-theme-name="documenter-dark" data-theme-primary-dark/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../assets/themes/documenter-light.css" data-theme-name="documenter-light" data-theme-primary/><script src="../assets/themeswap.js"></script></head><body><div id="documenter"><nav class="docs-sidebar"><div class="docs-package-name"><span class="docs-autofit"><a href="../">MetidaFlows.jl</a></span></div><button class="docs-search-query input is-rounded is-small is-clickable my-2 mx-auto py-1 px-2" id="documenter-search-query">Search docs (Ctrl + /)</button><ul class="docs-menu"><li><a class="tocitem" href="../">Home</a></li><li><a class="tocitem" href="../guide/">Guide</a></li><li><a class="tocitem" href="../typed_containers/">Typed containers</a></li><li><span class="tocitem">Examples</span><ul><li><a class="tocitem" href="../examples_abw_cycle/">AWB cycle</a></li><li><a class="tocitem" href="../examples_abw_two_node/">AWB two node cycle</a></li><li><a class="tocitem" href="../examples_settings_query/">Querying settings</a></li><li class="is-active"><a class="tocitem" href>Bubble sort as a graph</a><ul class="internal"><li><a class="tocitem" href="#Bubble-sort-as-a-graph"><span>Bubble sort as a graph</span></a></li></ul></li><li><a class="tocitem" href="../examples_insertion_sort/">Insertion sort: nested loops</a></li><li><a class="tocitem" href="../examples_gradient_descent/">Gradient descent on a graph</a></li><li><a class="tocitem" href="../examples_newton/">Newton&#39;s method and :error ports</a></li><li><a class="tocitem" href="../examples_horner/">Horner&#39;s scheme on DAW</a></li><li><a class="tocitem" href="../examples_edit_distance/">Edit distance: dynamic programming</a></li><li><a class="tocitem" href="../examples_intervals/">Interval arithmetic: metadata</a></li><li><a class="tocitem" href="../examples_power/">Modular exponentiation: skipping work</a></li></ul></li><li><span class="tocitem">API</span><ul><li><a class="tocitem" href="../api/">Overview</a></li><li><a class="tocitem" href="../api_types/">Types</a></li><li><a class="tocitem" href="../api_core/">Graph and nodes</a></li><li><a class="tocitem" href="../api_access/">Reading and writing a node</a></li><li><a class="tocitem" href="../api_execution/">Execution</a></li><li><a class="tocitem" href="../api_meta/">Port metadata</a></li><li><a class="tocitem" href="../api_serialization/">Serialization and schemas</a></li></ul></li></ul><div class="docs-version-selector field has-addons"><div class="control"><span class="docs-label button is-static is-size-7">Version</span></div><div class="docs-selector control is-expanded"><div class="select is-fullwidth is-size-7"><select id="documenter-version-selector"></select></div></div></div></nav><div class="docs-main"><header class="docs-navbar"><a class="docs-sidebar-button docs-navbar-link fa-solid fa-bars is-hidden-desktop" id="documenter-sidebar-button" href="#"></a><nav class="breadcrumb"><ul class="is-hidden-mobile"><li><a class="is-disabled">Examples</a></li><li class="is-active"><a href>Bubble sort as a graph</a></li></ul><ul class="is-hidden-tablet"><li class="is-active"><a href>Bubble sort as a graph</a></li></ul></nav><div class="docs-right"><a class="docs-navbar-link" href="https://github.com/PharmCat/MetidaFlows.jl" title="View the repository on GitHub"><span class="docs-icon fa-brands"></span><span class="docs-label is-hidden-touch">GitHub</span></a><a class="docs-navbar-link" href="https://github.com/PharmCat/MetidaFlows.jl/blob/main/docs/src/examples_bubble_sort.md" title="Edit source on GitHub"><span class="docs-icon fa-solid"></span></a><a class="docs-settings-button docs-navbar-link fa-solid fa-gear" id="documenter-settings-button" href="#" title="Settings"></a><a class="docs-article-toggle-button fa-solid fa-chevron-up" id="documenter-article-toggle-button" href="javascript:;" title="Collapse all docstrings"></a></div></header><article class="content" id="documenter-page"><h2 id="Bubble-sort-as-a-graph"><a class="docs-heading-anchor" href="#Bubble-sort-as-a-graph">Bubble sort as a graph</a><a id="Bubble-sort-as-a-graph-1"></a><a class="docs-heading-anchor-permalink" href="#Bubble-sort-as-a-graph" title="Permalink"></a></h2><p>This example builds an algorithm out of the graph itself. Nothing is hidden inside a node that does the real work: every elementary operation — read an element, compare two numbers, assign an element, advance an index, close the loop — is a node of its own, and the sorting happens because of how they are wired.</p><p>It is also the smallest complete example of an iterative <code>ABW</code> workflow with a pre-tested loop.</p><p>One turn of the graph is one comparison of neighbours, so a run of <code>n</code> elements takes <code>n(n-1)/2</code> turns.</p><h3 id="The-state-that-travels-around-the-loop"><a class="docs-heading-anchor" href="#The-state-that-travels-around-the-loop">The state that travels around the loop</a><a id="The-state-that-travels-around-the-loop-1"></a><a class="docs-heading-anchor-permalink" href="#The-state-that-travels-around-the-loop" title="Permalink"></a></h3><p>Bubble sort needs three values between steps:</p><table><tr><th style="text-align: right">Value</th><th style="text-align: right">Meaning</th></tr><tr><td style="text-align: right"><code>array</code></td><td style="text-align: right">the array as it is now</td></tr><tr><td style="text-align: right"><code>index</code></td><td style="text-align: right">the left element of the pair being compared</td></tr><tr><td style="text-align: right"><code>limit</code></td><td style="text-align: right">the end of the current pass; everything above it is already sorted</td></tr></table><p>A turn compares <code>array[index]</code> with <code>array[index + 1]</code>, swaps them if they are out of order, and then either advances <code>index</code> or — at the end of a pass — resets it to <code>1</code> and lowers <code>limit</code> by one. The loop stops when <code>limit</code> reaches <code>1</code>.</p><p>The loop is <strong>pre-tested</strong>: <code>MoreWork</code> computes <code>limit &gt; 1</code> and <code>LoopGate</code> either lets the turn into the body or publishes the result. An array of zero or one element therefore never reaches <code>array[index + 1]</code>.</p><h3 id="The-graph"><a class="docs-heading-anchor" href="#The-graph">The graph</a><a id="The-graph-1"></a><a class="docs-heading-anchor-permalink" href="#The-graph" title="Permalink"></a></h3><pre><code class="nohighlight hljs"> ConstArray ─┬─▶ ArrayLength ──┐
+             └─────────────────┤
+                               ├─▶ LoopState ─▶ MoreWork ─▶ LoopGate ──▶ :sorted
+ ConstOne ─────────────────────┘        ▲                       │
+                                        │                       ▼
+                                        │                   ReadLeft
+                                        │                       │
+   ConstOne ────────────────────────────┼──────────────▶  NextIndex
+                                        │                       │
+                                        │                   ReadRight
+                                        │                       │
+                                        │                  ComparePair
+                                        │                       │
+                                        │                  AssignLeft
+                                        │                       │
+                                        │                  AssignRight
+                                        │                       │
+                                        │                  ChooseArray
+                                        │                       │
+                                        │                    PassEnd
+                                        │                       │
+   ConstOne ────────────────────────────┼──────────────▶ AdvanceIndex
+                                        │                       │
+   ConstOne ────────────────────────────┼──────────────▶  LowerLimit
+                                        │                       │
+                                        └─── :feedback ─── ShrinkLimit</code></pre><p>The body is a straight chain: <code>ReadLeft</code> → <code>NextIndex</code> → … → <code>ShrinkLimit</code>, and each stage takes everything from the stage before it. <code>ConstOne</code> is one node, drawn four times: it feeds the four stages that need the literal <code>1</code>.</p><h3 id="The-node-catalogue"><a class="docs-heading-anchor" href="#The-node-catalogue">The node catalogue</a><a id="The-node-catalogue-1"></a><a class="docs-heading-anchor-permalink" href="#The-node-catalogue" title="Permalink"></a></h3><p>Seventeen nodes, one per step of the algorithm:</p><table><tr><th style="text-align: right">Node</th><th style="text-align: right">Elementary operation</th></tr><tr><td style="text-align: right"><code>ConstArray</code></td><td style="text-align: right">the input array</td></tr><tr><td style="text-align: right"><code>ConstOne</code></td><td style="text-align: right">the constant <code>1</code></td></tr><tr><td style="text-align: right"><code>ArrayLength</code></td><td style="text-align: right"><code>n = length(array)</code></td></tr><tr><td style="text-align: right"><code>LoopState</code></td><td style="text-align: right">holds <code>(array, index, limit)</code> between turns</td></tr><tr><td style="text-align: right"><code>MoreWork</code></td><td style="text-align: right"><code>go = limit &gt; 1</code></td></tr><tr><td style="text-align: right"><code>LoopGate</code></td><td style="text-align: right">branch: another turn, or publish the result</td></tr><tr><td style="text-align: right"><code>ReadLeft</code></td><td style="text-align: right"><code>left = array[index]</code></td></tr><tr><td style="text-align: right"><code>NextIndex</code></td><td style="text-align: right"><code>next = index + 1</code></td></tr><tr><td style="text-align: right"><code>ReadRight</code></td><td style="text-align: right"><code>right = array[next]</code></td></tr><tr><td style="text-align: right"><code>ComparePair</code></td><td style="text-align: right"><code>greater = left &gt; right</code></td></tr><tr><td style="text-align: right"><code>AssignLeft</code></td><td style="text-align: right"><code>work[index] = right</code></td></tr><tr><td style="text-align: right"><code>AssignRight</code></td><td style="text-align: right"><code>work[next] = left</code></td></tr><tr><td style="text-align: right"><code>ChooseArray</code></td><td style="text-align: right"><code>array = greater ? work : array</code></td></tr><tr><td style="text-align: right"><code>PassEnd</code></td><td style="text-align: right"><code>done = next &gt;= limit</code></td></tr><tr><td style="text-align: right"><code>AdvanceIndex</code></td><td style="text-align: right"><code>index = done ? 1 : next</code></td></tr><tr><td style="text-align: right"><code>LowerLimit</code></td><td style="text-align: right"><code>lower = limit - 1</code></td></tr><tr><td style="text-align: right"><code>ShrinkLimit</code></td><td style="text-align: right"><code>limit = done ? lower : limit</code></td></tr></table><p>The swap is three nodes rather than one. <code>AssignLeft</code> and <code>AssignRight</code> always write, on a copy of the array, and <code>ChooseArray</code> then picks between the copy and the original. That keeps assignment an assignment, with no condition hidden inside it.</p><h3 id="Why-the-body-is-a-pipeline"><a class="docs-heading-anchor" href="#Why-the-body-is-a-pipeline">Why the body is a pipeline</a><a id="Why-the-body-is-a-pipeline-1"></a><a class="docs-heading-anchor-permalink" href="#Why-the-body-is-a-pipeline" title="Permalink"></a></h3><p>Each body node here takes <strong>everything from the single node before it</strong>, including values it does not touch and only passes on. That is a choice of style, not something the engine requires: laid out this way a turn reads as the list of steps of the algorithm, and each node does exactly one operation.</p><p>The engine guarantees the consistency of a turn on its own. When a node publishes, the scheduler marks <code>:dirty</code> everything downstream of its children along <code>:normal</code> edges, so <a href="../api_core/#MetidaFlows.isready-Tuple{Workflow, Int64}"><code>isready</code></a> holds a node back until every one of its <code>:normal</code> ancestors has been recomputed during this turn — see <em>Rule 3</em> in the guide. A node may therefore take its inputs from any depth, and the same graph behaves the same whatever order its connections were created in.</p><p>So the natural layout works too: <code>GetElement(array, index)</code> reading the array straight from the loop head, a <code>SelectArray</code> taking one branch from the head and the other through three nodes, and so on. It needs about forty connections instead of seventy for the same seventeen nodes. The pipeline is kept here because the rails make the state of a turn explicit, which is what this page is trying to show.</p><h3 id="The-node-types"><a class="docs-heading-anchor" href="#The-node-types">The node types</a><a id="The-node-types-1"></a><a class="docs-heading-anchor-permalink" href="#The-node-types" title="Permalink"></a></h3><pre><code class="language-julia hljs">using MetidaFlows
+
+struct ConstArray   &lt;: AbstractNodeType end
+struct ConstOne     &lt;: AbstractNodeType end
+struct ArrayLength  &lt;: AbstractNodeType end
+struct LoopState    &lt;: AbstractNodeType end
+struct MoreWork     &lt;: AbstractNodeType end
+struct LoopGate     &lt;: AbstractNodeType end
+struct ReadLeft     &lt;: AbstractNodeType end
+struct NextIndex    &lt;: AbstractNodeType end
+struct ReadRight    &lt;: AbstractNodeType end
+struct ComparePair  &lt;: AbstractNodeType end
+struct AssignLeft   &lt;: AbstractNodeType end
+struct AssignRight  &lt;: AbstractNodeType end
+struct ChooseArray  &lt;: AbstractNodeType end
+struct PassEnd      &lt;: AbstractNodeType end
+struct AdvanceIndex &lt;: AbstractNodeType end
+struct LowerLimit   &lt;: AbstractNodeType end
+struct ShrinkLimit  &lt;: AbstractNodeType end
+
+const IntVec = Vector{Int}</code></pre><h3 id="Interfaces"><a class="docs-heading-anchor" href="#Interfaces">Interfaces</a><a id="Interfaces-1"></a><a class="docs-heading-anchor-permalink" href="#Interfaces" title="Permalink"></a></h3><p>The loop head is the only node with <code>:feedback</code> ports. Its normal inputs are the initial values; the feedback inputs carry the state of the previous turn, and they are not <code>required</code>, because on the first turn their buffers are empty.</p><pre><code class="language-julia hljs">state_spec = NodeSpec(&quot;Loop state&quot;,
+    [PortSpec(&quot;Initial array&quot;, IntVec, :init_array),
+     PortSpec(&quot;Initial index&quot;, Int,    :init_index),
+     PortSpec(&quot;Initial limit&quot;, Int,    :init_limit),
+     PortSpec(&quot;Array&quot;,         IntVec, :array; kind = :feedback, required = false),
+     PortSpec(&quot;Index&quot;,         Int,    :index; kind = :feedback, required = false),
+     PortSpec(&quot;Limit&quot;,         Int,    :limit; kind = :feedback, required = false)],
+    [PortSpec(&quot;Array&quot;, IntVec, :array),
+     PortSpec(&quot;Index&quot;, Int,    :index),
+     PortSpec(&quot;Limit&quot;, Int,    :limit)])</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi">     Name: Loop state
+     Input ports: 
+        #1 Port name: Initial array; label: &quot;init_array&quot;; datatype: Vector{Int64} (required, normal).
+        #2 Port name: Initial index; label: &quot;init_index&quot;; datatype: Int64 (required, normal).
+        #3 Port name: Initial limit; label: &quot;init_limit&quot;; datatype: Int64 (required, normal).
+        #4 Port name: Array; label: &quot;array&quot;; datatype: Vector{Int64} (optional, feedback).
+        #5 Port name: Index; label: &quot;index&quot;; datatype: Int64 (optional, feedback).
+        #6 Port name: Limit; label: &quot;limit&quot;; datatype: Int64 (optional, feedback).
+     Output ports: 
+        #1 Port name: Array; label: &quot;array&quot;; datatype: Vector{Int64} (required, normal).
+        #2 Port name: Index; label: &quot;index&quot;; datatype: Int64 (required, normal).
+        #3 Port name: Limit; label: &quot;limit&quot;; datatype: Int64 (required, normal).
+     Available settings: Symbol[]
+</code></pre><p>The gate publishes the state onward while the loop runs, and the answer on a <code>:terminal</code> port when it stops:</p><pre><code class="language-julia hljs">gate_spec = NodeSpec(&quot;Loop gate&quot;,
+    [PortSpec(&quot;Array&quot;, IntVec, :array),
+     PortSpec(&quot;Index&quot;, Int,    :index),
+     PortSpec(&quot;Limit&quot;, Int,    :limit),
+     PortSpec(&quot;Go&quot;,    Bool,   :go)],
+    [PortSpec(&quot;Array&quot;,  IntVec, :array),
+     PortSpec(&quot;Index&quot;,  Int,    :index),
+     PortSpec(&quot;Limit&quot;,  Int,    :limit),
+     PortSpec(&quot;Sorted&quot;, IntVec, :sorted; kind = :terminal)])</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi">     Name: Loop gate
+     Input ports: 
+        #1 Port name: Array; label: &quot;array&quot;; datatype: Vector{Int64} (required, normal).
+        #2 Port name: Index; label: &quot;index&quot;; datatype: Int64 (required, normal).
+        #3 Port name: Limit; label: &quot;limit&quot;; datatype: Int64 (required, normal).
+        #4 Port name: Go; label: &quot;go&quot;; datatype: Bool (required, normal).
+     Output ports: 
+        #1 Port name: Array; label: &quot;array&quot;; datatype: Vector{Int64} (required, normal).
+        #2 Port name: Index; label: &quot;index&quot;; datatype: Int64 (required, normal).
+        #3 Port name: Limit; label: &quot;limit&quot;; datatype: Int64 (required, normal).
+        #4 Port name: Sorted; label: &quot;sorted&quot;; datatype: Vector{Int64} (required, terminal).
+     Available settings: Symbol[]
+</code></pre><p>The rest are plain: each declares the rails it needs and the rails it passes on, plus whatever it computes.</p><pre><code class="language-julia hljs">array_spec  = NodeSpec(&quot;Const array&quot;, PortSpec[], [PortSpec(&quot;Array&quot;, IntVec, :array)], [:values])
+one_spec    = NodeSpec(&quot;Const one&quot;,   PortSpec[], [PortSpec(&quot;One&quot;, Int, :one)], [:value])
+length_spec = NodeSpec(&quot;Array length&quot;,
+    [PortSpec(&quot;Array&quot;, IntVec, :array)], [PortSpec(&quot;Length&quot;, Int, :length)])
+
+# a helper, so the rails below stay readable
+port(::Type{Int},    label, name) = PortSpec(name, Int,    label)
+port(::Type{Bool},   label, name) = PortSpec(name, Bool,   label)
+port(::Type{IntVec}, label, name) = PortSpec(name, IntVec, label)
+
+rails(pairs...) = [port(T, l, n) for (T, l, n) in pairs]
+
+more_spec = NodeSpec(&quot;More work&quot;,
+    rails((IntVec, :array, &quot;Array&quot;), (Int, :index, &quot;Index&quot;), (Int, :limit, &quot;Limit&quot;),
+          (Int, :one, &quot;One&quot;)),
+    rails((IntVec, :array, &quot;Array&quot;), (Int, :index, &quot;Index&quot;), (Int, :limit, &quot;Limit&quot;),
+          (Bool, :go, &quot;Go&quot;)))
+
+readleft_spec = NodeSpec(&quot;Read left&quot;,
+    rails((IntVec, :array, &quot;Array&quot;), (Int, :index, &quot;Index&quot;), (Int, :limit, &quot;Limit&quot;)),
+    rails((IntVec, :array, &quot;Array&quot;), (Int, :index, &quot;Index&quot;), (Int, :limit, &quot;Limit&quot;),
+          (Int, :left, &quot;Left&quot;)))
+
+nextindex_spec = NodeSpec(&quot;Next index&quot;,
+    rails((IntVec, :array, &quot;Array&quot;), (Int, :index, &quot;Index&quot;), (Int, :limit, &quot;Limit&quot;),
+          (Int, :left, &quot;Left&quot;), (Int, :one, &quot;One&quot;)),
+    rails((IntVec, :array, &quot;Array&quot;), (Int, :index, &quot;Index&quot;), (Int, :next, &quot;Next&quot;),
+          (Int, :limit, &quot;Limit&quot;), (Int, :left, &quot;Left&quot;)))
+
+readright_spec = NodeSpec(&quot;Read right&quot;,
+    rails((IntVec, :array, &quot;Array&quot;), (Int, :index, &quot;Index&quot;), (Int, :next, &quot;Next&quot;),
+          (Int, :limit, &quot;Limit&quot;), (Int, :left, &quot;Left&quot;)),
+    rails((IntVec, :array, &quot;Array&quot;), (Int, :index, &quot;Index&quot;), (Int, :next, &quot;Next&quot;),
+          (Int, :limit, &quot;Limit&quot;), (Int, :left, &quot;Left&quot;), (Int, :right, &quot;Right&quot;)))
+
+compare_spec = NodeSpec(&quot;Compare pair&quot;,
+    rails((IntVec, :array, &quot;Array&quot;), (Int, :index, &quot;Index&quot;), (Int, :next, &quot;Next&quot;),
+          (Int, :limit, &quot;Limit&quot;), (Int, :left, &quot;Left&quot;), (Int, :right, &quot;Right&quot;)),
+    rails((IntVec, :array, &quot;Array&quot;), (Int, :index, &quot;Index&quot;), (Int, :next, &quot;Next&quot;),
+          (Int, :limit, &quot;Limit&quot;), (Int, :left, &quot;Left&quot;), (Int, :right, &quot;Right&quot;),
+          (Bool, :greater, &quot;Greater&quot;)))
+
+assignleft_spec = NodeSpec(&quot;Assign left&quot;,
+    rails((IntVec, :array, &quot;Array&quot;), (Int, :index, &quot;Index&quot;), (Int, :next, &quot;Next&quot;),
+          (Int, :limit, &quot;Limit&quot;), (Int, :left, &quot;Left&quot;), (Int, :right, &quot;Right&quot;),
+          (Bool, :greater, &quot;Greater&quot;)),
+    rails((IntVec, :source, &quot;Source&quot;), (IntVec, :work, &quot;Work&quot;), (Int, :next, &quot;Next&quot;),
+          (Int, :limit, &quot;Limit&quot;), (Int, :left, &quot;Left&quot;), (Bool, :greater, &quot;Greater&quot;)))
+
+assignright_spec = NodeSpec(&quot;Assign right&quot;,
+    rails((IntVec, :source, &quot;Source&quot;), (IntVec, :work, &quot;Work&quot;), (Int, :next, &quot;Next&quot;),
+          (Int, :limit, &quot;Limit&quot;), (Int, :left, &quot;Left&quot;), (Bool, :greater, &quot;Greater&quot;)),
+    rails((IntVec, :source, &quot;Source&quot;), (IntVec, :work, &quot;Work&quot;), (Int, :next, &quot;Next&quot;),
+          (Int, :limit, &quot;Limit&quot;), (Bool, :greater, &quot;Greater&quot;)))
+
+choose_spec = NodeSpec(&quot;Choose array&quot;,
+    rails((IntVec, :source, &quot;Source&quot;), (IntVec, :work, &quot;Work&quot;), (Int, :next, &quot;Next&quot;),
+          (Int, :limit, &quot;Limit&quot;), (Bool, :greater, &quot;Greater&quot;)),
+    rails((IntVec, :array, &quot;Array&quot;), (Int, :next, &quot;Next&quot;), (Int, :limit, &quot;Limit&quot;)))
+
+passend_spec = NodeSpec(&quot;Pass end&quot;,
+    rails((IntVec, :array, &quot;Array&quot;), (Int, :next, &quot;Next&quot;), (Int, :limit, &quot;Limit&quot;)),
+    rails((IntVec, :array, &quot;Array&quot;), (Int, :next, &quot;Next&quot;), (Int, :limit, &quot;Limit&quot;),
+          (Bool, :done, &quot;Done&quot;)))
+
+advance_spec = NodeSpec(&quot;Advance index&quot;,
+    rails((IntVec, :array, &quot;Array&quot;), (Int, :next, &quot;Next&quot;), (Int, :limit, &quot;Limit&quot;),
+          (Bool, :done, &quot;Done&quot;), (Int, :one, &quot;One&quot;)),
+    rails((IntVec, :array, &quot;Array&quot;), (Int, :index, &quot;Index&quot;), (Int, :limit, &quot;Limit&quot;),
+          (Bool, :done, &quot;Done&quot;)))
+
+lower_spec = NodeSpec(&quot;Lower limit&quot;,
+    rails((IntVec, :array, &quot;Array&quot;), (Int, :index, &quot;Index&quot;), (Int, :limit, &quot;Limit&quot;),
+          (Bool, :done, &quot;Done&quot;), (Int, :one, &quot;One&quot;)),
+    rails((IntVec, :array, &quot;Array&quot;), (Int, :index, &quot;Index&quot;), (Int, :limit, &quot;Limit&quot;),
+          (Int, :lower, &quot;Lower&quot;), (Bool, :done, &quot;Done&quot;)))
+
+shrink_spec = NodeSpec(&quot;Shrink limit&quot;,
+    rails((IntVec, :array, &quot;Array&quot;), (Int, :index, &quot;Index&quot;), (Int, :limit, &quot;Limit&quot;),
+          (Int, :lower, &quot;Lower&quot;), (Bool, :done, &quot;Done&quot;)),
+    rails((IntVec, :array, &quot;Array&quot;), (Int, :index, &quot;Index&quot;), (Int, :limit, &quot;Limit&quot;)))</code></pre><h3 id="Behaviour"><a class="docs-heading-anchor" href="#Behaviour">Behaviour</a><a id="Behaviour-1"></a><a class="docs-heading-anchor-permalink" href="#Behaviour" title="Permalink"></a></h3><p>The two nodes that matter are the head and the gate. The head starts from the initial values while the feedback buffer is empty, and from the loop state once it is not:</p><pre><code class="language-julia hljs">function MetidaFlows.execute_unsafe!(node::DataNode{LoopState})
+    back = getinputdata(node, :array)
+    if back === nothing                       # first turn
+        setdata!(node, :array, getinputdata(node, :init_array))
+        setdata!(node, :index, getinputdata(node, :init_index))
+        setdata!(node, :limit, getinputdata(node, :init_limit))
+    else                                      # state of the previous turn
+        setdata!(node, :array, back)
+        setdata!(node, :index, getinputdata(node, :index))
+        setdata!(node, :limit, getinputdata(node, :limit))
+    end
+    return [:array, :index, :limit]
+end</code></pre><p>The gate ends the run by publishing <strong>only</strong> a terminal port: nothing reaches the body, no child is marked <code>:dirty</code>, and the queue drains.</p><pre><code class="language-julia hljs">function MetidaFlows.execute_unsafe!(node::DataNode{LoopGate})
+    if getinputdata(node, :go)
+        setdata!(node, :array, getinputdata(node, :array))
+        setdata!(node, :index, getinputdata(node, :index))
+        setdata!(node, :limit, getinputdata(node, :limit))
+        return [:array, :index, :limit]       # one more turn
+    end
+    setdata!(node, :sorted, getinputdata(node, :array))
+    return [:sorted]                          # the loop ends here
+end</code></pre><p>The rest are one line of work each, plus the rails:</p><pre><code class="language-julia hljs">function MetidaFlows.execute_unsafe!(node::DataNode{ConstArray})
+    setdata!(node, :array, Vector{Int}(node.settings[:values]))
+    return [:array]
+end
+
+function MetidaFlows.execute_unsafe!(node::DataNode{ConstOne})
+    setdata!(node, :one, node.settings[:value])
+    return [:one]
+end
+
+function MetidaFlows.execute_unsafe!(node::DataNode{ArrayLength})
+    setdata!(node, :length, length(getinputdata(node, :array)))
+    return [:length]
+end
+
+# forward every port the node does not change
+function forward!(node, ports)
+    for p in ports
+        setdata!(node, p, getinputdata(node, p))
+    end
+end
+
+function MetidaFlows.execute_unsafe!(node::DataNode{MoreWork})
+    forward!(node, (:array, :index, :limit))
+    setdata!(node, :go, getinputdata(node, :limit) &gt; getinputdata(node, :one))
+    return [:array, :index, :limit, :go]
+end
+
+function MetidaFlows.execute_unsafe!(node::DataNode{ReadLeft})
+    forward!(node, (:array, :index, :limit))
+    setdata!(node, :left, getinputdata(node, :array)[getinputdata(node, :index)])
+    return [:array, :index, :limit, :left]
+end
+
+function MetidaFlows.execute_unsafe!(node::DataNode{NextIndex})
+    forward!(node, (:array, :index, :limit, :left))
+    setdata!(node, :next, getinputdata(node, :index) + getinputdata(node, :one))
+    return [:array, :index, :next, :limit, :left]
+end
+
+function MetidaFlows.execute_unsafe!(node::DataNode{ReadRight})
+    forward!(node, (:array, :index, :next, :limit, :left))
+    setdata!(node, :right, getinputdata(node, :array)[getinputdata(node, :next)])
+    return [:array, :index, :next, :limit, :left, :right]
+end
+
+function MetidaFlows.execute_unsafe!(node::DataNode{ComparePair})
+    forward!(node, (:array, :index, :next, :limit, :left, :right))
+    setdata!(node, :greater, getinputdata(node, :left) &gt; getinputdata(node, :right))
+    return [:array, :index, :next, :limit, :left, :right, :greater]
+end
+
+function MetidaFlows.execute_unsafe!(node::DataNode{AssignLeft})
+    source = getinputdata(node, :array)
+    work   = copy(source)
+    work[getinputdata(node, :index)] = getinputdata(node, :right)
+    forward!(node, (:next, :limit, :left, :greater))
+    setdata!(node, :source, source)
+    setdata!(node, :work,   work)
+    return [:source, :work, :next, :limit, :left, :greater]
+end
+
+function MetidaFlows.execute_unsafe!(node::DataNode{AssignRight})
+    work = copy(getinputdata(node, :work))
+    work[getinputdata(node, :next)] = getinputdata(node, :left)
+    forward!(node, (:source, :next, :limit, :greater))
+    setdata!(node, :work, work)
+    return [:source, :work, :next, :limit, :greater]
+end
+
+function MetidaFlows.execute_unsafe!(node::DataNode{ChooseArray})
+    forward!(node, (:next, :limit))
+    setdata!(node, :array, getinputdata(node, :greater) ? getinputdata(node, :work) :
+                                                          getinputdata(node, :source))
+    return [:array, :next, :limit]
+end
+
+function MetidaFlows.execute_unsafe!(node::DataNode{PassEnd})
+    forward!(node, (:array, :next, :limit))
+    setdata!(node, :done, getinputdata(node, :next) &gt;= getinputdata(node, :limit))
+    return [:array, :next, :limit, :done]
+end
+
+function MetidaFlows.execute_unsafe!(node::DataNode{AdvanceIndex})
+    forward!(node, (:array, :limit, :done))
+    setdata!(node, :index, getinputdata(node, :done) ? getinputdata(node, :one) :
+                                                       getinputdata(node, :next))
+    return [:array, :index, :limit, :done]
+end
+
+function MetidaFlows.execute_unsafe!(node::DataNode{LowerLimit})
+    forward!(node, (:array, :index, :limit, :done))
+    setdata!(node, :lower, getinputdata(node, :limit) - getinputdata(node, :one))
+    return [:array, :index, :limit, :lower, :done]
+end
+
+function MetidaFlows.execute_unsafe!(node::DataNode{ShrinkLimit})
+    forward!(node, (:array, :index))
+    setdata!(node, :limit, getinputdata(node, :done) ? getinputdata(node, :lower) :
+                                                       getinputdata(node, :limit))
+    return [:array, :index, :limit]
+end</code></pre><h3 id="Building-the-graph"><a class="docs-heading-anchor" href="#Building-the-graph">Building the graph</a><a id="Building-the-graph-1"></a><a class="docs-heading-anchor-permalink" href="#Building-the-graph" title="Permalink"></a></h3><pre><code class="language-julia hljs">function bubble_graph(values::Vector{Int})
+    w = Workflow(0; type = :ABW)
+    w.name = &quot;Bubble sort&quot;
+
+    src   = add_node!(w, DataNode(ConstArray,   array_spec))
+    one   = add_node!(w, DataNode(ConstOne,     one_spec))
+    len   = add_node!(w, DataNode(ArrayLength,  length_spec))
+    head  = add_node!(w, DataNode(LoopState,     state_spec))
+    more  = add_node!(w, DataNode(MoreWork,     more_spec))
+    gate  = add_node!(w, DataNode(LoopGate,     gate_spec))
+    rleft = add_node!(w, DataNode(ReadLeft,     readleft_spec))
+    nidx  = add_node!(w, DataNode(NextIndex,    nextindex_spec))
+    rrght = add_node!(w, DataNode(ReadRight,    readright_spec))
+    cmp   = add_node!(w, DataNode(ComparePair,  compare_spec))
+    aleft = add_node!(w, DataNode(AssignLeft,   assignleft_spec))
+    argt  = add_node!(w, DataNode(AssignRight,  assignright_spec))
+    choos = add_node!(w, DataNode(ChooseArray,  choose_spec))
+    pend  = add_node!(w, DataNode(PassEnd,      passend_spec))
+    adv   = add_node!(w, DataNode(AdvanceIndex, advance_spec))
+    lower = add_node!(w, DataNode(LowerLimit,   lower_spec))
+    shrnk = add_node!(w, DataNode(ShrinkLimit,  shrink_spec))
+
+    # initial values
+    add_connection!(w, src, :array,  len,  :array)
+    add_connection!(w, src, :array,  head, :init_array)
+    add_connection!(w, one, :one,    head, :init_index)
+    add_connection!(w, len, :length, head, :init_limit)
+
+    # pre-test and branch
+    for p in (:array, :index, :limit); add_connection!(w, head, p, more, p); end
+    add_connection!(w, one, :one, more, :one)
+    for p in (:array, :index, :limit, :go); add_connection!(w, more, p, gate, p); end
+
+    # the body: one producer per node
+    wire(from, to, ports) = for p in ports; add_connection!(w, from, p, to, p); end
+    wire(gate,  rleft, (:array, :index, :limit))
+    wire(rleft, nidx,  (:array, :index, :limit, :left))
+    wire(nidx,  rrght, (:array, :index, :next, :limit, :left))
+    wire(rrght, cmp,   (:array, :index, :next, :limit, :left, :right))
+    wire(cmp,   aleft, (:array, :index, :next, :limit, :left, :right, :greater))
+    wire(aleft, argt,  (:source, :work, :next, :limit, :left, :greater))
+    wire(argt,  choos, (:source, :work, :next, :limit, :greater))
+    wire(choos, pend,  (:array, :next, :limit))
+    wire(pend,  adv,   (:array, :next, :limit, :done))
+    wire(adv,   lower, (:array, :index, :limit, :done))
+    wire(lower, shrnk, (:array, :index, :limit, :lower, :done))
+
+    # the constant 1
+    add_connection!(w, one, :one, nidx,  :one)
+    add_connection!(w, one, :one, adv,   :one)
+    add_connection!(w, one, :one, lower, :one)
+
+    # the feedback edge closes the loop
+    for p in (:array, :index, :limit); add_connection!(w, shrnk, p, head, p); end
+
+    setsettings!(w, src, Dict(:values =&gt; values))
+    setsettings!(w, one, Dict(:value =&gt; 1))
+    return w, gate, head, cmp
+end</code></pre><h3 id="Running-it"><a class="docs-heading-anchor" href="#Running-it">Running it</a><a id="Running-it-1"></a><a class="docs-heading-anchor-permalink" href="#Running-it" title="Permalink"></a></h3><pre><code class="language-julia hljs">w, gate, head, cmp = bubble_graph([5, 1, 4, 2, 8])
+scheduler!(w; maxiter = 20_000)
+getdata(w, gate, :sorted)</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi">5-element Vector{Int64}:
+ 1
+ 2
+ 4
+ 5
+ 8</code></pre><p>A pass of the pre-test costs one extra execution of the head, the test and the gate, so the counters show the shape of the run:</p><pre><code class="language-julia hljs">using MetidaFlows: getstate, getnode
+(turns = getstate(getnode(w, cmp), :exec_n),
+ head_runs = getstate(getnode(w, head), :exec_n))</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi">(turns = 10, head_runs = 11)</code></pre><p>Five elements give <code>5 * 4 / 2 = 10</code> turns, and the head runs eleven times — the eleventh closes the loop. Every node of the body runs exactly once per turn: that is the synchronous layout paying off.</p><p>An array that needs no work never enters the body:</p><pre><code class="language-julia hljs">w1, gate1, _, _ = bubble_graph([42])
+scheduler!(w1)
+getdata(w1, gate1, :sorted)</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi">1-element Vector{Int64}:
+ 42</code></pre><h3 id="Things-to-watch"><a class="docs-heading-anchor" href="#Things-to-watch">Things to watch</a><a id="Things-to-watch-1"></a><a class="docs-heading-anchor-permalink" href="#Things-to-watch" title="Permalink"></a></h3><ul><li><p><strong><code>maxiter</code> scales with the work.</strong> Each turn costs roughly one scheduler iteration per body node, so <code>n</code> elements need about <code>17 * n(n-1)/2</code> iterations. The default <code>maxiter = 1000</code> covers five elements; twenty need about four thousand. The run aborts with an error rather than hanging.</p></li><li><p><strong>A full reset starts the loop over.</strong> <code>reset_mode = :full</code> — the default — calls <a href="../api_core/#MetidaFlows.reset!-Tuple{MetidaFlows.AbstractDataNode}"><code>reset!</code></a>, which drops the cached data and clears the buffers of <code>:feedback</code> ports, so a second <a href="../api_execution/#MetidaFlows.scheduler!-Tuple{Workflow{MetidaFlows.ABW}}"><code>scheduler!</code></a> call sorts again from the beginning. Pass <code>reset_mode = :soft</code> to keep the loop state and continue where the previous call stopped.</p></li><li><p><strong><code>reset_mode = :none</code> is not a no-op here.</strong> <a href="../api_execution/#MetidaFlows.execute!-Tuple{Workflow, Int64}"><code>execute!</code></a> on a <code>:clean</code> node returns its stored <code>ready_ports</code>, the scheduler propagates from them, and the children recompute on whatever the buffers still hold. Use <code>:soft</code> to continue a loop and <code>:full</code> to start one.</p></li><li><p><strong>A finished run leaves the body <code>:dirty</code>.</strong> On the last pass the loop head marks the body dirty as usual and the gate then publishes only <code>:sorted</code>, so the body is never recomputed. For a cyclic workflow &quot;every node is <code>:clean</code>&quot; is not a completion signal; read the terminal port, or <code>exec_n</code>.</p></li><li><p><strong>The result lives on a <code>:terminal</code> port.</strong> <code>:sorted</code> is never connected; read it with <a href="../api_access/#MetidaFlows.getdata-Tuple{MetidaFlows.AbstractDataNode, Symbol}"><code>getdata</code></a> once the run is over.</p></li><li><p><strong><code>DAW</code> will not take this graph.</strong> A cycle closed by a <code>:feedback</code> port is still a cycle, and the <code>DAW</code> scheduler rejects it by design.</p></li></ul></article><nav class="docs-footer"><a class="docs-footer-prevpage" href="../examples_settings_query/">« Querying settings</a><a class="docs-footer-nextpage" href="../examples_insertion_sort/">Insertion sort: nested loops »</a><div class="flexbox-break"></div><p class="footer-message">Powered by <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> and the <a href="https://julialang.org/">Julia Programming Language</a>.</p></nav></div><div class="modal" id="documenter-settings"><div class="modal-background"></div><div class="modal-card"><header class="modal-card-head"><p class="modal-card-title">Settings</p><button class="delete"></button></header><section class="modal-card-body"><p><label class="label">Theme</label><div class="select"><select id="documenter-themepicker"><option value="auto">Automatic (OS)</option><option value="documenter-light">documenter-light</option><option value="documenter-dark">documenter-dark</option><option value="catppuccin-latte">catppuccin-latte</option><option value="catppuccin-frappe">catppuccin-frappe</option><option value="catppuccin-macchiato">catppuccin-macchiato</option><option value="catppuccin-mocha">catppuccin-mocha</option></select></div></p><hr/><p>This document was generated with <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> version 1.20.0 on <span class="colophon-date" title="Tuesday 10 November 2026 13:40">Tuesday 10 November 2026</span>. Using Julia version 1.13.3.</p></section><footer class="modal-card-foot"></footer></div></div></div></body></html>
