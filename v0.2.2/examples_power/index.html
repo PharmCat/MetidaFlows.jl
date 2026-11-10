@@ -1,0 +1,250 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="UTF-8"/><meta name="viewport" content="width=device-width, initial-scale=1.0"/><meta name="referrer" content="no-referrer"/><title>Modular exponentiation: skipping work · MetidaFlows.jl</title><meta name="title" content="Modular exponentiation: skipping work · MetidaFlows.jl"/><meta property="og:title" content="Modular exponentiation: skipping work · MetidaFlows.jl"/><meta property="twitter:title" content="Modular exponentiation: skipping work · MetidaFlows.jl"/><meta name="description" content="Documentation for MetidaFlows.jl."/><meta property="og:description" content="Documentation for MetidaFlows.jl."/><meta property="twitter:description" content="Documentation for MetidaFlows.jl."/><meta property="og:url" content="https://PharmCat.github.io/MetidaFlows.jl/examples_power/"/><meta property="twitter:url" content="https://PharmCat.github.io/MetidaFlows.jl/examples_power/"/><link rel="canonical" href="https://PharmCat.github.io/MetidaFlows.jl/examples_power/"/><script data-outdated-warner src="../assets/warner.js"></script><link href="https://cdnjs.cloudflare.com/ajax/libs/lato-font/3.0.0/css/lato-font.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/juliamono/0.63.2/juliamono.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/fontawesome.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/solid.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/brands.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.8/katex.min.css" rel="stylesheet" type="text/css"/><script>documenterBaseURL=".."</script><script src="https://cdnjs.cloudflare.com/ajax/libs/require.js/2.3.6/require.min.js" data-main="../assets/documenter.js"></script><script src="../search_index.js"></script><script src="../siteinfo.js"></script><script src="../../versions.js"></script><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../assets/themes/catppuccin-mocha.css" data-theme-name="catppuccin-mocha"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../assets/themes/catppuccin-macchiato.css" data-theme-name="catppuccin-macchiato"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../assets/themes/catppuccin-frappe.css" data-theme-name="catppuccin-frappe"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../assets/themes/catppuccin-latte.css" data-theme-name="catppuccin-latte"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../assets/themes/documenter-dark.css" data-theme-name="documenter-dark" data-theme-primary-dark/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../assets/themes/documenter-light.css" data-theme-name="documenter-light" data-theme-primary/><script src="../assets/themeswap.js"></script></head><body><div id="documenter"><nav class="docs-sidebar"><div class="docs-package-name"><span class="docs-autofit"><a href="../">MetidaFlows.jl</a></span></div><button class="docs-search-query input is-rounded is-small is-clickable my-2 mx-auto py-1 px-2" id="documenter-search-query">Search docs (Ctrl + /)</button><ul class="docs-menu"><li><a class="tocitem" href="../">Home</a></li><li><a class="tocitem" href="../guide/">Guide</a></li><li><a class="tocitem" href="../typed_containers/">Typed containers</a></li><li><span class="tocitem">Examples</span><ul><li><a class="tocitem" href="../examples_abw_cycle/">AWB cycle</a></li><li><a class="tocitem" href="../examples_abw_two_node/">AWB two node cycle</a></li><li><a class="tocitem" href="../examples_settings_query/">Querying settings</a></li><li><a class="tocitem" href="../examples_bubble_sort/">Bubble sort as a graph</a></li><li><a class="tocitem" href="../examples_insertion_sort/">Insertion sort: nested loops</a></li><li><a class="tocitem" href="../examples_gradient_descent/">Gradient descent on a graph</a></li><li><a class="tocitem" href="../examples_newton/">Newton&#39;s method and :error ports</a></li><li><a class="tocitem" href="../examples_horner/">Horner&#39;s scheme on DAW</a></li><li><a class="tocitem" href="../examples_edit_distance/">Edit distance: dynamic programming</a></li><li><a class="tocitem" href="../examples_intervals/">Interval arithmetic: metadata</a></li><li class="is-active"><a class="tocitem" href>Modular exponentiation: skipping work</a><ul class="internal"><li><a class="tocitem" href="#Modular-exponentiation:-an-algorithm-that-skips-work"><span>Modular exponentiation: an algorithm that skips work</span></a></li></ul></li></ul></li><li><span class="tocitem">API</span><ul><li><a class="tocitem" href="../api/">Overview</a></li><li><a class="tocitem" href="../api_types/">Types</a></li><li><a class="tocitem" href="../api_core/">Graph and nodes</a></li><li><a class="tocitem" href="../api_access/">Reading and writing a node</a></li><li><a class="tocitem" href="../api_execution/">Execution</a></li><li><a class="tocitem" href="../api_meta/">Port metadata</a></li><li><a class="tocitem" href="../api_serialization/">Serialization and schemas</a></li></ul></li></ul><div class="docs-version-selector field has-addons"><div class="control"><span class="docs-label button is-static is-size-7">Version</span></div><div class="docs-selector control is-expanded"><div class="select is-fullwidth is-size-7"><select id="documenter-version-selector"></select></div></div></div></nav><div class="docs-main"><header class="docs-navbar"><a class="docs-sidebar-button docs-navbar-link fa-solid fa-bars is-hidden-desktop" id="documenter-sidebar-button" href="#"></a><nav class="breadcrumb"><ul class="is-hidden-mobile"><li><a class="is-disabled">Examples</a></li><li class="is-active"><a href>Modular exponentiation: skipping work</a></li></ul><ul class="is-hidden-tablet"><li class="is-active"><a href>Modular exponentiation: skipping work</a></li></ul></nav><div class="docs-right"><a class="docs-navbar-link" href="https://github.com/PharmCat/MetidaFlows.jl" title="View the repository on GitHub"><span class="docs-icon fa-brands"></span><span class="docs-label is-hidden-touch">GitHub</span></a><a class="docs-navbar-link" href="https://github.com/PharmCat/MetidaFlows.jl/blob/main/docs/src/examples_power.md" title="Edit source on GitHub"><span class="docs-icon fa-solid"></span></a><a class="docs-settings-button docs-navbar-link fa-solid fa-gear" id="documenter-settings-button" href="#" title="Settings"></a><a class="docs-article-toggle-button fa-solid fa-chevron-up" id="documenter-article-toggle-button" href="javascript:;" title="Collapse all docstrings"></a></div></header><article class="content" id="documenter-page"><h2 id="Modular-exponentiation:-an-algorithm-that-skips-work"><a class="docs-heading-anchor" href="#Modular-exponentiation:-an-algorithm-that-skips-work">Modular exponentiation: an algorithm that skips work</a><a id="Modular-exponentiation:-an-algorithm-that-skips-work-1"></a><a class="docs-heading-anchor-permalink" href="#Modular-exponentiation:-an-algorithm-that-skips-work" title="Permalink"></a></h2><p>Every other example in this section computes something. This one is about <em>not</em> computing: the whole value of binary exponentiation is that it performs a multiplication only where the exponent has a one bit.</p><pre><code class="language-julia hljs">result = 1;  base = x;  e = n
+while e &gt; 0
+    if isodd(e)
+        result = result * base % m      # only on set bits
+    end
+    base = base * base % m              # every turn
+    e &gt;&gt;= 1
+end</code></pre><p>So conditional evaluation here is not decoration. Compute the product on every turn and throw the extra away, and the algorithm stops being cheap in multiplications — which is the only thing it was ever cheap in.</p><h3 id="Both-idioms,-and-both-load-bearing"><a class="docs-heading-anchor" href="#Both-idioms,-and-both-load-bearing">Both idioms, and both load-bearing</a><a id="Both-idioms,-and-both-load-bearing-1"></a><a class="docs-heading-anchor-permalink" href="#Both-idioms,-and-both-load-bearing" title="Permalink"></a></h3><p>The <a href="../guide/#Conditional-evaluation">guide</a> describes two ways to make a computation conditional. This graph uses one of each, and the choice between them is forced:</p><ul><li><strong>the operation decides.</strong> <code>PMulModIf</code> always runs — it checks a flag — and multiplies and publishes only on an odd turn. That is where the work is saved.</li><li><strong>an optional port merges the branches.</strong> The gate&#39;s <code>:product</code> port is <code>required = false</code>: on an even turn there is no product, the gate reads <code>nothing</code>, and carries the previous <code>result</code> forward. That is how two branches rejoin one loop state without a second writer into a feedback port.</li></ul><p>A full guard — a node that relays everything the multiplication needs, or publishes nothing — does <em>not</em> work here, and the reason is worth knowing. The guard goes silent, so the multiplication is not ready and never runs, so it stays <code>:dirty</code>, and the gate waits for its <code>:clean</code> — optional port or not. Waiting is about the producer&#39;s <em>status</em>, not about the value.</p><p>That failure is measured, and it is a quiet one: the queue drains, nothing throws, and <code>3^5 mod 7</code> comes back as <code>nothing</code> after two turns instead of a result. By default the guard form belongs at a dead end, where nothing downstream is waiting; this product has to come back into the loop.</p><p><code>scheduler!(w; release_optional = true)</code> lifts that restriction, and then the guard is the <em>better</em> of the two idioms here — it saves the node execution as well as the multiplication. Both are measured side by side at the end of this page.</p><h3 id="The-nodes"><a class="docs-heading-anchor" href="#The-nodes">The nodes</a><a id="The-nodes-1"></a><a class="docs-heading-anchor-permalink" href="#The-nodes" title="Permalink"></a></h3><pre><code class="language-julia hljs">using MetidaFlows
+import MetidaFlows: PortSpec, getstatus, getnode, getstate
+
+struct PConst     &lt;: AbstractNodeType end  # an integer constant
+struct PowState   &lt;: AbstractNodeType end  # the loop state
+struct PIsZero    &lt;: AbstractNodeType end  # a == 0
+struct PIsOdd     &lt;: AbstractNodeType end  # isodd(a)
+struct PMulMod    &lt;: AbstractNodeType end  # a * b % m
+struct PMulModIf  &lt;: AbstractNodeType end  # a * b % m, only when told to
+struct PHalf      &lt;: AbstractNodeType end  # a &gt;&gt; 1
+struct PowGate    &lt;: AbstractNodeType end  # the branch of a turn
+struct PowGuard   &lt;: AbstractNodeType end  # relays the pair, or publishes nothing
+
+spec_pconst() = NodeSpec(&quot;P const&quot;, PortSpec[],
+    [PortSpec(&quot;Out&quot;, Int, :out)], [:value])
+spec_piszero() = NodeSpec(&quot;P is zero&quot;,
+    [PortSpec(&quot;A&quot;, Int, :a)], [PortSpec(&quot;Out&quot;, Bool, :out)])
+spec_pisodd() = NodeSpec(&quot;P is odd&quot;,
+    [PortSpec(&quot;A&quot;, Int, :a)], [PortSpec(&quot;Out&quot;, Bool, :out)])
+spec_phalf() = NodeSpec(&quot;P half&quot;,
+    [PortSpec(&quot;A&quot;, Int, :a)], [PortSpec(&quot;Out&quot;, Int, :out)])
+spec_pmulmod() = NodeSpec(&quot;P mul mod&quot;,
+    [PortSpec(&quot;A&quot;, Int, :a), PortSpec(&quot;B&quot;, Int, :b), PortSpec(&quot;M&quot;, Int, :m)],
+    [PortSpec(&quot;Out&quot;, Int, :out)])
+
+spec_pmulmodif() = NodeSpec(&quot;P mul mod if&quot;,
+    [PortSpec(&quot;A&quot;, Int, :a), PortSpec(&quot;B&quot;, Int, :b), PortSpec(&quot;M&quot;, Int, :m),
+     PortSpec(&quot;Pass&quot;, Bool, :pass)],
+    [PortSpec(&quot;Out&quot;, Int, :out)])
+
+spec_powguard() = NodeSpec(&quot;Pow guard&quot;,
+    [PortSpec(&quot;Result&quot;, Int, :result), PortSpec(&quot;Base&quot;, Int, :base),
+     PortSpec(&quot;Pass&quot;, Bool, :pass)],
+    [PortSpec(&quot;Result&quot;, Int, :result), PortSpec(&quot;Base&quot;, Int, :base)])
+
+spec_powstate() = NodeSpec(&quot;Pow state&quot;,
+    [PortSpec(&quot;Initial result&quot;, Int, :init_result),
+     PortSpec(&quot;Initial base&quot;,   Int, :init_base),
+     PortSpec(&quot;Initial exp&quot;,    Int, :init_exp),
+     PortSpec(&quot;Result&quot;,   Int, :result; kind = :feedback, required = false),
+     PortSpec(&quot;Base&quot;,     Int, :base;   kind = :feedback, required = false),
+     PortSpec(&quot;Exponent&quot;, Int, :exp;    kind = :feedback, required = false)],
+    [PortSpec(&quot;Result&quot;,   Int, :result),
+     PortSpec(&quot;Base&quot;,     Int, :base),
+     PortSpec(&quot;Exponent&quot;, Int, :exp)])
+
+# :product is the optional port — the whole merge rests on it
+spec_powgate() = NodeSpec(&quot;Pow gate&quot;,
+    [PortSpec(&quot;Done&quot;,      Bool, :done),
+     PortSpec(&quot;Result&quot;,    Int,  :result),
+     PortSpec(&quot;Product&quot;,   Int,  :product; required = false),
+     PortSpec(&quot;Base next&quot;, Int,  :base_next),
+     PortSpec(&quot;Exp next&quot;,  Int,  :exp_next)],
+    [PortSpec(&quot;Result&quot;,   Int, :result),
+     PortSpec(&quot;Base&quot;,     Int, :base),
+     PortSpec(&quot;Exponent&quot;, Int, :exp),
+     PortSpec(&quot;Value&quot;,    Int, :value; kind = :terminal)])</code></pre><p>The conditional node is three lines, and the first of them is the whole point:</p><pre><code class="language-julia hljs">MULS = Ref(0)      # how many multiplications were actually performed
+
+MetidaFlows.execute_unsafe!(n::DataNode{PConst}) =
+    (setdata!(n, :out, Int(n.settings[:value])); [:out])
+MetidaFlows.execute_unsafe!(n::DataNode{PIsZero}) =
+    (setdata!(n, :out, getinputdata(n, :a) == 0); [:out])
+MetidaFlows.execute_unsafe!(n::DataNode{PIsOdd}) =
+    (setdata!(n, :out, isodd(getinputdata(n, :a))); [:out])
+MetidaFlows.execute_unsafe!(n::DataNode{PHalf}) =
+    (setdata!(n, :out, getinputdata(n, :a) &gt;&gt; 1); [:out])
+
+function MetidaFlows.execute_unsafe!(n::DataNode{PMulMod})
+    MULS[] += 1
+    setdata!(n, :out, (getinputdata(n, :a) * getinputdata(n, :b)) %
+                      getinputdata(n, :m))
+    return [:out]
+end
+
+function MetidaFlows.execute_unsafe!(n::DataNode{PMulModIf})
+    getinputdata(n, :pass) || return Symbol[]        # nothing is published
+    MULS[] += 1
+    setdata!(n, :out, (getinputdata(n, :a) * getinputdata(n, :b)) %
+                      getinputdata(n, :m))
+    return [:out]
+end
+
+# the guard form: everything the multiplication needs goes through here
+MetidaFlows.execute_unsafe!(n::DataNode{PowGuard}) =
+    getinputdata(n, :pass) ?
+        (setdata!(n, :result, getinputdata(n, :result));
+         setdata!(n, :base,   getinputdata(n, :base)); [:result, :base]) :
+        Symbol[]
+
+function MetidaFlows.execute_unsafe!(node::DataNode{PowGate})
+    result = getinputdata(node, :result)
+    if getinputdata(node, :done)
+        setdata!(node, :value, result)
+        return [:value]
+    end
+    product = getinputdata(node, :product)           # nothing on an even turn
+    setdata!(node, :result, isnothing(product) ? result : product)
+    setdata!(node, :base,   getinputdata(node, :base_next))
+    setdata!(node, :exp,    getinputdata(node, :exp_next))
+    return [:result, :base, :exp]
+end
+
+function MetidaFlows.execute_unsafe!(node::DataNode{PowState})
+    back = getinputdata(node, :result)
+    if back === nothing
+        setdata!(node, :result, getinputdata(node, :init_result))
+        setdata!(node, :base,   getinputdata(node, :init_base))
+        setdata!(node, :exp,    getinputdata(node, :init_exp))
+    else
+        setdata!(node, :result, back)
+        setdata!(node, :base,   getinputdata(node, :base))
+        setdata!(node, :exp,    getinputdata(node, :exp))
+    end
+    return [:result, :base, :exp]
+end</code></pre><h3 id="The-graph"><a class="docs-heading-anchor" href="#The-graph">The graph</a><a id="The-graph-1"></a><a class="docs-heading-anchor-permalink" href="#The-graph" title="Permalink"></a></h3><pre><code class="nohighlight hljs"> PConst(1) ─▶ head.init_result       ┌──▶ PIsZero (done: e == 0) ──┐
+ PConst(x) ─▶ head.init_base         │                             │
+ PConst(n) ─▶ head.init_exp          ├──▶ PIsOdd (odd: isodd e) ───┼──┐
+                                     │            │                │  │
+                      PowState ──────┤            └── :pass ──┐    │  │
+                      (result,       │                        ▼    │  │
+                       base, exp)    ├──▶ PMulModIf (product) ─────┼──┤
+                           ▲         ├──▶ PMulMod  (base²) ────────┤  │
+                           │         └──▶ PHalf    (e &gt;&gt; 1) ───────┤  │
+ PConst(m) ─────────────────────────────▶ (both multiplications)   │  │
+                           │                                 PowGate ◀┘
+                           └────── :feedback ───────────────────┘  │
+                             (result, base, exp)                   ▼
+                                                                :value</code></pre><p>Eleven nodes, twenty-one connections.</p><pre><code class="language-julia hljs">function build_power(x::Int, n::Int, m::Int; guard::Bool = false)
+    w      = Workflow(0; type = :ABW)
+    w.name = &quot;Modular exponentiation&quot;
+
+    cone = add_node!(w, DataNode(PConst, spec_pconst()))
+    cx   = add_node!(w, DataNode(PConst, spec_pconst()))
+    cn   = add_node!(w, DataNode(PConst, spec_pconst()))
+    cm   = add_node!(w, DataNode(PConst, spec_pconst()))
+    setsettings!(w, cone, Dict(:value =&gt; 1 % m))
+    setsettings!(w, cx,   Dict(:value =&gt; x % m))
+    setsettings!(w, cn,   Dict(:value =&gt; n))
+    setsettings!(w, cm,   Dict(:value =&gt; m))
+
+    head = add_node!(w, DataNode(PowState,  spec_powstate()))
+    done = add_node!(w, DataNode(PIsZero,   spec_piszero()))
+    odd  = add_node!(w, DataNode(PIsOdd,    spec_pisodd()))
+    prod = guard ? add_node!(w, DataNode(PMulMod,   spec_pmulmod())) :
+                   add_node!(w, DataNode(PMulModIf, spec_pmulmodif()))
+    sqr  = add_node!(w, DataNode(PMulMod,   spec_pmulmod()))
+    half = add_node!(w, DataNode(PHalf,     spec_phalf()))
+    gate = add_node!(w, DataNode(PowGate,   spec_powgate()))
+
+    add_connection!(w, cone, :out, head, :init_result)
+    add_connection!(w, cx,   :out, head, :init_base)
+    add_connection!(w, cn,   :out, head, :init_exp)
+
+    add_connection!(w, head, :exp, done, :a)
+    add_connection!(w, head, :exp, odd,  :a)
+    add_connection!(w, head, :exp, half, :a)
+
+    if guard
+        #  everything the multiplication needs goes through the guard, so on
+        #  an even turn the multiplication is not even executed
+        gd = add_node!(w, DataNode(PowGuard, spec_powguard()))
+        add_connection!(w, head, :result, gd, :result)
+        add_connection!(w, head, :base,   gd, :base)
+        add_connection!(w, odd,  :out,    gd, :pass)     # the condition
+        add_connection!(w, gd, :result, prod, :a)
+        add_connection!(w, gd, :base,   prod, :b)
+    else
+        add_connection!(w, head, :result, prod, :a)
+        add_connection!(w, head, :base,   prod, :b)
+        add_connection!(w, odd,  :out,    prod, :pass)   # the condition
+    end
+    add_connection!(w, cm,   :out,    prod, :m)
+
+    add_connection!(w, head, :base, sqr, :a)
+    add_connection!(w, head, :base, sqr, :b)
+    add_connection!(w, cm,   :out,  sqr, :m)
+
+    add_connection!(w, done, :out,    gate, :done)
+    add_connection!(w, head, :result, gate, :result)
+    add_connection!(w, prod, :out,    gate, :product)
+    add_connection!(w, sqr,  :out,    gate, :base_next)
+    add_connection!(w, half, :out,    gate, :exp_next)
+
+    add_connection!(w, gate, :result, head, :result)
+    add_connection!(w, gate, :base,   head, :base)
+    add_connection!(w, gate, :exp,    head, :exp)
+
+    (w = w, head = head, prod = prod, sqr = sqr, gate = gate, odd = odd)
+end
+
+function power(x::Int, n::Int, m::Int; guard::Bool = false, release::Bool = false)
+    MULS[] = 0
+    g = build_power(x, n, m; guard = guard)
+    scheduler!(g.w; maxiter = 1_000_000, release_optional = release)
+    sqrs = getnode(g.w, g.sqr).state.exec_n
+    (value = getdata(g.w, g.gate, :value),
+     turns = getnode(g.w, g.head).state.exec_n,
+     runs  = getnode(g.w, g.prod).state.exec_n,   # executions of the node
+     muls  = MULS[] - sqrs,                       # multiplications performed
+     sqrs  = sqrs, g = g)
+end
+
+r = power(3, 5, 7)
+(value = r.value, check = powermod(3, 5, 7),
+ turns = r.turns, node_runs = r.runs, multiplications = r.muls)</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi">(value = 5, check = 5, turns = 4, node_runs = 4, multiplications = 2)</code></pre><h3 id="The-node-runs-every-turn;-the-multiplication-does-not"><a class="docs-heading-anchor" href="#The-node-runs-every-turn;-the-multiplication-does-not">The node runs every turn; the multiplication does not</a><a id="The-node-runs-every-turn;-the-multiplication-does-not-1"></a><a class="docs-heading-anchor-permalink" href="#The-node-runs-every-turn;-the-multiplication-does-not" title="Permalink"></a></h3><p>That distinction is the measurement. The conditional node is executed on every turn — it only looks at a flag — while the number of multiplications it performs is exactly the number of one bits in the exponent:</p><pre><code class="language-julia hljs">using Printf
+function table()
+    for n in (1, 2, 3, 5, 15, 16, 100, 255, 256, 1023, 1024)
+        p = power(3, n, 1_000_003)
+        @printf(&quot;n = %4d (%12s)  turns %3d  node runs %3d  multiplications %2d  ones %2d\n&quot;,
+                n, string(n, base = 2), p.turns, p.runs, p.muls, count_ones(n))
+    end
+end
+table()</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi">n =    1 (           1)  turns   2  node runs   2  multiplications  1  ones  1
+n =    2 (          10)  turns   3  node runs   3  multiplications  1  ones  1
+n =    3 (          11)  turns   3  node runs   3  multiplications  2  ones  2
+n =    5 (         101)  turns   4  node runs   4  multiplications  2  ones  2
+n =   15 (        1111)  turns   5  node runs   5  multiplications  4  ones  4
+n =   16 (       10000)  turns   6  node runs   6  multiplications  1  ones  1
+n =  100 (     1100100)  turns   8  node runs   8  multiplications  3  ones  3
+n =  255 (    11111111)  turns   9  node runs   9  multiplications  8  ones  8
+n =  256 (   100000000)  turns  10  node runs  10  multiplications  1  ones  1
+n = 1023 (  1111111111)  turns  11  node runs  11  multiplications 10  ones 10
+n = 1024 ( 10000000000)  turns  12  node runs  12  multiplications  1  ones  1</code></pre><p>A power of two is the extreme case: one multiplication however large the exponent.</p><pre><code class="language-julia hljs">r = power(3, 2^20, 1_000_003)
+(value = r.value, check = powermod(3, 2^20, 1_000_003),
+ turns = r.turns, multiplications = r.muls)</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi">(value = 933603, check = 933603, turns = 22, multiplications = 1)</code></pre><p>Compare that with the twenty-two multiplications a graph that computed the product on every turn would perform — same answer, all of the work:</p><pre><code class="language-julia hljs">r = power(3, 2^20, 1_000_003)
+(conditional = r.muls, unconditional = r.turns,
+ naive_repeated_multiplication = 2^20 - 1)</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi">(conditional = 1, unconditional = 22, naive_repeated_multiplication = 1048575)</code></pre><h3 id="What-the-graph-looks-like-on-an-even-turn"><a class="docs-heading-anchor" href="#What-the-graph-looks-like-on-an-even-turn">What the graph looks like on an even turn</a><a id="What-the-graph-looks-like-on-an-even-turn-1"></a><a class="docs-heading-anchor-permalink" href="#What-the-graph-looks-like-on-an-even-turn" title="Permalink"></a></h3><p>With the exponent <code>2 = 0b10</code> the first turn is even, the second odd, the third the final one. Afterwards the conditional node is <code>:clean</code> — it ran — but it published nothing on that last turn, and the gate&#39;s buffer for <code>:product</code> is empty rather than holding the previous turn&#39;s value:</p><pre><code class="language-julia hljs">r = power(3, 2, 1_000_003)
+prod = getnode(r.g.w, r.g.prod)
+(value = r.value, turns = r.turns, multiplications = r.muls,
+ node_status = getstatus(prod),
+ published_last = getstate(prod, :ready_ports),
+ gate_sees = getinputdata(getnode(r.g.w, r.g.gate), :product))</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi">(value = 9, turns = 3, multiplications = 1, node_status = :clean, published_last = Symbol[], gate_sees = nothing)</code></pre><h3 id="The-guard-form,-and-what-releasing-it-costs"><a class="docs-heading-anchor" href="#The-guard-form,-and-what-releasing-it-costs">The guard form, and what releasing it costs</a><a id="The-guard-form,-and-what-releasing-it-costs-1"></a><a class="docs-heading-anchor-permalink" href="#The-guard-form,-and-what-releasing-it-costs" title="Permalink"></a></h3><p>Everything above routes the condition <em>into</em> the multiplication. The guard form routes the condition into a node ahead of it, so on an even turn the multiplication has no input at all and is never executed. In the cycle that deadlocks, and the deadlock is silent — no result, no error:</p><pre><code class="language-julia hljs">r = power(3, 5, 7; guard = true)
+(value = r.value, turns = r.turns, multiplications = r.muls)</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi">(value = nothing, turns = 2, multiplications = 1)</code></pre><p>With <code>release_optional = true</code> the scheduler, once its queue has run dry, releases the gate — whose <code>:product</code> is optional — and the loop continues:</p><pre><code class="language-julia hljs">function compare(n, m = 1_000_003)
+    a = power(3, n, m)                                    # condition in the node
+    b = power(3, n, m; guard = true, release = true)      # condition in a guard
+    (n = n, ones = count_ones(n),
+     value_ok = a.value == b.value == powermod(3, n, m),
+     turns = a.turns,
+     runs_conditional = a.runs, runs_guarded = b.runs,
+     muls_conditional = a.muls, muls_guarded = b.muls)
+end
+compare.((1, 5, 16, 100, 1024))</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi">((n = 1, ones = 1, value_ok = true, turns = 2, runs_conditional = 2, runs_guarded = 1, muls_conditional = 1, muls_guarded = 1), (n = 5, ones = 2, value_ok = true, turns = 4, runs_conditional = 4, runs_guarded = 2, muls_conditional = 2, muls_guarded = 2), (n = 16, ones = 1, value_ok = true, turns = 6, runs_conditional = 6, runs_guarded = 1, muls_conditional = 1, muls_guarded = 1), (n = 100, ones = 3, value_ok = true, turns = 8, runs_conditional = 8, runs_guarded = 3, muls_conditional = 3, muls_guarded = 3), (n = 1024, ones = 1, value_ok = true, turns = 12, runs_conditional = 12, runs_guarded = 1, muls_conditional = 1, muls_guarded = 1))</code></pre><p>Same answer, same number of multiplications — and the guarded node is executed only on the turns that use it, instead of on every turn. For <code>n = 1024</code> that is one execution against twelve.</p><p>The price is that &quot;no value&quot; now also covers &quot;the producer failed&quot;, so an exception upstream of an optional port arrives as <code>nothing</code> rather than as a node that did not run. That is why the flag is opt-in rather than the default.</p><h3 id="Things-to-watch"><a class="docs-heading-anchor" href="#Things-to-watch">Things to watch</a><a id="Things-to-watch-1"></a><a class="docs-heading-anchor-permalink" href="#Things-to-watch" title="Permalink"></a></h3><ul><li><p><strong>One squaring is wasted.</strong> The exit test lives in the gate, at the end of a turn, so the final turn squares the base and the gate discards it. The imperative loop tests before squaring and does one less. That is the price of a post-tested loop, the same as in <a href="../examples_gradient_descent/">gradient descent</a>.</p></li><li><p><strong>The modulus comes from a constant node that runs once.</strong> It executes on the first turn and stays <code>:clean</code> — nothing marks it dirty, because it is not downstream of the loop head — so its value stays in the multiplications&#39; buffers. If it were re-executed every turn it would be ordinary work; as it is, it is free.</p></li><li><p><strong><code>:product</code> must be <code>required = false</code>.</strong> Declare it required and the gate is simply not ready on an even turn: the value is not coming, the node does not run, and the loop stops. The flag is the whole difference between &quot;this may be absent&quot; and &quot;wait for it&quot;.</p></li></ul></article><nav class="docs-footer"><a class="docs-footer-prevpage" href="../examples_intervals/">« Interval arithmetic: metadata</a><a class="docs-footer-nextpage" href="../api/">Overview »</a><div class="flexbox-break"></div><p class="footer-message">Powered by <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> and the <a href="https://julialang.org/">Julia Programming Language</a>.</p></nav></div><div class="modal" id="documenter-settings"><div class="modal-background"></div><div class="modal-card"><header class="modal-card-head"><p class="modal-card-title">Settings</p><button class="delete"></button></header><section class="modal-card-body"><p><label class="label">Theme</label><div class="select"><select id="documenter-themepicker"><option value="auto">Automatic (OS)</option><option value="documenter-light">documenter-light</option><option value="documenter-dark">documenter-dark</option><option value="catppuccin-latte">catppuccin-latte</option><option value="catppuccin-frappe">catppuccin-frappe</option><option value="catppuccin-macchiato">catppuccin-macchiato</option><option value="catppuccin-mocha">catppuccin-mocha</option></select></div></p><hr/><p>This document was generated with <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> version 1.20.0 on <span class="colophon-date" title="Tuesday 10 November 2026 21:55">Tuesday 10 November 2026</span>. Using Julia version 1.13.3.</p></section><footer class="modal-card-foot"></footer></div></div></div></body></html>
