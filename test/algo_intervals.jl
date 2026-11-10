@@ -253,8 +253,9 @@ end
     #  Деление, когда нуль вне делителя
     @test rule(IvDiv, "div", 1.0, 2.0,  4.0, 5.0) ==
           (lo = 1.0/5.0, hi = 2.0/4.0)
-    #  и отказ, когда внутри
-    @test_throws ErrorException rule(IvDiv, "div", 1.0, 2.0, -1.0, 3.0)
+    #  и отказ, когда внутри. Ответ берётся обходом, поэтому отказ приходит
+    #  обёрнутым: обход называет узел и порт, исходный текст внутри.
+    @test_throws MetidaFlows.MetaRuleError rule(IvDiv, "div", 1.0, 2.0, -1.0, 3.0)
     @test occursin("containing zero",
         try; rule(IvDiv, "div", 1.0, 2.0, -1.0, 3.0); catch e; sprint(showerror, e); end)
 
@@ -376,7 +377,12 @@ end
     #  Делитель y − 2 при y ∈ [1, 5] пересекает нуль
     g = build_expr(ylo = 1.0, yhi = 5.0)
     @test getmeta(g.w, g.sub, :out) == (lo = -1.0, hi = 3.0)
-    @test_throws ErrorException getmeta(g.w, g.out, :out)
+    #  Отказ приходит из правила, поэтому обход называет узел и порт, а
+    #  исходное сообщение остаётся внутри: искать причину не по стеку.
+    @test_throws MetidaFlows.MetaRuleError getmeta(g.w, g.out, :out)
+    err = try; getmeta(g.w, g.out, :out); catch e; e; end
+    @test err.id == g.div
+    @test occursin("containing zero", sprint(showerror, err))
     #  и ни один узел при этом не исполнялся
     @test all(n -> n.state.exec_n == 0, values(g.w.nodes))
     @test g.w.run_id == 0

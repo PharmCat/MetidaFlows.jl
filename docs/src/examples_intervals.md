@@ -326,12 +326,40 @@ scheduler!(q.w)
 (estimate = est, actual = getdata(q.w, q.out, :out))
 ```
 
+### Describing the whole graph at once
+
+Asking port by port re-walks the graph from the top every time. The memo lives
+for one call, so a chain of `n` nodes costs `n` walks of `O(n)` where one walk
+would do. [`getmeta(model)`](@ref getmeta) asks once and returns every output
+port of every node, keyed by `(node id, port label)`:
+
+```@example iv
+d = getmeta(p.w)
+(ports = length(d), estimate_at_output = d[(p.out, :out)])
+```
+
+The gap is quadratic in the length of the graph: the test suite pins an 8-node
+chain at 8 rule invocations against 36 asked port by port, and a 101-node chain
+at 101 against 5151. The answers are identical to the port-by-port ones — same
+memo, same rules, asked in one pass.
+
+A rule that raises takes the whole call with it rather than returning a
+half-described graph; see [`MetaRuleError`](@ref) below.
+
 ### Things to watch
 
 * **The walk does not cache between calls.** Each `getmeta` recomputes;
   within one call a shared ancestor is described once, which is why the eight
   rules of this graph fire eight times even though `x` and `y` are each needed
-  twice. Memoize inside the node if describing a source is expensive.
+  twice. Memoize inside the node if describing a source is expensive, and use
+  the whole-graph form above instead of a loop over ports.
+
+* **An error from a rule names its node.** The walk is recursive, so a
+  `KeyError` from a rule would otherwise surface with nothing to say about where
+  it came from. [`MetaRuleError`](@ref) wraps it with the node id and the port
+  and keeps the original in `.cause` — that is what the refusal above printed.
+  Errors from the walk itself (an unknown port label, `maxdepth`) are not
+  wrapped: they already name their node.
 
 * **A metadata source cuts the walk short.** Everything above a node that
   returns `true` from [`ismetasource`](@ref) is never visited — which is the

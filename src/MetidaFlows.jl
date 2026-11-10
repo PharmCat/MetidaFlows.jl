@@ -101,6 +101,7 @@ node_schema,
 
 ismetasource,
 getmeta_unsafe,
+MetaRuleError,
 =#
 #
 """

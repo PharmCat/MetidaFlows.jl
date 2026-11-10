@@ -155,6 +155,84 @@ ismetasource(::AbstractDataNode, ::Symbol)::Bool = false
 
 
 """
+    MetaRuleError(id, port, cause) <: Exception
+
+Raised when [`getmeta_unsafe`](@ref) of node `id` fails while describing output
+port `port`. `cause` is the original exception, kept so the real reason is not
+lost; the wrapper exists because the walk is recursive, and an error from a
+rule otherwise surfaces with nothing to say about where it came from.
+
+A `KeyError` here almost always means the rule is not **total**, and there are
+only two ways to get there: it reads a setting that is not filled in yet, or it
+reads `inmeta[:label]` in the branch where the node declared itself a metadata
+source, and that dictionary is empty. An unconnected input port is *not* one of
+them - [`getinputmeta`](@ref) gives every `:normal` port a key, `nothing` when
+nothing is attached. See the *Consistency* section of [`ismetasource`](@ref).
+"""
+struct MetaRuleError <: Exception
+    id::Int
+    port::Symbol
+    cause::Any
+end
+
+function Base.showerror(io::IO, e::MetaRuleError)
+    print(io, "Node ", e.id, " metadata rule for port `:", e.port, "`: ")
+    showerror(io, e.cause)
+end
+
+#  Единственное место, где зовётся пользовательское правило. Ошибка оттуда
+#  без контекста выходит из середины рекурсии: ни узла, ни порта не видно, а
+#  причина обычно банальна — правило не тотально и читает настройку, которой
+#  нет. Оборачиваем так же, как это сделано в `dict_to_settings!`.
+function ask_meta(node::AbstractDataNode, port::Symbol, inmeta)
+    try
+        return getmeta_unsafe(node, port, inmeta)
+    catch e
+        e isa MetaRuleError && rethrow(e)
+        throw(MetaRuleError(getid(node), port, e))
+    end
+end
+
+"""
+    getmeta(model::Workflow; maxdepth::Int = 1000) -> Dict{Tuple{Int, Symbol}, Any}
+
+Describe **every output port of every node** in one walk, keyed by
+`(node id, port label)`.
+
+The point is the shared memo. [`getmeta`](@ref) memoizes only within a single
+call, so describing a graph port by port re-walks it from the top every time: a
+chain of `n` nodes costs `n` walks of `O(n)` where one walk of `O(n)` would do,
+and a node sitting under a diamond is described once per question instead of
+once in total. This form asks once.
+
+Nothing is executed, as with the single-port form. A rule that raises takes the
+whole call with it - see [`MetaRuleError`](@ref) - because a half-described
+graph is worse than a loud failure.
+
+```julia
+m = getmeta(w)
+m[(csv_id, :table)]          # (columns = [:Subject, :Time, :Concentration],)
+length(m)                    # one entry per output port in the graph
+```
+
+See also [`getmeta`](@ref), [`getinputmeta`](@ref).
+"""
+function getmeta(model::Workflow; maxdepth::Int = 1000)
+    done = Dict{Tuple{Int, Symbol}, Any}()
+    for id in sort!(collect(keys(model.nodes)))                                    # порядок обхода Dict машинно-зависим, порядок вопросов — нет
+        for ps in getnode(model, id).spec.output_ports
+            key = (id, ps.label)
+            haskey(done, key) && continue
+            #  Обратное ребро по обычным рёбрам в `done` не пишется (ответ
+            #  зависит от пути), поэтому результат берём из возврата, иначе
+            #  такой порт пропал бы из словаря.
+            done[key] = getmeta(model, id, ps.label; done = done, maxdepth = maxdepth)
+        end
+    end
+    return done
+end
+
+"""
     getmeta(model::Workflow, id::Int, port::Symbol)
 
 Describe what node `id` will produce on its output port `port`, without
@@ -167,7 +245,10 @@ without incoming connections, and at any node for which
 
 Returns `nothing` when the answer is unknown — because the node did not
 implement [`getmeta_unsafe`](@ref), because a producer up the chain did not,
-or because the required settings are not filled in yet.
+or because the required settings are not filled in yet. Unknown is only
+reported as `nothing` if the rule *checks*: a rule that reads a setting which
+is not there raises instead, wrapped in [`MetaRuleError`](@ref) so the node and
+port are named. See the *Consistency* section of [`ismetasource`](@ref).
 
 # Arguments
 - `maxdepth`: longest chain of nodes the walk may descend into before raising.
@@ -180,7 +261,9 @@ or because the required settings are not filled in yet.
   duration of the call only, so nothing can go stale between calls — a file
   may change on disk, and the next call sees it.
 - Nothing is cached **between** calls. Memoize inside the node if a source is
-  expensive to inspect.
+  expensive to inspect. To describe many ports at once, use the whole-graph
+  form [`getmeta(model)`](@ref getmeta) instead of calling this one in a loop:
+  it shares a single memo, which turns `O(n²)` rule invocations into `O(n)`.
 - A node declaring [`ismetasource`](@ref) cuts the walk short, so the branches
   above it are never visited.
 - In a graph containing a cycle built from `:normal` edges the answer for a
@@ -209,7 +292,7 @@ function getmeta(model::Workflow, id::Int, port::Symbol;
 
     # нода объявила себя источником описания: подъёма не происходит
     if ismetasource(node, port)
-        return done[key] = getmeta_unsafe(node, port, Dict{Symbol, Any}())          # Возвращаем то, что отдала "терминальная" нода
+        return done[key] = ask_meta(node, port, Dict{Symbol, Any}())                # Возвращаем то, что отдала "терминальная" нода
     end
 
     id in visited && return nothing          # обратное ребро: результат зависит от пути, в done не кладём
@@ -219,8 +302,8 @@ function getmeta(model::Workflow, id::Int, port::Symbol;
 
     push!(visited, id)
     try
-        inmeta = getinputmeta(model, id; visited = visited, done = done, maxdepth = maxdepth) # Продолжаем подниматься по уровню рекурсии выше 
-        return done[key] = getmeta_unsafe(node, port, inmeta)                              # Дописываем в то что пришло от родительских нод свою информацию
+        inmeta = getinputmeta(model, id; visited = visited, done = done, maxdepth = maxdepth) # Продолжаем подниматься по уровню рекурсии выше
+        return done[key] = ask_meta(node, port, inmeta)                                    # Дописываем в то что пришло от родительских нод свою информацию
     finally
         delete!(visited, id)                                                                  # множество хранит текущий путь, не всё пройденное
     end
