@@ -25,31 +25,41 @@ import NamedGraphs.Graphs: topological_sort
 
 import Base: show, keys, getindex, setindex!, empty!
 
-export AbstractNodeType, 
+export
+# Types
+AbstractNodeType,
+Workflow,
 NodeSpec,
 PortSpec,
-DataNode, 
-NodeConnection, 
-Workflow,
-ExecuteSettings, 
+DataNode,
+NodeConnection,
+ExecuteSettings,
+MultiPort,
+# Building and editing a graph
 add_node!,
 delete_node!,
-add_connection!, 
+add_connection!,
 delete_connection!,
 setsettings!,
-setdata!,
+isnodeexist,
+isportexist,
+# Execution
 scheduler!,
 execute!,
-getstatus,
+# Reading and writing a node
+getnode,
 getdata,
 getinputdata,
 getinputconnections,
+setdata!,
+getstatus,
+# Port metadata
 getmeta,
 getinputmeta,
-isnodeexist,
-isportexist,
+# Diagnostics
 failed_nodes,
 check_failed_nodes
+
 #=
 # In publick API, but not exported:
 # Execution:
@@ -2006,7 +2016,7 @@ function invalidate_stale_optional!(model::Workflow, id::Int)
         ps  = getportspec(node, con.input_port, :input)
         ps.kind == :normal || continue
         ps.required        && continue
-        getstatus(getnode(model, con.output_id)) == :clean && continue
+        getstatus(model, con.output_id) == :clean && continue
         invalidate_buffer!(node, con.input_port, con_id)
     end
     return model
@@ -2352,14 +2362,25 @@ end
 """
     makegraph(model::Workflow)
  
-Build directed graph representation of workflow: node identifiers become
-vertex names and every connection becomes an edge.
+Directed graph representation of workflow: node identifiers become vertex
+names and every connection becomes an edge.
+ 
+Built once per structural change and kept in `model.graph`; a call that finds
+the cache current does no work at all. See [`Graph`](@ref).
+ 
+# Returns
+The **shared** graph held by the workflow. Treat it as read-only: adding a
+vertex or an edge to it would leave the workflow describing a graph it does not
+have, and nothing would report that. Make a copy before modifying one.
  
 # Notes
 All connections are included regardless of the `kind` of the ports they
 attach to. A `:feedback` edge is therefore an ordinary edge here, so a graph
 with a feedback loop is cyclic and [`scheduler!`](@ref) for a [`DAW`](@ref)
 workflow rejects it. That is by design: cycles are an [`ABW`](@ref) feature.
+ 
+A graph edited around the editing functions is not seen here - see *Editing the
+graph* in [`Workflow`](@ref).
 """
 function makegraph(model::Workflow)
     if model.ver == model.graph.ver
@@ -2377,6 +2398,23 @@ function makegraph(model::Workflow)
     return g
 end
 
+"""
+    is_cyclic(model::Workflow) -> Bool
+ 
+Whether the workflow's graph contains a cycle, from the same cache as
+[`makegraph`](@ref); see [`Graph`](@ref).
+ 
+A cycle must be closed through a port declared `kind = :feedback` to be
+executable, and only by [`ABW`](@ref): [`scheduler!`](@ref) on a [`DAW`](@ref)
+workflow rejects a cyclic graph. The port's kind is not consulted here -
+[`makegraph`](@ref) builds an edge per connection whatever the kind, so a
+feedback edge is an ordinary edge and the graph it closes is cyclic.
+ 
+# Example
+```julia
+is_cyclic(w) && error("this one needs :ABW")
+```
+"""
 function is_cyclic(model::Workflow)
     if model.ver == model.graph.ic_ver
         return  model.graph.is_cyclic
@@ -2388,6 +2426,34 @@ function is_cyclic(model::Workflow)
     return ic
 end
 
+"""
+    topological_sort(model::Workflow) -> Vector{Int}
+ 
+A topological order of the workflow's nodes, from the same cache as
+[`makegraph`](@ref); the order [`scheduler!`](@ref) traverses a [`DAW`](@ref)
+workflow in. See [`Graph`](@ref).
+ 
+# Returns
+The **shared** order held by the workflow, as node identifiers. Treat it as
+read-only.
+ 
+# Notes
+Which of several valid topological orders this is, is unspecified: it follows
+the order the vertices went into the graph, which is dictionary order. It is
+the same for as long as the structure is unchanged.
+ 
+A cyclic graph has no topological order and this raises, as it does on a bare
+graph - ask [`is_cyclic`](@ref is_cyclic(::Workflow)) first. Unlike the other
+two cached values, a failure caches nothing, so every call on a cyclic graph
+raises again.
+ 
+# Example
+```julia
+for id in topological_sort(w)
+    execute!(w, id)
+end
+```
+"""
 function topological_sort(model::Workflow)
     if model.ver == model.graph.ts_ver
         return model.graph.topological_sort

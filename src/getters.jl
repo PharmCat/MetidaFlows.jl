@@ -28,7 +28,7 @@ end
 Return node unique identifier.
 """
 function getid(node::AbstractDataNode)
-    node.properties.id
+    return node.properties.id
 end
 """
     getposition(node::AbstractDataNode) -> Tuple{Int,Int}
@@ -36,7 +36,7 @@ end
 Return node UI/graph position.
 """
 function getposition(node::AbstractDataNode)
-    node.properties.position
+    return node.properties.position
 end
 """
     getstatus(node::AbstractDataNode) -> Symbol
@@ -54,17 +54,38 @@ Possible values:
 - `:invalid_result`
 """
 function getstatus(node::AbstractDataNode)
-    node.properties.status
+    return node.properties.status
+end
+
+"""
+    getstatus(model::Workflow, id::Int)
+
+Return execution status of node.
+"""
+function getstatus(model::Workflow, id::Int)
+    return getstatus(getnode(model, id))
 end
 
 
 """
     getstate(node::AbstractDataNode, s::Symbol)
 
+    getstate(model::Workflow, id::Int, s::Symbol)
+
 Get value from node execution state.
 """
 function getstate(node::AbstractDataNode, s::Symbol)
-    node.state[s]
+    return node.state[s]
+end
+function getstate(model::Workflow, id::Int, s::Symbol)
+    return getstate(getnode(model, id), s)
+end
+
+"""
+    getexecn(model::Workflow, id::Int)
+"""
+function getexecn(model::Workflow, id::Int)
+    return getnode(model, id).state.exec_n
 end
 
 

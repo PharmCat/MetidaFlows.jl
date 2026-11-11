@@ -554,17 +554,42 @@ end
     #  экспорта, то есть осознанно: упавший тест здесь означает не ошибку,
     #  а незадокументированное изменение публичной поверхности.
     EXPORTED = [
-        :AbstractNodeType, :DataNode, :ExecuteSettings, :NodeConnection,
-        :NodeSpec, :PortSpec, :Workflow,
-        :add_connection!, :add_node!, :check_failed_nodes,
-        :delete_connection!, :delete_node!, :execute!, :failed_nodes,
-        :getdata, :getinputconnections, :getinputdata, :getinputmeta,
-        :getmeta, :getstatus,
-        :isnodeexist, :isportexist, :scheduler!, :setdata!, :setsettings!,
+        :AbstractNodeType,
+        :Workflow,
+        :NodeSpec,
+        :PortSpec,
+        :DataNode,
+        :NodeConnection,
+        :ExecuteSettings,
+        :MultiPort,
+        # Building and editing a graph
+        :add_node!,
+        :delete_node!,
+        :add_connection!,
+        :delete_connection!,
+        :setsettings!,
+        :isnodeexist,
+        :isportexist,
+        # Execution
+        :scheduler!,
+        :execute!,
+        # Reading and writing a node
+        :getnode,
+        :getdata,
+        :getinputdata,
+        :getinputconnections,
+        :setdata!,
+        :getstatus,
+        # Port metadata
+        :getmeta,
+        :getinputmeta,
+        # Diagnostics
+        :failed_nodes,
+        :check_failed_nodes
     ]
     actual = filter(n -> n !== :MetidaFlows, names(MetidaFlows))
     @test sort(actual) == sort(EXPORTED)
-    @test length(actual) == 25
+    @test length(actual) == 27
     @test allunique(actual)
     #  Каждое экспортируемое имя определено и документировано: `api.md`
     #  идёт через @autodocs, а он берёт имена из словаря докстрингов
