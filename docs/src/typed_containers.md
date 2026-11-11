@@ -170,15 +170,81 @@ scheduler!(w2)
  result      = getdata(w2, s, :out))
 ```
 
+## The input buffer
+
+The buffer has three levels - the mapping from port label to that port's
+buffer, the per-port container keyed by connection id, and the value - and
+[`nodebuffer`](@ref) chooses all three, because `BufferT` is the type of the
+whole container.
+
+The outer level can be a struct with **one field per declared input port**,
+named after the port:
+
+```@example typed
+mutable struct CellBuffer <: MetidaFlows.AbstractNodeInputBuffer
+    diag::Dict{Int, Int}
+    up::Dict{Int, Int}
+    CellBuffer() = new(Dict{Int, Int}(), Dict{Int, Int}())
+end
+
+spec_cell = NodeSpec("Cell",
+    [PortSpec("Diag", Int, :diag), PortSpec("Up", Int, :up)],
+    [PortSpec("Cost", Int, :cost)])
+
+struct Cell <: AbstractNodeType end
+MetidaFlows.nodebuffer(::Type{Cell}) = CellBuffer()
+
+node = DataNode(Cell, spec_cell)
+typeof(node.input_buffer)
+```
+
+Reading `buffer[:diag]` off that struct is a field access where a `Dict` hashes
+a `Symbol`, and the per-port containers are concretely typed, so nothing the
+engine reads out of them is boxed.
+
+[`initbuffer!`](@ref) checks the struct against the spec when the node is
+built, and the check is strict in both directions, because a field cannot be
+added afterwards:
+
+```@example typed
+bad = try
+    DataNode(Cell, NodeSpec("Other", [PortSpec("Left", Int, :left)],
+                                     [PortSpec("Cost", Int, :cost)]))
+catch e
+    sprint(showerror, e)
+end
+println(bad)
+```
+
+The per-connection level stays an associative container: connection ids are
+handed out while the graph is built, so no struct can have a field per
+connection.
+
+### Teaching a container its own order
+
+[`getinputdata`](@ref) on a [`MultiPort`](@ref) returns the values ordered by
+ascending connection id. A `Dict` does not keep that order, so the default
+[`buffervalues`](@ref) collects the keys, sorts them and indexes - two
+allocations and a sort on every call. A container that keeps its keys sorted
+already knows the answer, and says so in two methods:
+
+```julia
+MetidaFlows.bufferkeys(b::SortedBuffer)   = copy(b.cids)
+MetidaFlows.buffervalues(b::SortedBuffer) = copy(b.vals)
+```
+
+Both must return a **fresh** vector: the node may sort, consume or empty what
+it is handed, and must not reach the buffer through it.
+
+Measured on a `MultiPort` summing node, against the same node backed by a
+`Dict`: at 2 inputs the accessor drops from 160 to 80 bytes and from 78 to
+41 ns; at 1000 inputs from 24536 to 8072 bytes and from 11.9 µs to 0.73 µs. Per
+node execution over a whole graph that is 10 to 17 percent fewer bytes. The
+`test/test_typed.jl` group `Y7` carries a complete worked container.
+
 ## What is not typeable yet
 
-The **input buffer's container** is fixed. The field is declared
-`Dict{Symbol, Dict{Int, BufferT}}`, so only the value type `BufferT` is a
-parameter, and that is what [`nodebuffer`](@ref) chooses. A struct subtyping
-[`AbstractNodeInputBuffer`](@ref) cannot be passed to a node today; allowing it
-means changing the `DataNode` struct.
-
-Two more things worth knowing before building on this:
+Two things worth knowing before building on this:
 
 * **state is typeable but not fully supported.** `nodestate` accepts any
   subtype of [`AbstractNodeState`](@ref), but [`request_stop!`](@ref) needs a

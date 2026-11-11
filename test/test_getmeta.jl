@@ -206,18 +206,21 @@ end
     @test im2[:input2] === nothing
     @test getmeta(w2, j2, :out) === nothing
 
-    # MultiPort: словарь по id связей, как во входном буфере.
+    # MultiPort: вектор описаний в порядке подключения, тем же правилом,
+    # что и значения в getinputdata.
     w3 = Workflow(0)
     m3 = add_node!(w3, DataNode(MetaJoin, spec_metamulti()))
-    @test getinputmeta(w3, m3) == Dict{Symbol, Any}(:items => Dict{Int, Any}())
+    @test getinputmeta(w3, m3) == Dict{Symbol, Any}(:items => Any[])
     p1 = add_node!(w3, DataNode(MetaSource, spec_metasource()))
     p2 = add_node!(w3, DataNode(MetaSource, spec_metasource()))
     c1 = add_connection!(w3, p1, :out, m3, :items)
     c2 = add_connection!(w3, p2, :out, m3, :items)
     im3 = getinputmeta(w3, m3)[:items]
+    @test im3 isa Vector
     @test length(im3) == 2
-    @test im3[c1] == (columns = [:a, :b],)
-    @test im3[c2] == (columns = [:a, :b],)
+    @test im3[1] == (columns = [:a, :b],)          # c1 подключили первым
+    @test im3[2] == (columns = [:a, :b],)
+    @test c1 < c2                                  # позиция = порядок связей
 end
 
 # --------------------------------------------------------------------------

@@ -13,7 +13,8 @@ uses:
 
 - [`SinglePort`](@ref): the description, or `nothing` when the port is
   unconnected or the producer does not know;
-- [`MultiPort`](@ref): a `Dict{connection id, description}`.
+- [`MultiPort`](@ref): a `Vector` of descriptions, ordered by ascending
+  connection id, matching [`getinputdata`](@ref).
 
 The default implementation returns `nothing`, meaning "unknown". The shape of
 a description is a contract between nodes sharing a port datatype, not
@@ -54,7 +55,12 @@ Keys are the **input port labels of node `id`** — taken from the connections,
 so a producer never needs to know which port of which consumer it feeds. Every
 `:normal` input port is present in the result: an unconnected
 [`SinglePort`](@ref) maps to `nothing`, an unconnected [`MultiPort`](@ref) to
-an empty `Dict`.
+an empty `Vector`.
+
+A [`MultiPort`](@ref) maps to a `Vector` of its producers' descriptions, ordered
+by ascending connection id - the same order in which [`getinputdata`](@ref)
+returns that port's values, so a metadata rule can be written to match the node
+body position for position.
 
 Ports of kind `:feedback` and `:error` are skipped: a feedback edge closes a
 cycle, and following it would not terminate.
@@ -88,10 +94,21 @@ function getinputmeta(model::Workflow, id::Int;
         ps.kind == :normal || continue                                                 # отсекаем не normal 
         m  = getmeta(model, c.output_id, c.output_port; visited = visited, done = done, maxdepth = maxdepth)  # Получаем данные от РОДИТЕЛЯ
         if ismultiport(ps)
-            inmeta[c.input_port][cid] = m                                               # ключ - id связи, как во входном буфере
+            inmeta[c.input_port][cid] = m                                               # собираем по номеру связи...
         else
             inmeta[c.input_port] = m
         end
+    end
+
+    #  ...а отдаём вектором по возрастанию номера связи — тем же правилом
+    #  порядка, что и `getinputdata`. Иначе описания пришли бы в порядке
+    #  обхода `Dict`, а значения — в порядке подключения, и правило
+    #  метаданных нельзя было бы написать согласованно с телом узла.
+    for ps in node.spec.input_ports
+        ps.kind == :normal || continue
+        ismultiport(ps) || continue
+        d = inmeta[ps.label]
+        inmeta[ps.label] = Any[d[c] for c in sort!(collect(keys(d)))]
     end
     return inmeta
 end

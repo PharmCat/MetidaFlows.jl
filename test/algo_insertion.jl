@@ -233,8 +233,9 @@ end
 Граф сортировки вставками: вложенные циклы, развёрнутые в один плоский
 цикл по паттерну эпохи. Возвращает workflow и идентификаторы узлов.
 """
-function build_insertion_sort(values::Vector{Int})
-    w      = Workflow(0; type = :ABW)
+function build_insertion_sort(values::Vector{Int}; type::Symbol = :ABW,
+                              reverse_connections::Bool = false)
+    w      = Workflow(0; type = type)
     w.name = "Insertion sort"
 
     a0    = add_node!(w, DataNode(InsConstArray, spec_insconstarray()))
@@ -264,59 +265,68 @@ function build_insertion_sort(values::Vector{Int})
     setsettings!(w, one,  Dict(:value  => 1))
     setsettings!(w, zero, Dict(:value  => 0))
 
-    #  Начальное состояние
-    add_connection!(w, a0,   :array, head, :init_array)
-    add_connection!(w, two,  :out,   head, :init_i)
-    add_connection!(w, one,  :out,   head, :init_j)
-    add_connection!(w, zero, :out,   head, :init_epochs)
+    #  Связи перечислены списком, а не вызовами: порядок их создания —
+    #  предмет теста I7, и обратный порядок должен получаться тем же
+    #  построителем, через add_connection!. Прямой записи в
+    #  w.connections здесь быть не должно: версия графа не поднимется.
+    cons = [
+        #  Начальное состояние
+        (a0,   :array, head, :init_array),
+        (two,  :out,   head, :init_i),
+        (one,  :out,   head, :init_j),
+        (zero, :out,   head, :init_epochs),
 
-    #  Длина считается один раз по исходному массиву: обмены её не меняют
-    add_connection!(w, a0,   :array, len,  :array)
+        #  Длина считается один раз по исходному массиву: обмены её не меняют
+        (a0,   :array, len,  :array),
 
-    #  Условие внешнего цикла
-    add_connection!(w, head, :i,     done, :a)
-    add_connection!(w, len,  :length, done, :b)
+        #  Условие внешнего цикла
+        (head, :i,     done, :a),
+        (len,  :length, done, :b),
 
-    #  Условие внутреннего цикла: j >= 1 и a[j] > a[j+1]
-    add_connection!(w, head, :j,     alive, :a)
-    add_connection!(w, one,  :out,   alive, :b)
-    add_connection!(w, head, :j,     jnext, :a)
-    add_connection!(w, one,  :out,   jnext, :b)
-    add_connection!(w, head, :array, left,  :array)
-    add_connection!(w, head, :j,     left,  :index)
-    add_connection!(w, head, :array, right, :array)
-    add_connection!(w, jnext, :out,  right, :index)
-    add_connection!(w, left,  :out,  gt,    :a)
-    add_connection!(w, right, :out,  gt,    :b)
-    add_connection!(w, alive, :out,  step,  :a)
-    add_connection!(w, gt,    :out,  step,  :b)
+        #  Условие внутреннего цикла: j >= 1 и a[j] > a[j+1]
+        (head, :j,     alive, :a),
+        (one,  :out,   alive, :b),
+        (head, :j,     jnext, :a),
+        (one,  :out,   jnext, :b),
+        (head, :array, left,  :array),
+        (head, :j,     left,  :index),
+        (head, :array, right, :array),
+        (jnext, :out,  right, :index),
+        (left,  :out,  gt,    :a),
+        (right, :out,  gt,    :b),
+        (alive, :out,  step,  :a),
+        (gt,    :out,  step,  :b),
 
-    #  Кандидаты обеих ветвей считаются каждый виток
-    add_connection!(w, head, :array,  swap,  :array)
-    add_connection!(w, head, :j,      swap,  :index)
-    add_connection!(w, head, :i,      inext, :a)
-    add_connection!(w, one,  :out,    inext, :b)
-    add_connection!(w, head, :j,      jdec,  :a)
-    add_connection!(w, one,  :out,    jdec,  :b)
-    add_connection!(w, head, :epochs, enext, :a)
-    add_connection!(w, one,  :out,    enext, :b)
+        #  Кандидаты обеих ветвей считаются каждый виток
+        (head, :array,  swap,  :array),
+        (head, :j,      swap,  :index),
+        (head, :i,      inext, :a),
+        (one,  :out,    inext, :b),
+        (head, :j,      jdec,  :a),
+        (one,  :out,    jdec,  :b),
+        (head, :epochs, enext, :a),
+        (one,  :out,    enext, :b),
 
-    #  Ворота
-    add_connection!(w, done,  :out,    gate, :done)
-    add_connection!(w, step,  :out,    gate, :step)
-    add_connection!(w, head,  :array,  gate, :array)
-    add_connection!(w, swap,  :out,    gate, :array_swap)
-    add_connection!(w, head,  :i,      gate, :i)
-    add_connection!(w, inext, :out,    gate, :i_next)
-    add_connection!(w, jdec,  :out,    gate, :j_dec)
-    add_connection!(w, head,  :epochs, gate, :epochs)
-    add_connection!(w, enext, :out,    gate, :epochs_next)
+        #  Ворота
+        (done,  :out,    gate, :done),
+        (step,  :out,    gate, :step),
+        (head,  :array,  gate, :array),
+        (swap,  :out,    gate, :array_swap),
+        (head,  :i,      gate, :i),
+        (inext, :out,    gate, :i_next),
+        (jdec,  :out,    gate, :j_dec),
+        (head,  :epochs, gate, :epochs),
+        (enext, :out,    gate, :epochs_next),
 
-    #  Замыкание цикла
-    add_connection!(w, gate, :array,  head, :array)
-    add_connection!(w, gate, :i,      head, :i)
-    add_connection!(w, gate, :j,      head, :j)
-    add_connection!(w, gate, :epochs, head, :epochs)
+        #  Замыкание цикла
+        (gate, :array,  head, :array),
+        (gate, :i,      head, :i),
+        (gate, :j,      head, :j),
+        (gate, :epochs, head, :epochs),
+    ]
+    for c in (reverse_connections ? Iterators.reverse(cons) : cons)
+        add_connection!(w, c...)
+    end
 
     return (w = w, a0 = a0, two = two, one = one, zero = zero, len = len,
             head = head, done = done, alive = alive, jnext = jnext,
@@ -476,14 +486,12 @@ end
     @test Set(p.label for p in gspec.output_ports if p.kind == :terminal) ==
           Set([:sorted, :total_epochs])
 
-    #  граф циклический, и DAW его не берёт
-    gd = build_insertion_sort([3, 1, 2])
-    wd = Workflow(0; type = :DAW)
-    for (id, node) in gd.w.nodes; wd.nodes[id] = node; end
-    for (id, con) in gd.w.connections; wd.connections[id] = con; end
-    MetidaFlows.refreshind!(wd)
-    wd.n_iter = gd.w.n_iter; wd.c_iter = gd.w.c_iter
-    @test_throws ErrorException scheduler!(wd)
+    #  граф циклический, и DAW его не берёт. Та же структура собирается тем
+    #  же построителем под :DAW — копировать словари узлов и связей в новую
+    #  модель нельзя: прямая запись не поднимает версию графа, и кеш
+    #  остаётся от пустой модели (пустой граф, is_cyclic = false).
+    gd = build_insertion_sort([3, 1, 2]; type = :DAW)
+    @test_throws ErrorException scheduler!(gd.w)
 
     #  длина берётся от источника, а не от головы: обмены её не меняют
     @test getconnection(g.w, first(c for (c, con) in g.w.connections
@@ -622,25 +630,17 @@ end
     ref = graph_insertion(copy(v))
     reftrace = copy(INS_TRACE)
 
-    g = build_insertion_sort(copy(v))
-    #  пересобрать связи в обратном порядке: id растут, но порядок
-    #  вставки другой
-    cons = sort(collect(g.w.connections); by = first)
-    w2   = Workflow(0; type = :ABW)
-    for (id, node) in sort(collect(g.w.nodes); by = first)
-        w2.nodes[id] = node
-        MetidaFlows.mark_dirty!(node)
-        node.state.exec_n = 0
-    end
-    w2.n_iter = g.w.n_iter
-    for (_, c) in reverse(cons)
-        add_connection!(w2, c.output_id, c.output_port, c.input_id, c.input_port)
-    end
-    @test length(w2.connections) == 40
+    #  Тот же граф, но связи создаются в обратном порядке: номера связей
+    #  растут так же, а порядок вставки другой. Собирается тем же
+    #  построителем, через add_connection!: переносить узлы записью в
+    #  w2.nodes нельзя — версия графа не поднимется, и обе модели будут
+    #  держать одни и те же объекты узлов.
+    g2 = build_insertion_sort(copy(v); reverse_connections = true)
+    @test length(g2.w.connections) == 40
 
     resetins!()
-    scheduler!(w2; maxiter = 100_000)
-    @test getdata(w2, g.gate, :sorted) == sort(v)
+    scheduler!(g2.w; maxiter = 100_000)
+    @test getdata(g2.w, g2.gate, :sorted) == sort(v)
     @test INS_TRACE == reftrace
 end
 

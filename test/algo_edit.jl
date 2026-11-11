@@ -470,10 +470,10 @@ end
 end
 
 # --------------------------------------------------------------------------
-@testset "E9. MultiPort: тот же минимум, направление нет   " begin
-    #  Собираем клетку на MultiPort и сравниваем. Минимум тот же, но
-    #  getinputdata отдаёт Dict с НОМЕРАМИ СВЯЗЕЙ, поэтому сказать,
-    #  какое направление выиграло, узел не может.
+@testset "E9. MultiPort: минимум и направление по позиции  " begin
+    #  Собираем клетку на MultiPort и сравниваем. Минимум тот же, а
+    #  направление теперь выводится: getinputdata отдаёт значения в порядке
+    #  подключения, то есть позиция и есть «диагональ / верх / слева».
     w  = Workflow(0; type = :DAW)
     s1 = add_node!(w, DataNode(EdConst, spec_edconst()))
     s2 = add_node!(w, DataNode(EdConst, spec_edconst()))
@@ -489,13 +489,22 @@ end
     scheduler!(w)
     @test getdata(w, mc, :cost) === 3
 
-    #  вот что узел видит на входе: словарь, ключи — номера связей
+    #  вот что узел видит на входе: значения в порядке подключения
     opts = getinputdata(getnode(w, mc), :options)
-    @test opts isa AbstractDict
-    @test Set(keys(opts)) == Set([c1, c2, c3])
-    @test Set(values(opts)) == Set([5, 3, 4])
-    #  узел не знает, что c2 это «диагональ»: порядок связей — внешнее
-    #  знание, которого у него нет
+    @test opts isa Vector
+    @test opts == [5, 3, 4]                       # s1, s2, s3 — как подключали
+    @test getinputconnections(getnode(w, mc), :options) == [c1, c2, c3]
+
+    #  Направление теперь выводимо: позиция в векторе — это и есть порядок,
+    #  в котором автор графа подключил diag/up/left. Раньше здесь стоял
+    #  обратный тест: сказать было нечем.
+    names = (:diag, :up, :left)
+    @test names[argmin(opts)] === :up             # 3 — это s2, второй вход
+    @test getdata(w, mc, :cost) == minimum(opts)
+
+    #  и номера связей доступны узлу без модели, если нужна не позиция, а
+    #  именно связь
+    @test length(getinputconnections(getnode(w, mc), :options)) == 3
     @test getportspec(getnode(w, mc), :options, :input).label === :options
     @test length(getnode(w, mc).spec.input_ports) == 1
 

@@ -25,85 +25,41 @@ import NamedGraphs.Graphs: topological_sort
 
 import Base: show, keys, getindex, setindex!, empty!
 
-export AbstractNodeType, 
+export
+# Types
+AbstractNodeType,
+Workflow,
 NodeSpec,
 PortSpec,
-DataNode, 
-NodeConnection, 
-Workflow,
-ExecuteSettings, 
+DataNode,
+NodeConnection,
+ExecuteSettings,
+MultiPort,
+# Building and editing a graph
 add_node!,
 delete_node!,
-add_connection!, 
+add_connection!,
 delete_connection!,
 setsettings!,
-setdata!,
-scheduler!,
-execute!,
-getstatus,
-getdata,
-getinputdata,
-getmeta,
-getinputmeta,
 isnodeexist,
 isportexist,
+# Execution
+scheduler!,
+execute!,
+# Reading and writing a node
+getnode,
+getdata,
+getinputdata,
+getinputconnections,
+setdata!,
+getstatus,
+# Port metadata
+getmeta,
+getinputmeta,
+# Diagnostics
 failed_nodes,
 check_failed_nodes
-#=
-# In publick API, but not exported:
-# Execution:
 
-execute_unsafe!,
-request_stop!,
-isstoprequested,
-failed_nodes,
-check_failed_nodes,
-validate_node,
-validate_settings, 
-validate_result,
-
-# Serialization and schemas:
-
-workflow_to_dict,
-node_to_dict, 
-node_properties_to_dict,
-spec_to_dict, 
-portspec_to_dict,
-connection_to_dict,
-settings_to_dict,
-node_state_to_dict,
-value_to_dict,
-
-dict_to_workflow,
-dict_to_node,
-dict_to_connection,
-dict_to_properties,
-dict_to_spec,
-dict_to_settings!,
-dict_to_node_state!,
-dict_to_value,
-
-settings_to_dict_usermod!,
-dict_to_settings_usermod!,
-
-# Node register:
-
-NODE_REGISTER,
-register_node!,
-unregister_node!,
-unregister_all!,
-isregistered,
-getregnodeinfo,
-nodetypestr,
-
-settings_schema,
-node_schema,
-
-ismetasource,
-getmeta_unsafe,
-MetaRuleError,
-=#
-#
 """
     AbstractDataNode
  
@@ -132,16 +88,129 @@ abstract type AbstractNodeType end
 """
     AbstractAuditEvent
 
-Supertype of audit records in `Workflow.audit_log`.
+Supertype of the records in `Workflow.audit_log`: a **change log of the graph**
+in the order the edits happened.
 
-!!! warning "Reserved, with no implementation"
-    The package defines no concrete subtype and writes nothing to
-    `audit_log`: the field exists and stays empty for the lifetime of a
-    workflow. Whether it becomes a real change log of a graph - nodes and
-    connections added, settings changed - or is removed is an open question
-    for the next breaking release. Do not build on it yet.
+Five concrete events, one per model-level mutator:
+[`NodeAdded`](@ref), [`NodeDeleted`](@ref), [`ConnectionAdded`](@ref),
+[`ConnectionDeleted`](@ref) and [`SettingsChanged`](@ref).
+
+That set is the mutators that take a [`Workflow`](@ref), which is also the
+boundary of what the log can see: [`setid!`](@ref) and [`setposition!`](@ref)
+are given a node and no model, so moving a node in an editor is not an edit
+this log records.
+
+# What it is not
+- **Not an undo stack.** [`SettingsChanged`](@ref) records which setting keys
+  changed, not their values before and after: the log would otherwise carry a
+  second copy of every value a user ever typed, into every snapshot.
+- **Not a trace of execution.** Running a graph is not an edit. The per-run
+  log of a node is [`NodeState`](@ref)`.log`, and the workflow's is
+  `Workflow.log` ([`LogMsg`](@ref)).
+- **Not timestamped.** The vector's order *is* the sequence, and it is the same
+  on every machine; a wall clock would only add something that is not
+  reproducible.
+
+Recording is **off by default** - see [`Workflow`](@ref) and the `audit`
+keyword - and when it is on, **nothing is ever dropped**: the log is neither
+capped nor truncated by the engine. A change log with holes in it answers "did
+this happen?" with a maybe, which is worse than having none, so the switch is
+all or nothing. Trimming it, if a long editing session needs that, is the
+caller's business. Cascades fall out of the mutators: [`delete_node!`](@ref) deletes the
+node's connections through [`delete_connection!`](@ref), so the log shows each
+[`ConnectionDeleted`](@ref) and then the [`NodeDeleted`](@ref).
+
+!!! compat "Implemented in 0.3.0"
+    Until 0.3.0 this type had no concrete subtype and nothing was ever written
+    to `audit_log`.
 """
 abstract type AbstractAuditEvent end
+
+"""
+    NodeAdded(id, type) <: AbstractAuditEvent
+
+A node with id `id` was added by [`add_node!`](@ref).
+
+`type` is the node type's **registry name** as [`nodetypestr`](@ref) renders it,
+a `String` and not a `Type`: an audit record travels into snapshot files, and
+nothing read out of a file is ever resolved to a type.
+"""
+struct NodeAdded <: AbstractAuditEvent
+    id::Int
+    type::String
+end
+
+"""
+    NodeDeleted(id) <: AbstractAuditEvent
+
+The node with id `id` was removed by [`delete_node!`](@ref). Its connections are
+removed first, each as a [`ConnectionDeleted`](@ref) ahead of this record.
+"""
+struct NodeDeleted <: AbstractAuditEvent
+    id::Int
+end
+
+"""
+    ConnectionAdded(id, output_id, output_port, input_id, input_port) <: AbstractAuditEvent
+
+A connection with id `id` was added by [`add_connection!`](@ref), from
+`output_port` of node `output_id` to `input_port` of node `input_id`.
+
+The ports are carried because the connection itself is gone from the model by
+the time a deletion is read back, and a log that could not say what was
+connected would not describe the graph it logged.
+"""
+struct ConnectionAdded <: AbstractAuditEvent
+    id::Int
+    output_id::Int
+    output_port::Symbol
+    input_id::Int
+    input_port::Symbol
+end
+
+"""
+    ConnectionDeleted(id) <: AbstractAuditEvent
+
+The connection with id `id` was removed by [`delete_connection!`](@ref), or by
+[`delete_node!`](@ref) removing one of its endpoints. Connection ids are never
+reused, so the matching [`ConnectionAdded`](@ref) earlier in the log says what
+it was.
+"""
+struct ConnectionDeleted <: AbstractAuditEvent
+    id::Int
+end
+
+"""
+    SettingsChanged(id, keys) <: AbstractAuditEvent
+
+Settings of node `id` were written by [`setsettings!`](@ref). `keys` are the
+setting names that were passed, in sorted order - values are deliberately not
+recorded, see [`AbstractAuditEvent`](@ref).
+
+Sorted rather than as given: the caller passes a `Dict`, whose iteration order
+is not the insertion order, so recording them as they came would make the log
+differ between machines on identical edits.
+"""
+struct SettingsChanged <: AbstractAuditEvent
+    id::Int
+    keys::Vector{Symbol}
+end
+
+#  Структурное равенство на всё семейство. Умолчание Julia для неизменяемой
+#  структуры сводится к `===`, а `NodeAdded` несёт `String`, а
+#  `SettingsChanged` — `Vector`: два объекта с одинаковым содержимым дают
+#  `false`. Для журнала это дефект, а не придирка — равенство нужно, чтобы
+#  сравнить журнал до и после круга через снимок. `hash` обязателен вместе с
+#  `==`, иначе события нельзя положить в `Set` или ключ `Dict`.
+function Base.:(==)(a::AbstractAuditEvent, b::AbstractAuditEvent)
+    typeof(a) === typeof(b) || return false
+    return all(f -> getfield(a, f) == getfield(b, f), fieldnames(typeof(a)))
+end
+function Base.hash(e::AbstractAuditEvent, h::UInt)
+    h = hash(typeof(e), h)
+    for f in fieldnames(typeof(e)); h = hash(getfield(e, f), h); end
+    return h
+end
 #
 """
     WorkFlowType
@@ -287,15 +356,35 @@ abstract type AbstractNodeState  <: AbstractNodeFields end
 """
     AbstractNodeInputBuffer <: AbstractNodeFields
 
-Supertype reserved for an input-buffer container.
+Supertype for an input-buffer container: the outer mapping from input port
+label to that port's buffer. Choose one per node type with
+[`nodebuffer`](@ref).
 
-!!! warning "Not reachable yet"
-    `DataNode.input_buffer` is declared as
-    `Dict{Symbol, Dict{Int, BufferT}}`, so the *container* is fixed and only
-    the **value type** `BufferT` is a type parameter - see
-    [`nodebuffer`](@ref), which is where that type is chosen. A subtype of this
-    type cannot be passed to a node, and making it possible means changing the
-    `DataNode` struct.
+A subtype needs one **field per declared input port**, named after the port and
+holding a container keyed by connection id - [`initbuffer!`](@ref) checks that
+on construction, because fields cannot be added later. The per-connection level
+stays an associative container: connection ids are handed out at runtime, so no
+struct can have a field per connection.
+
+```julia
+mutable struct CellBuffer <: MetidaFlows.AbstractNodeInputBuffer
+    diag::PortBuffer{Int}
+    up::PortBuffer{Int}
+    left::PortBuffer{Int}
+    CellBuffer() = new(PortBuffer{Int}(), PortBuffer{Int}(), PortBuffer{Int}())
+end
+MetidaFlows.nodebuffer(::Type{Cell}) = CellBuffer()
+```
+
+Getting `buffer[:diag]` off such a struct is a field access, where a `Dict`
+hashes a `Symbol`; the per-port containers are concretely typed, so what the
+engine reads out of them needs no boxing.
+
+!!! compat "Reachable since 0.3.0"
+    Until 0.3.0 the `input_buffer` field was declared
+    `Dict{Symbol, Dict{Int, BufferT}}`, which fixed the container and left only
+    the value type free, so a subtype of this type could not be passed to a
+    node at all.
 """
 abstract type AbstractNodeInputBuffer  <: AbstractNodeFields end
 
@@ -324,6 +413,7 @@ function Base.empty!(obj::T) where T <: AbstractNodeFields
     end
     return obj
 end
+
 
 """
     ExecuteSettings(; execute_upstream = true, invalidate_downstream = true,
@@ -362,6 +452,90 @@ end
 # Minimal fields for NodeState
 # Dict compatible struct and minimal methods
 """
+    SETTINGS
+
+Package-wide settings, in one mutable table. The engine reads three keys from
+it; anything else you put there is yours.
+
+```julia
+MetidaFlows.SETTINGS[:audit]     = true    # вести журнал правок графа
+MetidaFlows.SETTINGS[:logging]   = false   # не писать сообщения движка
+MetidaFlows.SETTINGS[:log_limit] = 200     # и держать не больше 200
+MetidaFlows.SETTINGS[:my_thing]  = "..."   # своё — читайте через `get`
+```
+
+| key | type | default | what it controls |
+|:---|:---|:---|:---|
+| `:logging` | `Bool` | `true` | whether [`log!`](@ref) records anything |
+| `:audit` | `Bool` | `false` | whether [`audit!`](@ref) records anything |
+| `:log_limit` | `Int` | `1000` | how many messages a log keeps; `0` means no limit |
+
+A value of the wrong type, or one of these three keys deleted, raises an error
+naming the key rather than failing somewhere inside a run.
+
+# The eviction policy, in one place
+A log at its limit **drops its oldest record** to make room for the newest, so
+what a log holds is the most recent `:log_limit` messages. A log whose length
+equals the limit is therefore *possibly truncated*, and that is the only signal
+there is - the count of what was dropped is not kept. When the whole history
+matters, raise the limit or set it to `0`; when nothing should be recorded at
+all, set `:logging` to `false`.
+
+`:log_limit` bounds both logs that hold [`LogMsg`](@ref): `Workflow.log` and a
+node's own `node.state[:log]`. It does **not** apply to the graph change log:
+`audit_log` is never capped and never evicts, because a record of an edit that
+may or may not be there cannot be used to tell what the graph went through.
+See [`AbstractAuditEvent`](@ref).
+
+!!! note "These are process-wide"
+    One table for every workflow in the process. Two graphs open at once cannot
+    differ, and code that changes a setting has to put it back - a test that
+    needs the audit log on, above all, or it changes what every later test
+    sees.
+"""
+const SETTINGS = Dict{Symbol, Any}(
+    :logging   => true,
+    :audit     => false,
+    :log_limit => 1000,
+)
+
+#  Чтение настройки движка: ключ обязан быть и быть нужного типа. Проверка
+#  здесь, а не на месте использования, чтобы ошибка называла ключ, а не
+#  вываливалась TypeError из середины прогона.
+function _setting(key::Symbol, ::Type{T}) where T
+    haskey(SETTINGS, key) ||
+        error("MetidaFlows.SETTINGS has no `:$(key)`: it is one of the engine's own " *
+              "settings and should not be removed from the table")
+    v = SETTINGS[key]
+    v isa T ||
+        error("MetidaFlows.SETTINGS[:$(key)] should be a $(T), got $(typeof(v)): $(repr(v))")
+    return v::T
+end
+
+#  Общая реализация политики для обоих логов. `limit <= 0` — без предела.
+#
+#  Снимаем с головы ДО записи, а не подрезаем после: в установившемся режиме
+#  это ровно один `popfirst!`, который у `Vector` амортизированно O(1) —
+#  массив держит смещение с головы и хвост не двигает, — и массив при этом
+#  не растёт. Замерено на пределе 1000: 5,7 нс против 8,0 нс на сообщение у
+#  варианта «push! и подрезать после», и одинаково на пределах 100 и 10000.
+#
+#  Массовый срез нужен для другого случая: предел ПОНИЗИЛИ на живом логе. По
+#  одному сообщению за запись он сходился бы к новому пределу сотни записей.
+function _logpush!(v::Vector{LogMsg}, msg::LogMsg, limit::Int)
+    if limit > 0
+        extra = length(v) - limit + 1          # сколько снять, чтобы после push! было ровно limit
+        if extra == 1
+            popfirst!(v)
+        elseif extra > 1
+            deleteat!(v, 1:extra)
+        end
+    end
+    push!(v, msg)
+    return v
+end
+
+"""
     NodeState()
  
 Per-node execution state with dict-like field access:
@@ -379,7 +553,10 @@ Per-node execution state with dict-like field access:
   number;
 - `ready_ports::Vector{Symbol}` - output ports produced by the last successful execution (used by [`push_buffer!`](@ref));
 - `execution_id::UInt64` - id of the run that last touched the node;
-- `log::Vector{LogMsg}` - per-run node log (cleared at the start of a run).
+- `log::Vector{LogMsg}` - the node's own log, written by the node through
+  [`log!`](@ref) and by nothing in the engine; cleared by `empty!(state)` and
+  `reset!(node)`, **not** by `reset!(model)`;
+  bounded by [`SETTINGS`](@ref)`[:log_limit]`, oldest dropped first.
  
 Reset in place with `empty!(state)`.
 """
@@ -416,7 +593,8 @@ abstract type AbstractPortType end
     MultiPort
 
 Port type that accepts any number of connections;
-[`getinputdata`](@ref) returns the whole buffer `Dict(connection_id => value)`.
+[`getinputdata`](@ref) returns the buffered values as a `Vector`, ordered by
+ascending connection id; [`getinputconnections`](@ref) gives the matching ids.
 """
 struct MultiPort <: AbstractPortType end
 """
@@ -534,6 +712,165 @@ struct NodeSpec
     end
 end
 
+"""
+    PortBuffer{V}() <: AbstractDict{Int, V}
+
+The container the engine puts under one input port by default: values keyed by
+connection id, **kept in ascending key order**.
+
+That order is the contract [`getinputdata`](@ref) publishes for a
+[`MultiPort`](@ref), so a container that already holds its keys sorted answers
+with a copy instead of collecting, sorting and hashing - see
+[`buffervalues`](@ref). Two parallel vectors, binary search to place a write.
+
+# Why sorted and not insertion-ordered
+An insertion-ordered container (`OrderedDict` and friends) would record the
+order in which producers **finished**, which is scheduling order and not wiring
+order. Measured on three branches of different length feeding one port, wired
+as connections `[5, 8, 9]`: the short branch publishes first, so insertion order
+is `[9, 8, 5]` and the values come out reversed. Worse, overwriting a key does
+not move it, so a second run inherits whatever the first run's schedule
+happened to be. Sorting by key is independent of when anything ran.
+
+# Cost against a `Dict`
+Measured per read, with `V = Any`:
+
+| | `Dict{Int, Any}` | `PortBuffer{Any}` |
+|:---|---:|---:|
+| build + one write + one read (a `SinglePort`) | 448 B / 84 ns | **192 B / 60 ns** |
+| read 2 values in order | 208 B / 256 ns | **48 B / 18 ns** |
+| read 1000 values in order | 24 584 B / 12 850 ns | **8 040 B / 857 ns** |
+
+Writing is cheaper too at one connection per port, which is the common case,
+and the insert costs more only when a port has many connections *and* they
+arrive out of order.
+
+It is an `AbstractDict`, so code that treated a port's buffer as a dictionary -
+`buf[cid]`, `get`, `haskey`, iteration over pairs, `length`, `isempty`,
+`empty!`, `delete!` - keeps working unchanged.
+"""
+mutable struct PortBuffer{V} <: AbstractDict{Int, V}
+    cids::Vector{Int}
+    vals::Vector{V}
+    PortBuffer{V}() where V = new{V}(Int[], V[])
+end
+
+Base.length(b::PortBuffer)  = length(b.cids)
+Base.isempty(b::PortBuffer) = isempty(b.cids)
+Base.keys(b::PortBuffer)    = b.cids
+Base.values(b::PortBuffer)  = b.vals
+Base.haskey(b::PortBuffer, c::Int) = !isempty(searchsorted(b.cids, c))
+function Base.getindex(b::PortBuffer, c::Int)
+    r = searchsorted(b.cids, c)
+    isempty(r) && throw(KeyError(c))
+    return b.vals[first(r)]
+end
+function Base.get(b::PortBuffer, c::Int, default)
+    r = searchsorted(b.cids, c)
+    return isempty(r) ? default : b.vals[first(r)]
+end
+function Base.setindex!(b::PortBuffer, v, c::Int)
+    n = length(b.cids)
+    #  Самый частый случай — порт с одной связью, и вообще номер больше всех
+    #  уже лежащих: тогда ни искать, ни сдвигать нечего.
+    if n == 0 || c > @inbounds b.cids[n]
+        push!(b.cids, c); push!(b.vals, v)
+        return b
+    end
+    i = searchsortedfirst(b.cids, c)
+    if b.cids[i] == c
+        b.vals[i] = v                      # перезапись: место то же
+    else
+        insert!(b.cids, i, c)
+        insert!(b.vals, i, v)
+    end
+    return b
+end
+function Base.delete!(b::PortBuffer, c::Int)
+    r = searchsorted(b.cids, c)
+    if !isempty(r)
+        deleteat!(b.cids, first(r)); deleteat!(b.vals, first(r))
+    end
+    return b
+end
+Base.empty!(b::PortBuffer) = (empty!(b.cids); empty!(b.vals); b)
+function Base.iterate(b::PortBuffer, i::Int = 1)
+    i > length(b.cids) && return nothing
+    return (b.cids[i] => b.vals[i], i + 1)
+end
+
+"""
+    initbuffer!(buffer, spec::NodeSpec)
+
+Prepare an input buffer against the node specification, and return it.
+
+Called by the [`DataNode`](@ref) constructor. Two things have to hold afterwards:
+every entry of `buffer` names a declared `:input` port, and every declared
+`:input` port has an entry - the engine indexes `buffer[label]` without checking.
+
+How the second is achieved depends on the container, which is why this is a
+function and not a loop in the constructor:
+
+- a dictionary is **grown**: a missing port gets a fresh empty entry of the
+  dictionary's own value type, so `Dict{Symbol, PortBuffer{Any}}` keeps giving
+  `PortBuffer{Any}` and a typed `Dict{Symbol, PortBuffer{Float64}}` keeps giving
+  `PortBuffer{Float64}`;
+- a struct ([`AbstractNodeFields`](@ref)) is **checked**: fields cannot be
+  added, so a port without a field is an error naming the field to declare.
+
+Define a method for a container that is neither.
+
+# Example
+```julia
+mutable struct PairBuffer <: MetidaFlows.AbstractNodeInputBuffer
+    a::PortBuffer{Float64}
+    b::PortBuffer{Float64}
+    PairBuffer() = new(PortBuffer{Float64}(), PortBuffer{Float64}())
+end
+MetidaFlows.nodebuffer(::Type{MyNode}) = PairBuffer()
+```
+"""
+function initbuffer!(buffer::AbstractDict, spec::NodeSpec)
+    for k in keys(buffer)
+        isportinspec(k, spec, :input) ||
+            error("Input buffer key $k doesn't match any input port in node specification")
+    end
+    V = valtype(buffer)
+    for ip in spec.input_ports
+        haskey(buffer, ip.label) && continue
+        #  Нарастить словарь можно только если его тип значения — конкретный
+        #  контейнер. `Dict{Symbol, Any}` сюда проходит по типу, но создать
+        #  `Any()` нельзя, и без этой проверки ошибка была бы невнятной.
+        (isconcretetype(V) && hasmethod(V, Tuple{})) ||
+            error("Input buffer of type $(typeof(buffer)) has no entry for input port " *
+                  "`:$(ip.label)`, and its value type $(V) cannot be constructed to make one. " *
+                  "Use a buffer whose value type is a concrete container, such as " *
+                  "`Dict{Symbol, PortBuffer{Any}}`, or fill the entry in before building the node.")
+        buffer[ip.label] = V()
+    end
+    return buffer
+end
+function initbuffer!(buffer::AbstractNodeFields, spec::NodeSpec)
+    #  Оба перечня собираются и сообщаются вместе. Структура с опечаткой в
+    #  имени поля нарушает обе проверки сразу, и по одной из них не видно,
+    #  что надо переименовать: «нет поля `in`» и «поле `inp` не порт» —
+    #  одна и та же ошибка, рассказанная с двух сторон.
+    missing_fields = Symbol[ip.label for ip in spec.input_ports if !haskey(buffer, ip.label)]
+    extra_fields   = Symbol[k for k in keys(buffer) if !isportinspec(k, spec, :input)]
+    if !isempty(missing_fields) || !isempty(extra_fields)
+        msg = "Input buffer of type $(typeof(buffer)) does not match the node specification: "
+        isempty(missing_fields) ||
+            (msg *= "no field for input port(s) " * join(("`$(f)`" for f in missing_fields), ", ") * "; ")
+        isempty(extra_fields) ||
+            (msg *= "field(s) " * join(("`$(f)`" for f in extra_fields), ", ") *
+                    " name no input port; ")
+        msg *= "a struct buffer needs exactly one field per input port, named after it, " *
+               "holding a container keyed by connection id."
+        error(msg)
+    end
+    return buffer
+end
+
 #
 """
     NodeProperties(id, status, position)
@@ -572,34 +909,48 @@ struct NodeConnection
 end
 # Node
 """
-    DataNode(type::Type{T}, properties, spec, settings::SettingsT, data::DataT, state::StateT, input_buffer::Dict{Symbol, Dict{Int, BufferT}} ) where T <: AbstractNodeType where SettingsT where DataT  where StateT  where BufferT
-    DataNode(type::Type, id, status, position, spec; settings = Dict{Symbol, Any}(), data = Dict{Symbol, Any}(), state = NodeState(), input_buffer = Dict{Symbol, Dict{Int, Any}}())
-    DataNode(type::Type, spec; settings = Dict{Symbol, Any}(), data = Dict{Symbol, Any}(), state = NodeState(), input_buffer = Dict{Symbol, Dict{Int, Any}}())
+    DataNode(type::Type{T}, properties, spec, settings::SettingsT, data::DataT, state::StateT, input_buffer::BufferT) where T <: AbstractNodeType where SettingsT where DataT where StateT where BufferT
+    DataNode(type::Type, id, status, position, spec; settings = Dict{Symbol, Any}(), data = Dict{Symbol, Any}(), state = NodeState(), input_buffer = Dict{Symbol, PortBuffer{Any}}())
+    DataNode(type::Type, spec; settings = Dict{Symbol, Any}(), data = Dict{Symbol, Any}(), state = NodeState(), input_buffer = Dict{Symbol, PortBuffer{Any}}())
 
 Concrete workflow node.
- 
+
 The first type parameter is the user-defined behaviour tag
 ([`AbstractNodeType`](@ref)) on which [`execute_unsafe!`](@ref) and the
-validation hooks dispatch; the remaining parameters are the types of the
-containers, so a node can be backed by plain `Dict`s (the default) or by
-custom structs.
- 
+validation hooks dispatch; the remaining four are the types of the containers,
+so a node can be backed by plain `Dict`s (the default) or by custom structs.
+
 Fields:
 - `properties::NodeProperties` - id, status, position.
 - `spec::NodeSpec` - port and settings interface.
 - `settings` - configuration values (`Dict{Symbol, Any}` by default).
 - `data` - cached output values, keyed by output port label.
 - `state` - execution state ([`NodeState`](@ref) by default).
-- `input_buffer` - `input_buffer[port label][connection id] = value`.
- 
-The constructor creates an empty buffer entry for every input port declared in
-`spec` and rejects buffer keys that are not input ports.
- 
+- `input_buffer` - `input_buffer[port label][connection id] = value`
+  (`Dict{Symbol, PortBuffer{Any}}` by default).
+
+!!! compat "Changed in 0.3.0"
+    `BufferT` is the type of the **whole buffer container**, not of the value
+    inside it. Before 0.3.0 the field was declared
+    `Dict{Symbol, Dict{Int, BufferT}}`, which fixed the container and left only
+    the value type free; a node backed by a buffer struct was therefore
+    impossible. Code that spelled the full `DataNode{...}` type out, or
+    dispatched on its last parameter, has to be updated - nothing in this
+    package did.
+
+[`initbuffer!`](@ref) prepares the buffer against `spec`: for a dictionary it
+creates an empty entry for every declared input port, for a struct it checks
+that a field exists for each, and either way it rejects entries that are not
+input ports.
+
 # Example
 ```julia
 node = DataNode(MyNode, spec)
 id   = add_node!(workflow, node)
 ```
+
+See [`AbstractNodeFields`](@ref) for what a container has to support, and
+[`nodebuffer`](@ref) for choosing one per node type.
 """
 struct DataNode{T <: AbstractNodeType, SettingsT, DataT, StateT, BufferT} <: AbstractDataNode
     properties::NodeProperties
@@ -608,16 +959,9 @@ struct DataNode{T <: AbstractNodeType, SettingsT, DataT, StateT, BufferT} <: Abs
     data::DataT           # Dict{Symbol, Any}() by default
     state::StateT         # NodeState by default
     # input_buffer[port_label][connection_id] = data
-    input_buffer::Dict{Symbol, Dict{Int, BufferT}} # Dict{Symbol, Any}() by default
-    function DataNode(type::Type{T}, properties::NodeProperties, spec::NodeSpec, settings::SettingsT, data::DataT, state::StateT, input_buffer::Dict{Symbol, Dict{Int, BufferT}} ) where T <: AbstractNodeType where SettingsT where DataT  where StateT  where BufferT
-        for k in keys(input_buffer)
-            isportinspec(k, spec, :input) || error("Input buffer key $k doesn't match any input port in node specification")
-        end
-        for ip in spec.input_ports
-            if !haskey(input_buffer, ip.label)
-                input_buffer[ip.label] = Dict{Int, BufferT}()
-            end
-        end
+    input_buffer::BufferT          # Dict{Symbol, PortBuffer{Any}}() by default
+    function DataNode(type::Type{T}, properties::NodeProperties, spec::NodeSpec, settings::SettingsT, data::DataT, state::StateT, input_buffer::BufferT) where T <: AbstractNodeType where SettingsT where DataT  where StateT  where BufferT
+        initbuffer!(input_buffer, spec)
         new{T, SettingsT, DataT, StateT, BufferT}(properties, spec, settings, data, state, input_buffer)
     end
     #  Умолчания берутся из nodesettings / nodedata / nodestate / nodebuffer:
@@ -638,7 +982,7 @@ end
     nodesettings(::Type) -> container
     nodedata(::Type)     -> container
     nodestate(::Type)    -> container
-    nodebuffer(::Type)   -> Dict{Symbol, Dict{Int, T}}
+    nodebuffer(::Type)   -> Dict{Symbol, PortBuffer{T}}
 
 Fresh containers for a node of the given node type. These are the defaults of
 the [`DataNode`](@ref) keyword constructors and what [`dict_to_node`](@ref)
@@ -646,7 +990,7 @@ builds a loaded node with, so **one method here types a node everywhere** - by
 hand, in a graph, and after a round trip through a snapshot.
 
 Default: `Dict{Symbol, Any}()` for settings and data, [`NodeState`](@ref) for
-state, `Dict{Symbol, Dict{Int, Any}}()` for the input buffer. Each is called
+state, `Dict{Symbol, PortBuffer{Any}}()` for the input buffer. Each is called
 once per node, and only when the corresponding keyword is not given, so a
 container is never built and thrown away.
 
@@ -663,22 +1007,29 @@ end
 struct Scale <: AbstractNodeType end
 MetidaFlows.nodesettings(::Type{Scale}) = ScaleSettings()
 MetidaFlows.nodedata(::Type{Scale})     = ScaleData()
-MetidaFlows.nodebuffer(::Type{Scale})   = Dict{Symbol, Dict{Int, Float64}}()
+MetidaFlows.nodebuffer(::Type{Scale})   = Dict{Symbol, PortBuffer{Float64}}()
 
 node = DataNode(Scale, spec_scale())
-# DataNode{Scale, ScaleSettings, ScaleData, NodeState, Float64}
+# DataNode{Scale, ScaleSettings, ScaleData, NodeState, Dict{Symbol, PortBuffer{Float64}}}
 ```
 
 Specialize them independently: typed settings with `Dict` data is a perfectly
 good combination.
 
-`nodebuffer` chooses the buffer's **value type**, not its container: the
-`input_buffer` field is declared `Dict{Symbol, Dict{Int, BufferT}}`, so a
-custom container cannot be substituted - see
-[`AbstractNodeInputBuffer`](@ref). A value type narrower than `Any` is checked
-on every write, which is how a port carrying the wrong type is caught early.
+`nodebuffer` chooses the buffer **container**, so all three levels of it are
+yours: the outer mapping from port label to buffer (a `Dict` or a struct with
+one field per input port), the per-port container keyed by connection id, and
+the value type. A value type narrower than `Any` is checked on every write,
+which is how a port carrying the wrong type is caught early.
 
-See [`AbstractNodeFields`](@ref) for what a container struct has to provide.
+```julia
+MetidaFlows.nodebuffer(::Type{Scale}) = ScaleBuffer()   # <: AbstractNodeInputBuffer
+```
+
+See [`AbstractNodeFields`](@ref) for what a container struct has to provide,
+[`initbuffer!`](@ref) for how it is checked against the spec, and
+[`buffervalues`](@ref) for teaching a per-port container to report its own
+order cheaply.
 """
 nodesettings(::Type) = Dict{Symbol, Any}()
 
@@ -689,7 +1040,7 @@ nodedata(::Type)     = Dict{Symbol, Any}()
 nodestate(::Type)    = NodeState()
 
 @doc (@doc nodesettings)
-nodebuffer(::Type)   = Dict{Symbol, Dict{Int, Any}}()
+nodebuffer(::Type)   = Dict{Symbol, PortBuffer{Any}}()
 
 """
     NODE_REGISTER::Dict{String, Tuple{Type, NodeSpec}}
@@ -809,6 +1160,45 @@ function unregister_all!()
     true
 end
 
+
+"""
+    GraphCache
+
+The graph of a workflow, cached: the directed graph itself and, derived from
+it, whether the graph is acyclic and a topological order of its nodes.
+
+Held by [`Workflow`](@ref) in its `graph` field and never built by hand. Read
+it through [`makegraph`](@ref), [`is_cyclic`](@ref is_cyclic(::Workflow)) and
+[`topological_sort`](@ref topological_sort(::Workflow)), each of which
+recomputes its own part when that part is out of date.
+
+# Fields
+- `graph`, `is_cyclic`, `topological_sort` - the three cached values.
+- `ver`, `ic_ver`, `ts_ver` - the `Workflow.ver` each of them was computed at.
+  A value is current when its version equals the workflow's, so the three are
+  refreshed independently: asking whether the graph is cyclic does not pay for
+  a topological sort.
+
+# Staleness
+`Workflow.ver` is raised by the four functions that edit a graph, and only by
+them, so a cached value is stale exactly when the structure changed through
+them.
+
+A new workflow starts at version `0` with all three values already set - the
+empty graph, `false`, and an empty order - which is what an empty workflow's
+answers are, so nothing is computed until the first edit. The cache is
+therefore correct for as long as every edit goes through the editing
+functions, and silently wrong as soon as one does not: see *Editing the graph*
+in [`Workflow`](@ref).
+"""
+mutable struct GraphCache
+    ver::Int
+    ic_ver::Int
+    ts_ver::Int
+    is_cyclic::Bool
+    topological_sort::Vector{Int}
+    graph::NamedDiGraph{Int}
+end
 #=
 Cтатусы:
 :idle - just created
@@ -832,10 +1222,14 @@ Fields:
 - `n_iter`, `c_iter` - monotonically increasing id counters; identifiers of
   deleted nodes and connections are never reused.
 - `run_id` - identifier of the current scheduler run.
-- `log`, `audit_log` - reserved for engine-level logging and audit events.
+- `log` - engine log messages ([`LogMsg`](@ref)); see [`SETTINGS`](@ref)`[:logging]`
+  and [`log!`](@ref).
+- `audit_log` - the graph change log; empty unless [`SETTINGS`](@ref)`[:audit]`
+  is on, see [`AbstractAuditEvent`](@ref).
 """
 mutable struct Workflow{T <: WorkFlowType}
     id::Int                      # model ID
+    ver::Int                     # version
     name::String                 # Workflow name
     n_iter::Int                  # node iterator
     nodes::Dict{Int, DataNode}   # {Node id, Node}
@@ -846,6 +1240,7 @@ mutable struct Workflow{T <: WorkFlowType}
     run_id::UInt64
     log::Vector{LogMsg}
     audit_log::Vector{AbstractAuditEvent}
+    graph::GraphCache
 end
 #
 """
@@ -856,16 +1251,109 @@ Create a new workflow model with the specified identifier and type.
 `type` selects the execution model and the concrete type parameter of the
 result: `:DAW` gives a `Workflow{DAW}`, `:ABW` gives a `Workflow{ABW}`.
 Any other value raises an error.
+
+Whether a graph records its edits, whether the engine records messages, and how
+many of those it keeps are **package-wide** settings, not properties of a
+workflow: see [`SETTINGS`](@ref).
 """
 function Workflow(id::Int; type::Symbol = :DAW)
     if type == :DAW
-        Workflow{DAW}(id, "Default", 0, Dict{Int, DataNode}(), 0, Dict{Int, NodeConnection}(), Dict{Int, Vector{Int}}(), Dict{Int, Vector{Int}}(), 0, LogMsg[], AbstractAuditEvent[])
+        Workflow{DAW}(id, 0, "Default", 0, Dict{Int, DataNode}(), 0, Dict{Int, NodeConnection}(), Dict{Int, Vector{Int}}(), Dict{Int, Vector{Int}}(), 0, LogMsg[], AbstractAuditEvent[], GraphCache(0, 0, 0, false, Int[], NamedDiGraph{Int}()))
     elseif type == :ABW
-        Workflow{ABW}(id, "Default", 0, Dict{Int, DataNode}(), 0, Dict{Int, NodeConnection}(), Dict{Int, Vector{Int}}(), Dict{Int, Vector{Int}}(), 0, LogMsg[], AbstractAuditEvent[])
+        Workflow{ABW}(id, 0, "Default", 0, Dict{Int, DataNode}(), 0, Dict{Int, NodeConnection}(), Dict{Int, Vector{Int}}(), Dict{Int, Vector{Int}}(), 0, LogMsg[], AbstractAuditEvent[], GraphCache(0, 0, 0, false, Int[], NamedDiGraph{Int}()))
     else
         error("Unknown workflow type: $(type) (expected :DAW or :ABW)")
     end
 end
+
+"""
+    log!(model::Workflow, msg::LogMsg)
+
+Append `msg` to `model.log` if [`SETTINGS`](@ref)`[:logging]` is on, and return the
+model. The single place the log is written.
+
+The log is bounded by [`SETTINGS`](@ref)`[:log_limit]` and the engine never clears it between
+runs, so what it holds is the most recent `log_limit` messages of this
+workflow's whole life. See [`SETTINGS`](@ref)`[:log_limit]` for the policy and
+[`Workflow`](@ref) for the two knobs.
+
+Unlike this one, the graph change log is never capped - see
+[`AbstractAuditEvent`](@ref) for why an edit history with holes in it is worse
+than none.
+"""
+function log!(model::Workflow, msg::LogMsg)
+    _setting(:logging, Bool) && _logpush!(model.log, msg, _setting(:log_limit, Int))
+    return model
+end
+
+"""
+    log!(node::AbstractDataNode, msg::LogMsg)
+    log!(node::AbstractDataNode, level::Symbol, message::AbstractString)
+
+Append a message to **this node's own log**, `node.state[:log]`, and return the
+node.
+
+This is the log a node writes about itself, for whoever is looking at that
+node - "read 1 240 rows", "3 values dropped as missing", "converged after 11
+iterations". [`execute_unsafe!`](@ref) is handed only the node, which is exactly
+what this needs, so a node can report from inside its own run:
+
+```julia
+function MetidaFlows.execute_unsafe!(n::DataNode{ReadCSV})
+    tbl = CSV.read(n.settings[:file], DataFrame)
+    log!(n, :info, "read \$(nrow(tbl)) rows")
+    setdata!(n, :table, tbl)
+    return [:table]
+end
+```
+
+# Who writes, and who switches it off
+Nothing in the engine writes here: engine messages go to `Workflow.log`
+through [`log!(model, msg)`](@ref log!). That is also why this one has no
+on/off switch where `Workflow.log` has `logging` - the only thing that writes a
+node's log is the node's own code, so declining to call this *is* the switch.
+
+# Bound and lifetime
+The log keeps the most recent [`SETTINGS`](@ref)`[:log_limit]` messages, oldest
+dropped first ([`SETTINGS`](@ref)`[:log_limit]` is 1000, `0` means no limit). That bound is
+what makes logging from inside a cycle safe: a node that writes a line on every
+turn of a 100 000-turn loop still holds that many records, the last ones.
+
+It is cleared when the node's state is, which is [`reset!`](@ref)`(node)`,
+`empty!(node.state)`, and `add_node!` on a node that is neither `:idle` nor
+`:clean`. [`reset!`](@ref)`(model)` does **not** clear it, so messages survive
+a re-run of the workflow; the limit is what keeps that bounded.
+
+A custom [`AbstractNodeState`](@ref) needs a `log` field to be written to, and
+a node whose state has none raises an error naming the type. A state without a
+`log_limit` field is fine - the default is used.
+"""
+function log!(node::AbstractDataNode, msg::LogMsg)
+    haskey(node.state, :log) ||
+        error("Node $(getid(node)) has state of type $(typeof(node.state)), which has no " *
+              "`log` field, so there is nowhere to write. Add a `log::Vector{LogMsg}` field " *
+              "to it, or do not call `log!` on this node.")
+    _logpush!(node.state[:log], msg, _setting(:log_limit, Int))
+    return node
+end
+log!(node::AbstractDataNode, level::Symbol, message::AbstractString) =
+    log!(node, LogMsg(level, String(message)))
+
+"""
+    audit!(model::Workflow, event::AbstractAuditEvent)
+
+Append `event` to `model.audit_log` if [`SETTINGS`](@ref)`[:audit]` is on, and return
+the model. The single place the log is written, so the check sits in one place and
+a mutator records with one line.
+"""
+function audit!(model::Workflow, event::AbstractAuditEvent)
+    _setting(:audit, Bool) && push!(model.audit_log, event)
+    return model
+end
+
+#  Ни кольцевого буфера, ни предела длины — намеренно. Журнал правок с
+#  дырами отвечает на вопрос «это случилось?» словом «может быть», а это
+#  хуже, чем отсутствие журнала. Поэтому всё или ничего, и ничего между.
 
 """
     workflowtypestr(w::Workflow) -> String
@@ -1091,6 +1579,7 @@ Assigned connection identifier (`Int`).
 function add_connection!(model::Workflow, c::NodeConnection)::Int
     check_connection_validity(model, c)
     id = model.c_iter += 1
+    model.ver += 1
     model.connections[id] = c
     output_node = getnode(model, c.output_id)
     # Инвалидируем дочерние ноды
@@ -1104,6 +1593,7 @@ function add_connection!(model::Workflow, c::NodeConnection)::Int
     # Add index
     push!(get!(model.incoming, c.input_id, Int[]), id)
     push!(get!(model.outgoing, c.output_id, Int[]), id)
+    audit!(model, ConnectionAdded(id, c.output_id, c.output_port, c.input_id, c.input_port))
     return id
 end
 function add_connection!(model::Workflow, id_out::Int, port_out::Symbol, id_in::Int, port_in::Symbol)
@@ -1130,7 +1620,6 @@ function refreshind!(model::Workflow)
     # sort! не косметика
     for v in values(model.incoming); sort!(v); end
     for v in values(model.outgoing); sort!(v); end
-  
     return model
 end
 
@@ -1160,8 +1649,11 @@ function delete_connection!(model::Workflow, id::Int)
         # Удаляем индексы
         filter!(x -> x != id, model.outgoing[c.output_id])
         filter!(x -> x != id, model.incoming[c.input_id])
+        # Версия графа
+        model.ver += 1
         # Удаляем связь
         delete!(model.connections, id) 
+        audit!(model, ConnectionDeleted(id))
         return true
     end
     return false
@@ -1189,8 +1681,11 @@ function add_node!(model::Workflow, node::AbstractDataNode)
     # If Node node is not in :idle or :clean state, reset it to clear any previous execution state.
     if !(getstatus(node) in [:idle, :clean]) reset!(node) end
     id = model.n_iter += 1
+    # Версия графа
+    model.ver += 1
     setid!(node, id)
     model.nodes[id] = node
+    audit!(model, NodeAdded(id, nodetypestr(node)))
     return id
 end
 """
@@ -1217,11 +1712,16 @@ function delete_node!(model::Workflow, id::Int)
                 delete_connection!(model, k)
             end
         end
+        # Версия графа
+        model.ver += 1
         # Удаляем ноду
         delete!(model.nodes, id) 
         # delete index if exist
         if haskey(model.incoming, id) delete!(model.incoming, id)  end
         if haskey(model.outgoing, id) delete!(model.outgoing, id) end
+        #  Связи сняты выше через delete_connection!, значит в журнале их
+        #  удаления уже стоят — каскад виден сам, без особого события.
+        audit!(model, NodeDeleted(id))
         return true
     end
     return false
@@ -1261,19 +1761,28 @@ The workflow.
 """
 function reset!(model::Workflow; soft::Bool = false)
     for (k, node) in model.nodes
-        node.state.exec_n = 0
-        #  Признак остановки принадлежит прогону
-        node.state.stop   = false
-        mark_dirty!(node, soft = soft)
-        # Полный сброс обязан снять состояние цикла
-        if !soft
-            for ps in node.spec.input_ports
-                ps.kind == :feedback || continue
-                empty!(node.input_buffer[ps.label])
-            end
-        end
+        reset_node!(node, soft)
     end
     model
+end
+
+#  БАРЬЕР ФУНКЦИИ. `model.nodes` — `Dict{Int, DataNode}`, а `DataNode` без
+#  параметров абстрактен: тип узла в графе разный, иначе и быть не может.
+#  Поэтому в теле цикла каждое `node.state` было бы поиском поля в рантайме.
+#  Узел, переданный аргументом, компилируется по своему конкретному типу: на
+#  входе один динамический диспатч, внутри всё статически.
+function reset_node!(node::N, soft::Bool) where N <: AbstractDataNode
+    node.state.exec_n = 0
+    #  Признак остановки принадлежит прогону
+    node.state.stop   = false
+    mark_dirty!(node, soft)
+    soft && return node
+    # Полный сброс обязан снять состояние цикла
+    for ps in node.spec.input_ports
+        ps.kind == :feedback || continue
+        empty!(node.input_buffer[ps.label])
+    end
+    return node
 end
 """
     reset!(node::AbstractDataNode)
@@ -1296,7 +1805,9 @@ The node.
 function reset!(node::AbstractDataNode)
     setstatus!(node, :idle)
     empty!(node.settings)
-    for (l, b) in node.input_buffer; empty!(b); end
+    #  Обходим порты спеки, а не сам контейнер: ключи буфера ей и так равны
+    #  (это проверяет `initbuffer!`), зато структуре не нужна итерация.
+    for ps in node.spec.input_ports; empty!(node.input_buffer[ps.label]); end
     empty!(node.state)
     empty!(node.data)
     node
@@ -1339,12 +1850,16 @@ This function intentionally does **not** clear:
 # Returns
 The node.
 """
-function mark_dirty!(node::AbstractDataNode; soft::Bool = false)
+mark_dirty!(node::AbstractDataNode; soft::Bool = false) = mark_dirty!(node, soft)
+
+#  Позиционная форма для горячего пути: вызов с кваргом собирает NamedTuple,
+#  и на сбросе это 56 байт на узел на прогон.
+function mark_dirty!(node::AbstractDataNode, soft::Bool)
     setstatus!(node, :dirty)
-    if soft return node end
+    soft && return node
     empty!(node.state[:ready_ports])
     empty!(node.data)
-    node
+    return node
 end
 """
     request_stop!(node::AbstractDataNode)
@@ -1459,7 +1974,7 @@ function invalidate_stale_optional!(model::Workflow, id::Int)
         ps  = getportspec(node, con.input_port, :input)
         ps.kind == :normal || continue
         ps.required        && continue
-        getstatus(getnode(model, con.output_id)) == :clean && continue
+        getstatus(model, con.output_id) == :clean && continue
         invalidate_buffer!(node, con.input_port, con_id)
     end
     return model
@@ -1522,18 +2037,29 @@ function mark_dirty_downstream!(model::Workflow, id::Int)
     stack = Int[id]
     while !isempty(stack)
         nid  = pop!(stack)
-        node = getnode(model, nid)
-        getstatus(node) == :dirty && continue
-        setstatus!(node, :dirty)
+        mark_if_clean!(getnode(model, nid)) || continue
         for con_id in get(model.outgoing, nid, Int[])
-            con   = model.connections[con_id]
-            child = getnode(model, con.input_id)
-            getportspec(child, con.input_port, :input).kind == :feedback && continue
+            con = model.connections[con_id]
+            isfeedbackport(getnode(model, con.input_id), con.input_port) && continue
             push!(stack, con.input_id)
         end
     end
     return model
 end
+
+#  БАРЬЕРЫ. Параметр `N` обязателен: у `getstatus` и `getportspec` по одному
+#  методу, поэтому без него Julia девиртуализует их и встроит прямо в
+#  абстрактный контекст — доступ к полю снова станет динамическим, и барьера
+#  не получится. С параметром она вынуждена подобрать специализацию по
+#  фактическому типу узла.
+function mark_if_clean!(node::N) where N <: AbstractDataNode
+    getstatus(node) == :dirty && return false
+    setstatus!(node, :dirty)
+    return true
+end
+
+isfeedbackport(node::N, port::Symbol) where N <: AbstractDataNode =
+    getportspec(node, port, :input).kind == :feedback
 
 
 """
@@ -1596,13 +2122,24 @@ optional port's buffer, which [`invalidate_stale_optional!`](@ref) clears.
   immediately; it just never gets enqueued unless something feeds it.
 """
 function isready(model::Workflow, id::Int; wait_optional::Bool = true)
-    node = getnode(model, id)
+    return isready_node(model, getnode(model, id), id, wait_optional)
+end
+
+function isready_node(model::Workflow, node::N, id::Int,
+                      wait_optional::Bool) where N <: AbstractDataNode
     connections = get(model.incoming, id, Int[])
     for con_id in connections
         con = getconnection(model, con_id)
-        parent_node = getnode(model, con.output_id)
         ps = getportspec(node, con.input_port, :input)
         ps.kind == :normal || continue
+        isparentready(getnode(model, con.output_id), con, ps, wait_optional) || return false
+    end
+    return true
+end
+
+#  Родитель у каждой связи свой, поэтому ему нужен отдельный барьер.
+function isparentready(parent_node::N, con::NodeConnection, ps::PortSpec,
+                       wait_optional::Bool) where N <: AbstractDataNode
         if ps.required
             getstatus(parent_node) != :clean && return false # crytical for cycling
             #  Родитель :clean, но в ЭТОТ порт на своём исполнении не публиковал: значения нет и не будет.
@@ -1615,7 +2152,6 @@ function isready(model::Workflow, id::Int; wait_optional::Bool = true)
             #  значит не "нечего ждать", а "еще не посчитано".
             getstatus(parent_node) != :clean && return false
         end
-    end
     return true
 end
 """
@@ -1667,8 +2203,8 @@ by [`isready`](@ref).
 - `false` otherwise.
 """
 function execution_node_validation(node::AbstractDataNode, check_input_buffer::Bool = true)
-    #  Обязательный обычный порт должен иметь значение в буфере. Цикл, а
-    #  не `all` с замыканием: замыкание захватывает node и аллоцирует, а
+    #  Обязательный обычный порт должен иметь значение в буфере. 
+    # Цикл вместо `all` с замыканием: замыкание захватывает node и аллоцирует, а
     #  эта функция зовётся на каждое исполнение узла.
     if check_input_buffer
         for ps in node.spec.input_ports
@@ -1751,13 +2287,20 @@ function push_buffer!(model::Workflow, id::Int, port::Symbol)
     return push_buffer!(model::Workflow, id::Int, ready_ports)
 end
 function push_buffer!(model::Workflow, id::Int, ready_ports::Vector{Symbol})
-    node = getnode(model, id)
-    haskey( model.outgoing, id) || return model
+    haskey(model.outgoing, id) || return model
+    return push_buffer_from!(model, getnode(model, id), id, ready_ports)
+end
+
+#  БАРЬЕР: публикующий узел приходит аргументом, поэтому `getdata` из него
+#  уходит статическим вызовом, а не диспатчем на каждую связь.
+function push_buffer_from!(model::Workflow, node::N, id::Int,
+                           ready_ports::Vector{Symbol}) where N <: AbstractDataNode
     for cid in model.outgoing[id]
         con = model.connections[cid]
         con.output_port in ready_ports || continue
-        child = getnode(model, con.input_id)
-        child.input_buffer[con.input_port][cid] = getdata(node, con.output_port)
+        #  У потребителя тип свой, поэтому ему нужен собственный барьер.
+        setinputbuffer!(getnode(model, con.input_id), con.input_port, cid,
+                        getdata(node, con.output_port))
     end
     return model
 end
@@ -1777,16 +2320,30 @@ end
 """
     makegraph(model::Workflow)
  
-Build directed graph representation of workflow: node identifiers become
-vertex names and every connection becomes an edge.
+Directed graph representation of workflow: node identifiers become vertex
+names and every connection becomes an edge.
+ 
+Built once per structural change and kept in `model.graph`; a call that finds
+the cache current does no work at all. See [`GraphCache`](@ref).
+ 
+# Returns
+The **shared** graph held by the workflow. Treat it as read-only: adding a
+vertex or an edge to it would leave the workflow describing a graph it does not
+have, and nothing would report that. Make a copy before modifying one.
  
 # Notes
 All connections are included regardless of the `kind` of the ports they
 attach to. A `:feedback` edge is therefore an ordinary edge here, so a graph
 with a feedback loop is cyclic and [`scheduler!`](@ref) for a [`DAW`](@ref)
 workflow rejects it. That is by design: cycles are an [`ABW`](@ref) feature.
+ 
+A graph edited around the editing functions is not seen here - see *Editing the
+graph* in [`Workflow`](@ref).
 """
 function makegraph(model::Workflow)
+    if model.ver == model.graph.ver
+        return  model.graph.graph
+    end
     g = NamedDiGraph{Int}()
     for (k, v) in model.nodes
         add_vertex!(g, k)
@@ -1794,8 +2351,78 @@ function makegraph(model::Workflow)
     for (k, v) in model.connections
         add_edge!(g, v.output_id, v.input_id)
     end
-    g
+    model.graph.ver = model.ver
+    model.graph.graph = g
+    return g
 end
+
+"""
+    is_cyclic(model::Workflow) -> Bool
+ 
+Whether the workflow's graph contains a cycle, from the same cache as
+[`makegraph`](@ref); see [`GraphCache`](@ref).
+ 
+A cycle must be closed through a port declared `kind = :feedback` to be
+executable, and only by [`ABW`](@ref): [`scheduler!`](@ref) on a [`DAW`](@ref)
+workflow rejects a cyclic graph. The port's kind is not consulted here -
+[`makegraph`](@ref) builds an edge per connection whatever the kind, so a
+feedback edge is an ordinary edge and the graph it closes is cyclic.
+ 
+# Example
+```julia
+is_cyclic(w) && error("this one needs :ABW")
+```
+"""
+function is_cyclic(model::Workflow)
+    if model.ver == model.graph.ic_ver
+        return  model.graph.is_cyclic
+    end
+    g  = makegraph(model)
+    ic = is_cyclic(g)
+    model.graph.is_cyclic = ic
+    model.graph.ic_ver = model.ver 
+    return ic
+end
+
+"""
+    topological_sort(model::Workflow) -> Vector{Int}
+ 
+A topological order of the workflow's nodes, from the same cache as
+[`makegraph`](@ref); the order [`scheduler!`](@ref) traverses a [`DAW`](@ref)
+workflow in. See [`GraphCache`](@ref).
+ 
+# Returns
+The **shared** order held by the workflow, as node identifiers. Treat it as
+read-only.
+ 
+# Notes
+Which of several valid topological orders this is, is unspecified: it follows
+the order the vertices went into the graph, which is dictionary order. It is
+the same for as long as the structure is unchanged.
+ 
+A cyclic graph has no topological order and this raises, as it does on a bare
+graph - ask [`is_cyclic`](@ref is_cyclic(::Workflow)) first. Unlike the other
+two cached values, a failure caches nothing, so every call on a cyclic graph
+raises again.
+ 
+# Example
+```julia
+for id in topological_sort(w)
+    execute!(w, id)
+end
+```
+"""
+function topological_sort(model::Workflow)
+    if model.ver == model.graph.ts_ver
+        return model.graph.topological_sort
+    end
+    g  = makegraph(model)
+    ts = topological_sort(g)
+    model.graph.ts_ver = model.ver 
+    model.graph.topological_sort = ts
+    return ts
+end
+
 
 
 # End Module:

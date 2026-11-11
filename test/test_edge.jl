@@ -98,10 +98,11 @@ end
     invalidate_buffer!(d, :in, 1)
     @test getinputdata(d, :in) === nothing            # снова 0
 
-    # MultiPort: пустой буфер — это пустой словарь, а не nothing.
+    # MultiPort: пустой буфер — это пустой вектор, а не nothing.
     m = DataNode(CollectNode, spec_collect())
-    @test getinputdata(m, :ins) == Dict{Int, Any}()
+    @test getinputdata(m, :ins) == []
     @test isempty(getinputdata(m, :ins))
+    @test isempty(getinputconnections(m, :ins))
     for (i, v) in enumerate((1, 2, 3))
         setinputbuffer!(m, :ins, i, v)
     end
