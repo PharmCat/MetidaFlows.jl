@@ -373,7 +373,7 @@ that has input ports but no incoming connection never becomes ready and stays
 A `DAW` run needs three things from the structure - the graph, the answer to
 "is it cyclic", and a topological order - and none of them change between runs
 of an unedited workflow. Each is computed when asked for and cached in
-`model.graph` (see [`Graph`](@ref)), keyed by `model.ver`: a counter of
+`model.graph` (see [`GraphCache`](@ref)), keyed by `model.ver`: a counter of
 **structural** edits. Repeated runs of an unedited workflow therefore do no
 graph work at all. An `ABW` run needs none of the three, so it is unaffected
 either way.
