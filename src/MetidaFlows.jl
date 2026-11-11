@@ -1223,7 +1223,7 @@ function unregister_all!()
 end
 
 
-mutable struct Graph
+mutable struct GraphCache
     ver::Int
     ic_ver::Int
     ts_ver::Int
@@ -1272,7 +1272,7 @@ mutable struct Workflow{T <: WorkFlowType}
     run_id::UInt64
     log::Vector{LogMsg}
     audit_log::Vector{AbstractAuditEvent}
-    graph::Graph
+    graph::GraphCache
 end
 #
 """
@@ -1290,9 +1290,9 @@ workflow: see [`SETTINGS`](@ref).
 """
 function Workflow(id::Int; type::Symbol = :DAW)
     if type == :DAW
-        Workflow{DAW}(id, 0, "Default", 0, Dict{Int, DataNode}(), 0, Dict{Int, NodeConnection}(), Dict{Int, Vector{Int}}(), Dict{Int, Vector{Int}}(), 0, LogMsg[], AbstractAuditEvent[], Graph(0, 0, 0, false, Int[], NamedDiGraph{Int}()))
+        Workflow{DAW}(id, 0, "Default", 0, Dict{Int, DataNode}(), 0, Dict{Int, NodeConnection}(), Dict{Int, Vector{Int}}(), Dict{Int, Vector{Int}}(), 0, LogMsg[], AbstractAuditEvent[], GraphCache(0, 0, 0, false, Int[], NamedDiGraph{Int}()))
     elseif type == :ABW
-        Workflow{ABW}(id, 0, "Default", 0, Dict{Int, DataNode}(), 0, Dict{Int, NodeConnection}(), Dict{Int, Vector{Int}}(), Dict{Int, Vector{Int}}(), 0, LogMsg[], AbstractAuditEvent[], Graph(0, 0, 0, false, Int[], NamedDiGraph{Int}()))
+        Workflow{ABW}(id, 0, "Default", 0, Dict{Int, DataNode}(), 0, Dict{Int, NodeConnection}(), Dict{Int, Vector{Int}}(), Dict{Int, Vector{Int}}(), 0, LogMsg[], AbstractAuditEvent[], GraphCache(0, 0, 0, false, Int[], NamedDiGraph{Int}()))
     else
         error("Unknown workflow type: $(type) (expected :DAW or :ABW)")
     end
@@ -1652,7 +1652,6 @@ function refreshind!(model::Workflow)
     # sort! не косметика
     for v in values(model.incoming); sort!(v); end
     for v in values(model.outgoing); sort!(v); end
-  
     return model
 end
 
@@ -2236,8 +2235,8 @@ by [`isready`](@ref).
 - `false` otherwise.
 """
 function execution_node_validation(node::AbstractDataNode, check_input_buffer::Bool = true)
-    #  Обязательный обычный порт должен иметь значение в буфере. Цикл, а
-    #  не `all` с замыканием: замыкание захватывает node и аллоцирует, а
+    #  Обязательный обычный порт должен иметь значение в буфере. 
+    # Цикл вместо `all` с замыканием: замыкание захватывает node и аллоцирует, а
     #  эта функция зовётся на каждое исполнение узла.
     if check_input_buffer
         for ps in node.spec.input_ports
@@ -2391,7 +2390,7 @@ end
 
 function topological_sort(model::Workflow)
     if model.ver == model.graph.ts_ver
-        return model.graph.ts_ver
+        return model.graph.topological_sort
     end
     g  = makegraph(model)
     ts = topological_sort(g)

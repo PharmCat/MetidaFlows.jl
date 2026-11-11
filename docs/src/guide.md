@@ -353,7 +353,7 @@ scheduler!(w; maxiter = 5000)    # ABW
 
 |  | [`DAW`](@ref) | [`ABW`](@ref) |
 |---|---|---|
-| Order | topological, via [`makegraph`](@ref) | readiness queue |
+| Order | topological, via [`topological_sort`](@ref topological_sort(::Workflow)) | readiness queue |
 | Cycles | rejected before execution | not detected up front |
 | Per run | [`reset!`](@ref): statuses and cached outputs | statuses only |
 | Required inputs | enforced | **not** enforced (`ExecuteSettings(false)`) |
@@ -367,6 +367,72 @@ In `ABW`, a node popped while a parent is still `:dirty` is dropped and
 re-queued later by that parent; [`isready`](@ref) implements the check. A node
 that has input ports but no incoming connection never becomes ready and stays
 `:dirty`.
+
+### The graph is built once per edit, not once per run
+
+A `DAW` run needs three things from the structure - the graph, the answer to
+"is it cyclic", and a topological order - and none of them change between runs
+of an unedited workflow. Each is computed when asked for and cached in
+`model.graph` (see [`Graph`](@ref)), keyed by `model.ver`: a counter of
+**structural** edits. Repeated runs of an unedited workflow therefore do no
+graph work at all. An `ABW` run needs none of the three, so it is unaffected
+either way.
+
+The three readers are [`makegraph`](@ref),
+[`is_cyclic`](@ref is_cyclic(::Workflow)) and
+[`topological_sort`](@ref topological_sort(::Workflow)), and each returns the
+**shared** value the workflow holds, so treat all three results as read-only.
+Copy the graph before modifying one: a vertex added to the cached graph leaves
+the workflow describing a graph it does not have, and nothing reports it.
+
+### Edit a graph through the four editing functions
+
+[`add_node!`](@ref), [`delete_node!`](@ref), [`add_connection!`](@ref) and
+[`delete_connection!`](@ref) raise `model.ver`, and that is the whole mechanism
+that tells the cache it is out of date. Nothing else raises it - settings,
+data, buffers, statuses and a run leave it alone, because none of them can
+change the graph.
+
+**Writing into `model.nodes` or `model.connections` directly is not
+supported.** Those fields are reachable and nothing stops it, but `ver` stays
+where it was and the cache goes on answering from the structure it saw last.
+For a workflow assembled that way from new, that is the empty graph it was
+born with, and every symptom is silent:
+
+```julia
+w = Workflow(0; type = :DAW)
+for (id, node) in other.nodes; w.nodes[id] = node; end        # ТАК НЕ НАДО
+for (id, con)  in other.connections; w.connections[id] = con; end
+
+makegraph(w)      # граф без вершин
+is_cyclic(w)      # false — даже если цикл есть
+scheduler!(w)     # true, не исполнив ни одного узла
+```
+
+Build it with the editing functions instead:
+
+```julia
+w = Workflow(0; type = :DAW)
+a = add_node!(w, DataNode(MyNode, spec))
+b = add_node!(w, DataNode(MyNode, spec))
+add_connection!(w, a, :out, b, :in)
+```
+
+Two cases where that is not quite enough, and what to do instead:
+
+* **copying a workflow**, where the identifiers of the original have to
+  survive. [`add_node!`](@ref) hands out its own from `n_iter` and cannot
+  reproduce them, so go through the snapshot codec -
+  [`workflow_to_dict`](@ref) then [`dict_to_workflow`](@ref). It keeps the
+  identifiers, rebuilds the indices and leaves the version right.
+* **a direct write you cannot avoid.** Raise the version yourself, in the same
+  breath, and remember that [`refreshind!`](@ref) rebuilds the indices only:
+
+```julia
+w.connections[id] = con
+refreshind!(w)              # индексы
+w.ver += 1                  # кеш графа
+```
 
 ---
 
