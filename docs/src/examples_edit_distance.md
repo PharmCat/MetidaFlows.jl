@@ -297,21 +297,26 @@ Read left to right: substitute `k`→`s`, keep `i`, `t`, `t`, substitute
 is the distance. The division of labour is honest — the graph computes the
 table, the caller walks it.
 
-### Named ports, not `MultiPort`
+### Named ports, or `MultiPort`
 
-A cell has three predecessors and a `MultiPort` input would have accepted all
-of them with one port. It would also have made `:choice` impossible:
-[`getinputdata`](@ref) on a `MultiPort` returns the raw buffer, a
-`Dict{Int, Any}` **keyed by connection id**, and a node has no way to know
-which connection means "diagonal".
+A cell has three predecessors and a `MultiPort` input accepts all of them with
+one port. [`getinputdata`](@ref) hands them over as a `Vector` in the order the
+connections were made, so `:choice` is recoverable from the position — wire
+diagonal, up and left in that order and position 2 *is* "up":
 
 ```@example edit
 struct EdCellMulti <: AbstractNodeType end
 spec_edcellmulti() = NodeSpec("Ed cell multi",
     [PortSpec("Options", Int, :options, MultiPort())],
-    [PortSpec("Cost", Int, :cost)])
-MetidaFlows.execute_unsafe!(n::DataNode{EdCellMulti}) =
-    (setdata!(n, :cost, minimum(values(getinputdata(n, :options)))); [:cost])
+    [PortSpec("Cost", Int, :cost), PortSpec("Choice", Symbol, :choice)])
+
+function MetidaFlows.execute_unsafe!(n::DataNode{EdCellMulti})
+    opts = getinputdata(n, :options)        # [diag, up, left]
+    i    = argmin(opts)
+    setdata!(n, :cost,   opts[i])
+    setdata!(n, :choice, (:diag, :up, :left)[i])
+    return [:cost, :choice]
+end
 
 w = Workflow(0; type = :DAW)
 src = [add_node!(w, DataNode(EdConst, spec_edconst())) for _ in 1:3]
@@ -321,13 +326,22 @@ ids = [add_connection!(w, id, :out, mc, :options) for id in src]
 scheduler!(w)
 
 (cost = getdata(w, mc, :cost),
+ choice = getdata(w, mc, :choice),
  what_the_node_sees = getinputdata(getnode(w, mc), :options),
  connection_ids = ids)
 ```
 
-The minimum is right; the labels are gone. `MultiPort` is the tool for a
-variable number of *equivalent* inputs — a sum over however many producers are
-attached — and named ports are the tool when the inputs mean different things.
+So the choice between them is no longer about what is possible. It is about
+what the interface *says*: a spec with `:diag`, `:up` and `:left` declares that
+a cell takes exactly three inputs with three fixed meanings, and a connection
+to the wrong one is rejected at `add_connection!`. A `MultiPort` declares only
+"any number of these", and the three meanings live in the node body's
+`(:diag, :up, :left)` tuple, where nothing checks them against the graph. This
+table is wired by one function, so either would do; the named version is the
+one that would survive someone else wiring a cell by hand.
+
+`MultiPort` earns its keep where the *count* is genuinely variable — a sum, a
+minimum or a concatenation over however many producers are attached.
 
 ### Things to watch
 

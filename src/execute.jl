@@ -50,9 +50,17 @@ execute!(w, id; settings = ExecuteSettings(; execute_upstream = false))
 execute!(w, id; throw_error = true)
 ```
 """
-function execute!(model::Workflow, id::Int; settings::ExecuteSettings = ExecuteSettings(), throw_error::Bool = false) 
-    node =  getnode(model, id)
+function execute!(model::Workflow, id::Int; settings::ExecuteSettings = ExecuteSettings(), throw_error::Bool = false)
+    return execute_node!(model, getnode(model, id), id, settings, throw_error)
+end
 
+#  БАРЬЕР ФУНКЦИИ. Узел достаётся из `Dict{Int, DataNode}`, то есть приходит
+#  абстрактно типизированным, и в теле ниже к его полям обращаются много раз.
+#  Передача узла аргументом даёт компиляции его конкретный тип: один
+#  динамический диспатч на входе вместо поиска поля на каждое обращение.
+#  Аргументы позиционные — кварг в горячем пути собирает NamedTuple.
+function execute_node!(model::Workflow, node::N, id::Int,
+                       settings::ExecuteSettings, throw_error::Bool) where N <: AbstractDataNode
     if getstate(node, :execution_id) != model.run_id
         empty!(getstate(node, :log))
         setstate!(node, :execution_id, model.run_id)
@@ -99,7 +107,7 @@ function execute!(model::Workflow, id::Int; settings::ExecuteSettings = ExecuteS
     catch e
         setstatus!(node, :failed)
         # Log error
-        push!(model.log, LogMsg(:error, "Node (id: $(getid(node))) execution failed: $(e)"))
+        log!(model, LogMsg(:error, "Node (id: $(getid(node))) execution failed: $(e)"))
         if throw_error
             rethrow(e)
         end

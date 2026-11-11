@@ -127,8 +127,8 @@ result = getdata(workflow, output_id, :result)
 ```
 """
 function scheduler!(model::Workflow{DAW}; reset_mode::Symbol = :full, throw_error::Bool = false, strict::Bool = false, release_optional::Bool = false)
-    g = makegraph(model)
-    if is_cyclic(g) error("workflow is cyclic") end
+    #g = makegraph(model)
+    if is_cyclic(model) error("workflow is cyclic") end
     if reset_mode ∉ (:full, :soft, :none) error("Wrong reset mode: $reset_mode , only :full, :soft, :none availabel.") end
     soft_reset = false
     # change to thread safe
@@ -136,7 +136,7 @@ function scheduler!(model::Workflow{DAW}; reset_mode::Symbol = :full, throw_erro
     if reset_mode == :soft soft_reset = true end
     if reset_mode != :none reset!(model; soft = soft_reset) end
 
-    order = topological_sort(g)
+    order = topological_sort(model)
     for id in order
         #  A node whose producer failed must not be executed
         if !isready(model, id)
@@ -153,7 +153,7 @@ function scheduler!(model::Workflow{DAW}; reset_mode::Symbol = :full, throw_erro
         execute!(model, id; settings = ExecuteSettings(;execute_upstream = false, invalidate_downstream = false, check_cyclic = false), throw_error = throw_error)
         #  Узел поднимает флаг остановки: обход прекращается, остальные узлы порядка  :dirty.
         if isstoprequested(getnode(model, id))
-            push!(model.log, LogMsg(:info, "Run stopped by node (id: $(id))"))
+            log!(model, LogMsg(:info, "Run stopped by node (id: $(id))"))
             break
         end
     end
@@ -353,7 +353,7 @@ function scheduler!(model::Workflow{ABW}; reset_mode::Symbol = :full, maxiter = 
             if !announced
                 #  Один раз за прогон: иначе на длинном цикле запись
                 #  в лог на каждый виток.
-                push!(model.log, LogMsg(:info,
+                log!(model, LogMsg(:info,
                     "Released $(n) node(s) blocked only by optional inputs (release_optional = true)"))
                 announced = true
             end
@@ -388,7 +388,7 @@ function scheduler!(model::Workflow{ABW}; reset_mode::Symbol = :full, maxiter = 
                 throw_error = throw_error)
             #  Узел попросил остановиться. Опубликованное им уже лежит в буферах потомков, в очередь  не попадают.
             if isstoprequested(getnode(model, id))
-                push!(model.log, LogMsg(:info, "Run stopped by node (id: $(id))"))
+                log!(model, LogMsg(:info, "Run stopped by node (id: $(id))"))
                 break
             end
             for port in ready_ports

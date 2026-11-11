@@ -258,14 +258,18 @@ end
     @test getinputdata(n, :in, 2) === nothing
     @test getinputdata(n, :in)    == 10
 
-    # MultiPort: весь словарь {id связи => значение}.
+    # MultiPort: значения вектором, по возрастанию номера связи.
     m = DataNode(CollectNode, spec_collect())
+    setinputbuffer!(m, :ins, 2, 3)        # пишем в обратном порядке...
     setinputbuffer!(m, :ins, 1, 2)
-    setinputbuffer!(m, :ins, 2, 3)
     buf = getinputdata(m, :ins)
-    @test buf isa Dict
-    @test length(buf) == 2
-    @test sum(values(buf)) == 5
+    @test buf isa Vector
+    @test buf == [2, 3]                   # ...читаем по номеру связи
+    @test getinputconnections(m, :ins) == [1, 2]
+    @test sum(buf) == 5
+    #  вектор свежий: узел может его испортить, не тронув буфер
+    empty!(buf)
+    @test length(getinputdata(m, :ins)) == 2
 end
 
 # --------------------------------------------------------------------------
@@ -554,12 +558,13 @@ end
         :NodeSpec, :PortSpec, :Workflow,
         :add_connection!, :add_node!, :check_failed_nodes,
         :delete_connection!, :delete_node!, :execute!, :failed_nodes,
-        :getdata, :getinputdata, :getinputmeta, :getmeta, :getstatus,
+        :getdata, :getinputconnections, :getinputdata, :getinputmeta,
+        :getmeta, :getstatus,
         :isnodeexist, :isportexist, :scheduler!, :setdata!, :setsettings!,
     ]
     actual = filter(n -> n !== :MetidaFlows, names(MetidaFlows))
     @test sort(actual) == sort(EXPORTED)
-    @test length(actual) == 24
+    @test length(actual) == 25
     @test allunique(actual)
     #  Каждое экспортируемое имя определено и документировано: `api.md`
     #  идёт через @autodocs, а он берёт имена из словаря докстрингов

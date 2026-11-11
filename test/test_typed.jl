@@ -13,7 +13,8 @@
 import MetidaFlows: PortSpec, AbstractNodeFields, AbstractNodeSettings,
     AbstractNodeData, AbstractNodeState, AbstractNodeInputBuffer, NodeState,
     nodesettings, nodedata, nodestate, nodebuffer, getnode, getstatus,
-    setinputbuffer!, reset!, mark_dirty!, settings_to_dict
+    setinputbuffer!, reset!, mark_dirty!, settings_to_dict,
+    MultiPort, buffervalues, bufferkeys, PortBuffer
 
 # ==========================================================================
 #  Контейнеры и узлы
@@ -37,11 +38,72 @@ end
 struct TyImmutable <: AbstractNodeData
     out::Int
 end
-#  Контейнер буфера, который по смыслу хотелось бы подставить, но нельзя
+#  Буфер-структура: по одному полю на каждый ВХОДНОЙ порт спеки, и в
+#  каждом — контейнер по номеру связи. Поля под связи быть не может:
+#  номера выдаются в работе.
 mutable struct TyBuf <: AbstractNodeInputBuffer
-    inp::Dict{Int, Int}
+    in::Dict{Int, Int}
     TyBuf() = new(Dict{Int, Int}())
 end
+
+#  Тот же тип, но поле названо не как порт: initbuffer! обязан сказать это
+#  внятно, потому что поле не доращивается.
+mutable struct TyBufWrong <: AbstractNodeInputBuffer
+    inp::Dict{Int, Int}
+    TyBufWrong() = new(Dict{Int, Int}())
+end
+
+#  Контейнер ОДНОГО порта, который держит ключи упорядоченными. Нужен, чтобы
+#  проверить точку расширения `buffervalues`/`bufferkeys`: словарь порядка не
+#  хранит, поэтому умолчание обязано собрать ключи и отсортировать, а такой
+#  контейнер уже знает ответ и только копирует.
+mutable struct SortedBuf{V} <: AbstractDict{Int, V}
+    cids::Vector{Int}
+    vals::Vector{V}
+    SortedBuf{V}() where V = new{V}(Int[], V[])
+end
+
+Base.length(b::SortedBuf)  = length(b.cids)
+Base.isempty(b::SortedBuf) = isempty(b.cids)
+Base.keys(b::SortedBuf)    = b.cids
+Base.values(b::SortedBuf)  = b.vals
+Base.haskey(b::SortedBuf, c::Int) = !isempty(searchsorted(b.cids, c))
+function Base.getindex(b::SortedBuf, c::Int)
+    r = searchsorted(b.cids, c)
+    isempty(r) && throw(KeyError(c))
+    b.vals[first(r)]
+end
+Base.get(b::SortedBuf, c::Int, d) = haskey(b, c) ? b[c] : d
+function Base.setindex!(b::SortedBuf, v, c::Int)
+    i = searchsortedfirst(b.cids, c)
+    if i <= length(b.cids) && b.cids[i] == c
+        b.vals[i] = v
+    else
+        insert!(b.cids, i, c); insert!(b.vals, i, v)
+    end
+    b
+end
+function Base.delete!(b::SortedBuf, c::Int)
+    r = searchsorted(b.cids, c)
+    isempty(r) || (deleteat!(b.cids, first(r)); deleteat!(b.vals, first(r)))
+    b
+end
+Base.empty!(b::SortedBuf) = (empty!(b.cids); empty!(b.vals); b)
+function Base.iterate(b::SortedBuf, i::Int = 1)
+    i > length(b.cids) && return nothing
+    (b.cids[i] => b.vals[i], i + 1)
+end
+
+#  Вот и всё переопределение: сортировать нечего, копия обязательна.
+MetidaFlows.bufferkeys(b::SortedBuf)   = copy(b.cids)
+MetidaFlows.buffervalues(b::SortedBuf) = copy(b.vals)
+
+struct TySorted <: AbstractNodeType end  # MultiPort на упорядоченном буфере
+sp_tysorted() = NodeSpec("Ty sorted", [PortSpec("In", Int, :ins, MultiPort())],
+                                      [PortSpec("Out", Int, :out)])
+MetidaFlows.nodebuffer(::Type{TySorted}) = Dict{Symbol, SortedBuf{Int}}(:ins => SortedBuf{Int}())
+MetidaFlows.execute_unsafe!(n::DataNode{TySorted}) =
+    (setdata!(n, :out, sum(getinputdata(n, :ins); init = 0)); [:out])
 
 struct TyScale <: AbstractNodeType end   # типизирован целиком
 struct TyPlain <: AbstractNodeType end   # остаётся на Dict
@@ -120,7 +182,7 @@ end
     @test nodesettings(TyPlain) isa Dict{Symbol, Any}
     @test nodedata(TyPlain)     isa Dict{Symbol, Any}
     @test nodestate(TyPlain)    isa NodeState
-    @test nodebuffer(TyPlain)   isa Dict{Symbol, Dict{Int, Any}}
+    @test nodebuffer(TyPlain)   isa Dict{Symbol, PortBuffer{Any}}
 
     #  Специализированный тип получает свои контейнеры
     @test nodesettings(TyScale) isa TySettings
@@ -134,20 +196,20 @@ end
 
     #  Узел собирается типизированным без единого кварга
     node = DataNode(TyScale, sp_tyscale())
-    @test node isa DataNode{TyScale, TySettings, TyData, NodeState, Int}
+    @test node isa DataNode{TyScale, TySettings, TyData, NodeState, Dict{Symbol, Dict{Int, Int}}}
     @test DataNode(TyPlain, sp_typlain()) isa
-          DataNode{TyPlain, Dict{Symbol, Any}, Dict{Symbol, Any}, NodeState, Any}
+          DataNode{TyPlain, Dict{Symbol, Any}, Dict{Symbol, Any}, NodeState, Dict{Symbol, PortBuffer{Any}}}
 
     #  Явный кварг по-прежнему сильнее точки расширения
     mixed = DataNode(TyScale, sp_tyscale(); settings = Dict{Symbol, Any}())
-    @test mixed isa DataNode{TyScale, Dict{Symbol, Any}, TyData, NodeState, Int}
+    @test mixed isa DataNode{TyScale, Dict{Symbol, Any}, TyData, NodeState, Dict{Symbol, Dict{Int, Int}}}
 end
 
 # --------------------------------------------------------------------------
 @testset "Y4. типизированный узел в графе                  " begin
     g = tygraph(value = 5, factor = 3)
     #  Раньше здесь падало: add_connection! → mark_dirty! → empty!(node.data)
-    @test getnode(g.w, g.s) isa DataNode{TyScale, TySettings, TyData, NodeState, Int}
+    @test getnode(g.w, g.s) isa DataNode{TyScale, TySettings, TyData, NodeState, Dict{Symbol, Dict{Int, Int}}}
     @test scheduler!(g.w)
     @test getstatus(getnode(g.w, g.s)) === :clean
     @test getdata(g.w, g.s, :out) == 15
@@ -193,10 +255,10 @@ end
     w2 = dict_to_workflow(d)
     #  ГЛАВНОЕ: загруженный узел того же типа, а не на Dict-ах
     @test typeof(getnode(w2, g.s)) === typeof(getnode(g.w, g.s))
-    @test getnode(w2, g.s) isa DataNode{TyScale, TySettings, TyData, NodeState, Int}
+    @test getnode(w2, g.s) isa DataNode{TyScale, TySettings, TyData, NodeState, Dict{Symbol, Dict{Int, Int}}}
     @test getnode(w2, g.s).settings[:factor] == 3
     #  а узел без специализации остался на Dict
-    @test getnode(w2, g.c) isa DataNode{TyPlain, Dict{Symbol, Any}, Dict{Symbol, Any}, NodeState, Any}
+    @test getnode(w2, g.c) isa DataNode{TyPlain, Dict{Symbol, Any}, Dict{Symbol, Any}, NodeState, Dict{Symbol, PortBuffer{Any}}}
 
     @test scheduler!(w2)
     @test getdata(w2, g.s, :out) == 15
@@ -204,19 +266,108 @@ end
 end
 
 # --------------------------------------------------------------------------
-@testset "Y6. чего нельзя: контейнер буфера                " begin
-    #  `nodebuffer` выбирает тип ЗНАЧЕНИЯ, а не контейнер: поле объявлено
-    #  Dict{Symbol, Dict{Int, BufferT}}, и подменить его нельзя.
-    @test fieldtype(DataNode, :input_buffer) <: Dict
+@testset "Y6. контейнер буфера — тоже параметр          " begin
+    #  До 0.3.0 поле было объявлено Dict{Symbol, Dict{Int, BufferT}}: контейнер
+    #  фиксирован, свободен только тип значения. Здесь стоял тест, что
+    #  конструктор структуры НЕ принимает. Теперь принимает.
     @test TyImmutable <: AbstractNodeData
     @test AbstractNodeInputBuffer <: AbstractNodeFields
 
-    #  конструктор DataNode такого не принимает
-    @test_throws MethodError DataNode(TyScale, sp_tyscale(); input_buffer = TyBuf())
+    node = DataNode(TyScale, sp_tyscale(); input_buffer = TyBuf())
+    @test node isa DataNode{TyScale, TySettings, TyData, NodeState, TyBuf}
+    @test node.input_buffer isa TyBuf
 
-    #  а тип значения — принимает, и он виден в параметре узла
-    node = DataNode(TyScale, sp_tyscale(); input_buffer = Dict{Symbol, Dict{Int, Int8}}())
-    @test node isa DataNode{TyScale, TySettings, TyData, NodeState, Int8}
+    #  и он работает как буфер: чтение, запись, пустота, очистка
+    @test getinputdata(node, :in) === nothing
+    setinputbuffer!(node, :in, 7, 42)
+    @test getinputdata(node, :in) == 42
+    @test getinputdata(node, :in, 7) == 42
+    @test getinputconnections(node, :in) == [7]
+    @test node.input_buffer.in[7] == 42          # поле, а не хеш по Symbol
+    MetidaFlows.invalidate_buffer!(node, :in, 7)
+    @test getinputdata(node, :in) === nothing
+
+    #  тип значения по-прежнему выбирается, просто теперь вместе с контейнером
+    n8 = DataNode(TyScale, sp_tyscale(); input_buffer = Dict{Symbol, Dict{Int, Int8}}())
+    @test n8 isa DataNode{TyScale, TySettings, TyData, NodeState, Dict{Symbol, Dict{Int, Int8}}}
+
+    #  Поле должно называться как порт — доращивать структуру нечем, поэтому
+    #  это ошибка, и она называет и тип, и нужное поле.
+    #  Опечатка в имени поля нарушает обе проверки сразу, и сообщение
+    #  называет обе стороны: что нужно и что лишнее.
+    err = try; DataNode(TyScale, sp_tyscale(); input_buffer = TyBufWrong()); catch e; e; end
+    @test err isa ErrorException
+    @test occursin("TyBufWrong", err.msg)
+    @test occursin("`in`", err.msg)          # нужное поле
+    @test occursin("`inp`", err.msg)         # лишнее поле
+
+    #  Лишнее поле само по себе — тоже ошибка: буфер не должен обещать
+    #  портов, которых в спеке нет
+    err3 = try; DataNode(TyPlain, sp_typlain(); input_buffer = TyBuf()); catch e; e; end
+    @test err3 isa ErrorException
+    @test occursin("`in`", err3.msg)
+    @test !occursin("no field for input port", err3.msg)   # нечего не хватать
+
+    #  Словарь, значение которого не контейнер, нарастить нельзя — и об этом
+    #  тоже говорится внятно, а не MethodError из глубины.
+    err2 = try; DataNode(TyScale, sp_tyscale(); input_buffer = Dict{Symbol, Any}()); catch e; e; end
+    @test err2 isa ErrorException
+    @test occursin("cannot be constructed", err2.msg)
+
+    @test fieldtype(DataNode{TyScale, TySettings, TyData, NodeState, TyBuf}, :input_buffer) === TyBuf
+end
+
+# --------------------------------------------------------------------------
+@testset "Y7. контейнер, который знает свой порядок        " begin
+    #  `buffervalues`/`bufferkeys` — точка расширения: словарь порядка не
+    #  хранит, поэтому умолчание собирает ключи и сортирует. Контейнер,
+    #  который держит их упорядоченными, отвечает копией.
+    b = SortedBuf{Int}()
+    b[30] = 3; b[10] = 1; b[20] = 2            # пишем вразнобой
+    @test collect(keys(b)) == [10, 20, 30]
+    @test MetidaFlows.bufferkeys(b)   == [10, 20, 30]
+    @test MetidaFlows.buffervalues(b) == [1, 2, 3]
+
+    #  копия, а не внутренний вектор: иначе узел дотянулся бы до буфера
+    @test !(MetidaFlows.buffervalues(b) === b.vals)
+    @test !(MetidaFlows.bufferkeys(b)   === b.cids)
+    v = MetidaFlows.buffervalues(b); empty!(v)
+    @test MetidaFlows.buffervalues(b) == [1, 2, 3]
+
+    #  переопределение даёт ТО ЖЕ, что умолчание на словаре с теми же данными
+    d = Dict{Int, Int}(30 => 3, 10 => 1, 20 => 2)
+    @test MetidaFlows.buffervalues(d) == MetidaFlows.buffervalues(b)
+    @test MetidaFlows.bufferkeys(d)   == MetidaFlows.bufferkeys(b)
+
+    #  и то же в узле: MultiPort отдаёт порядок подключения
+    w = Workflow(0; type = :DAW)
+    sm = add_node!(w, DataNode(TySorted, sp_tysorted()))
+    @test getnode(w, sm).input_buffer[:ins] isa SortedBuf{Int}
+    cids = Int[]
+    for i in 1:12
+        p = add_node!(w, DataNode(TyPlain, sp_typlain()))
+        setsettings!(w, p, Dict(:value => i))
+        push!(cids, add_connection!(w, p, :out, sm, :ins))
+    end
+    scheduler!(w)
+    node = getnode(w, sm)
+    @test getinputdata(node, :ins) == collect(1:12)     # на Dict тут было cbfedahgjkli
+    @test getinputconnections(node, :ins) == cids
+    @test getdata(w, sm, :out) == sum(1:12)
+
+    #  удаление связи и переподключение ведут себя как на словаре
+    delete_connection!(w, cids[3])
+    scheduler!(w)
+    @test getinputdata(node, :ins) == [1, 2, 4, 5, 6, 7, 8, 9, 10, 11, 12]
+
+    #  круг через снимок сохраняет и тип контейнера, и порядок
+    MetidaFlows.unregister_all!()
+    register_node!(w)
+    w2 = dict_to_workflow(workflow_to_dict(w; values = true, state = true))
+    @test getnode(w2, sm).input_buffer[:ins] isa SortedBuf{Int}
+    scheduler!(w2)
+    @test getinputdata(getnode(w2, sm), :ins) == [1, 2, 4, 5, 6, 7, 8, 9, 10, 11, 12]
+    MetidaFlows.unregister_all!()
 end
 
 end

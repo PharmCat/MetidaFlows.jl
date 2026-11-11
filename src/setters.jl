@@ -113,6 +113,9 @@ function setsettings!(model::Workflow, id::Int, settings::Dict{Symbol, <: Any})
     node = getnode(model, id)
     setsettings_unsafe!(node, settings)
     invalidate_downstream!(model, id)
+    #  Ключи сортируются: порядок обхода переданного `Dict` машинно-зависим,
+    #  а журнал одинаковых правок обязан быть одинаковым.
+    audit!(model, SettingsChanged(id, sort!(collect(keys(settings)))))
     node
 end
 """

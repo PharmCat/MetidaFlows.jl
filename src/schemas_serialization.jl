@@ -226,6 +226,80 @@ function connection_to_dict(nc::NodeConnection)
     d["input_port"]  = nc.input_port
     return d
 end
+
+# ==========================================================================
+#  Audit codec
+#
+#  Журнал правок графа — набор СОБЫТИЙ ЗАКРЫТ. Имя события из файла
+#  сверяется с этим перечнем и ни во что не разрешается: каждая ветка ниже
+#  конструирует свой тип явно, по своим полям. Тот же принцип, что в
+#  `VALUE_TYPES` и `NODE_REGISTER` — загрузка снимка не должна уметь
+#  создать то, чего пакет не предусмотрел.
+# ==========================================================================
+
+"""
+    AUDIT_EVENT_NAMES
+
+The names [`audit_event_to_dict`](@ref) writes and
+[`dict_to_audit_event`](@ref) accepts. A closed set: a name outside it is an
+error, and nothing read from a file is resolved to a type.
+"""
+const AUDIT_EVENT_NAMES = ("NodeAdded", "NodeDeleted", "ConnectionAdded",
+                           "ConnectionDeleted", "SettingsChanged")
+
+"""
+    audit_event_to_dict(e::AbstractAuditEvent) -> Dict{String, Any}
+
+One record of the graph change log as a JSON-serializable dictionary, tagged by
+`"event"` with one of [`AUDIT_EVENT_NAMES`](@ref).
+
+Port labels and setting keys are written as plain strings rather than through
+the value codec: a change log is read by people as often as by programs, and
+`"a"` says as much as `{"t": "Symbol", "v": "a"}`.
+
+See also [`dict_to_audit_event`](@ref).
+"""
+audit_event_to_dict(e::NodeAdded) =
+    Dict{String, Any}("event" => "NodeAdded", "id" => e.id, "type" => e.type)
+audit_event_to_dict(e::NodeDeleted) =
+    Dict{String, Any}("event" => "NodeDeleted", "id" => e.id)
+audit_event_to_dict(e::ConnectionAdded) =
+    Dict{String, Any}("event" => "ConnectionAdded", "id" => e.id,
+                      "output_id" => e.output_id, "output_port" => String(e.output_port),
+                      "input_id"  => e.input_id,  "input_port"  => String(e.input_port))
+audit_event_to_dict(e::ConnectionDeleted) =
+    Dict{String, Any}("event" => "ConnectionDeleted", "id" => e.id)
+audit_event_to_dict(e::SettingsChanged) =
+    Dict{String, Any}("event" => "SettingsChanged", "id" => e.id,
+                      "keys" => String[String(k) for k in e.keys])
+
+"""
+    dict_to_audit_event(d::Dict{String}) -> AbstractAuditEvent
+
+Rebuild one change-log record from the dictionary
+[`audit_event_to_dict`](@ref) produced.
+
+`d["event"]` must be one of [`AUDIT_EVENT_NAMES`](@ref); each is constructed
+explicitly from its own fields, so a file cannot name a type to build or a
+field to fill. Port labels and setting keys are accepted as `String` or
+`Symbol`, like the rest of the loader.
+"""
+function dict_to_audit_event(d::Dict{String})
+    haskey(d, "event") || error("Audit record has no `event` key")
+    name = d["event"]
+    sym(x) = x isa Symbol ? x : Symbol(x)
+    if     name == "NodeAdded"         return NodeAdded(Int(d["id"]), String(d["type"]))
+    elseif name == "NodeDeleted"       return NodeDeleted(Int(d["id"]))
+    elseif name == "ConnectionAdded"   return ConnectionAdded(Int(d["id"]),
+                                              Int(d["output_id"]), sym(d["output_port"]),
+                                              Int(d["input_id"]),  sym(d["input_port"]))
+    elseif name == "ConnectionDeleted" return ConnectionDeleted(Int(d["id"]))
+    elseif name == "SettingsChanged"   return SettingsChanged(Int(d["id"]),
+                                              Symbol[sym(k) for k in d["keys"]])
+    end
+    error("Unknown audit event `$(name)`; the snapshot format knows only " *
+          join(AUDIT_EVENT_NAMES, ", "))
+end
 # ==========================================================================
 #  Value codec
 #
@@ -537,6 +611,12 @@ function workflow_to_dict(w::Workflow; values::Bool = true, state::Bool = false)
         o[k] = copy(v)
     end
     d["outgoing"]    = o
+    #  Журнал пишется только когда он не пуст, то есть когда `audit` включали.
+    #  По умолчанию снимок остаётся таким же, каким был, — ключа просто нет,
+    #  и `format_version` поднимать не за что.
+    if !isempty(w.audit_log)
+        d["audit_log"] = [audit_event_to_dict(e) for e in w.audit_log]
+    end
     return d
 end
 
@@ -612,8 +692,17 @@ function dict_to_workflow(d::Dict{String}; usermode::Bool = false,
     #  Same clamp as n_iter above: a connection id from the file must never be
     #  handed out again, or the next add_connection! overwrites a loaded edge.
     w.c_iter = max(d["c_iter"], isempty(w.connections) ? 0 : maximum(keys(w.connections)))
-    # w.audit_log # technical debt
+    #  Журнал правок восстанавливается, если он в файле есть: это данные, и
+    #  они принадлежат графу. А пишутся ли ДАЛЬШЕ новые правки — решает
+    #  `SETTINGS[:audit]`, настройка процесса, и снимок её не меняет: файл не
+    #  вправе переключать режим работы пакета.
+    if haskey(d, "audit_log")
+        for e in d["audit_log"]
+            push!(w.audit_log, dict_to_audit_event(e))
+        end
+    end
     refreshind!(w)
+    w.ver += 1
     return w
 end
 
