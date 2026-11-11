@@ -626,7 +626,7 @@ The optional positional argument selects the port arity:
 |---|---|
 | `:normal` | an ordinary data connection: [`isready`](@ref) waits for its producer and [`execution_node_validation`](@ref) requires a value when `required` |
 | `:feedback` | **input ports only**: closes a cycle and carries the value of the previous iteration. Not waited for, not required |
-| `:terminal` | a slot for a result that is not meant to be connected |
+| `:terminal` | a slot for a result that is not meant to be connected. Connecting one is allowed but warns: the kind is a statement of intent, not a constraint |
 | `:error` | reserved for error routing; must be `required = false` and its `datatype` must be a subtype of `Exception` |
  
 Constraints are checked at construction time. `kind = :feedback` on an
@@ -643,7 +643,13 @@ PortSpec("items", Int, :vals, MultiPort())                    # multi-connection
 PortSpec("hint",  Int, :in; required = false)                 # optional port
 PortSpec("state", Int, :prev; kind = :feedback)                # closes a cycle
 PortSpec("report", DataFrame, :out; kind = :terminal)          # result slot
+PortSpec("error", Exception, :err; kind = :error,              # error routing:
+                                   required = false)           # both are mandatory
 ```
+
+The arity is the only positional argument after the label, so a `kind` written
+positionally - `PortSpec("p", Int, :p, :feedback)` - is a `MethodError`, not a
+feedback port.
 """
 struct PortSpec{T <: AbstractPortType}
     name::String
@@ -679,6 +685,16 @@ Fields:
 - `input_ports::Vector{PortSpec}`, `output_ports::Vector{PortSpec}` - port specifications.
 - `settings::Vector{Symbol}` - settings keys advertised through the node schema.
 - `portmap::Dict{Tuple{Symbol,Symbol}, Int}` - `(direction, label) => port index`, built by the constructor.
+
+# Ports are enforced, settings are not
+The two lists are not symmetric, and it is worth knowing which is which. A
+port label that is not in the spec is **rejected**. A settings key that is not
+in `settings` is **not**: [`setsettings!`](@ref) merges whatever it is given,
+and the list is a declaration for [`settings_schema`](@ref) and for whoever
+builds a user interface over the node. If a setting is mandatory, or has to be
+of a particular type, say so in [`validate_settings`](@ref) - that is the only
+thing the engine checks, and a node that fails it ends `:invalid_settings`
+without executing.
  
 # Example
 ```julia
@@ -1530,8 +1546,8 @@ function check_connection_validity(model, c::NodeConnection; throw_error::Bool =
     input_port = c.input_port
     output_port = c.output_port
     # check nodes exist
-    haskey(model.nodes, output_id) || (throw_error ? error("Output (parent) node  doesn't exist") : return false)
-    haskey(model.nodes, input_id)  || (throw_error ? error("Input (child) node doesn't exist") : return false)
+    haskey(model.nodes, output_id) || (throw_error ? error("Output (parent) node $(output_id) doesn't exist") : return false)
+    haskey(model.nodes, input_id)  || (throw_error ? error("Input (child) node $(input_id) doesn't exist") : return false)
     
     parent_node = getnode(model, output_id)
     child_node  = getnode(model, input_id)

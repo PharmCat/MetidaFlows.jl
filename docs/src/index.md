@@ -86,11 +86,6 @@ Instead of hidden execution magic, everything is explicit:
 
 ```@example mfexample
 using MetidaFlows
-
-import MetidaFlows: Workflow, NodeSpec, PortSpec, DataNode, AbstractNodeType,
-                   add_node!, add_connection!, setsettings!, scheduler!,
-                   getdata, setdata!, getinputdata
-
 using CSV, DataFrames
 
 # CSV node type
