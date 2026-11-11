@@ -40,6 +40,7 @@ function getposition(node::AbstractDataNode)
 end
 """
     getstatus(node::AbstractDataNode) -> Symbol
+    getstatus(model::Workflow, id::Int) -> Symbol
 
 Return execution status of node.
 
@@ -57,11 +58,6 @@ function getstatus(node::AbstractDataNode)
     return node.properties.status
 end
 
-"""
-    getstatus(model::Workflow, id::Int)
-
-Return execution status of node.
-"""
 function getstatus(model::Workflow, id::Int)
     return getstatus(getnode(model, id))
 end
@@ -82,7 +78,27 @@ function getstate(model::Workflow, id::Int, s::Symbol)
 end
 
 """
-    getexecn(model::Workflow, id::Int)
+    getexecn(model::Workflow, id::Int) -> Int
+
+How many times the node has executed since its execution state was last
+cleared.
+
+The counter lives in [`NodeState`](@ref) and is raised by [`execute!`](@ref)
+just before the node's own code runs, so a node that raised still counts as
+having executed. [`reset!`](@ref) zeroes it; `reset!(model; soft = true)`
+zeroes it too, since both forms reset the counter.
+
+This is the cheapest way to ask what a run actually did: a node left `:dirty`
+below a failure has the same status as a node that was never reached, but a
+different `exec_n`. In a cyclic [`ABW`](@ref) workflow it counts turns.
+
+# Example
+```julia
+scheduler!(w)
+getexecn(w, id)                 # 1 — узел исполнился один раз
+scheduler!(w; reset_mode = :none)
+getexecn(w, id)                 # 1 — чистый узел не пересчитывался
+```
 """
 function getexecn(model::Workflow, id::Int)
     return getnode(model, id).state.exec_n
@@ -213,6 +229,7 @@ _getinputdata(node::AbstractDataNode, port::PortSpec{SinglePort}) =
 #  Единственное значение порта. Общая форма достаёт его через пару, которую
 #  отдаёт итератор; контейнер по умолчанию хранит значения подряд, поэтому
 #  берёт напрямую — на цепочке из SinglePort это и есть разница.
+@doc (@doc buffervalues)
 function buffersingle(buffer)
     len = length(buffer)
     len == 1 && return first(buffer)[2]

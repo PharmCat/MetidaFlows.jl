@@ -60,78 +60,6 @@ getinputmeta,
 failed_nodes,
 check_failed_nodes
 
-#=
-# In publick API, but not exported:
-# Execution:
-
-execute_unsafe!,
-request_stop!,
-isstoprequested,
-failed_nodes,
-check_failed_nodes,
-validate_node,
-validate_settings, 
-validate_result,
-
-# Serialization and schemas:
-
-workflow_to_dict,
-node_to_dict, 
-node_properties_to_dict,
-spec_to_dict, 
-portspec_to_dict,
-connection_to_dict,
-settings_to_dict,
-node_state_to_dict,
-value_to_dict,
-
-dict_to_workflow,
-dict_to_node,
-dict_to_connection,
-dict_to_properties,
-dict_to_spec,
-dict_to_settings!,
-dict_to_node_state!,
-dict_to_value,
-
-settings_to_dict_usermod!,
-dict_to_settings_usermod!,
-
-# Node register:
-
-NODE_REGISTER,
-register_node!,
-unregister_node!,
-unregister_all!,
-isregistered,
-getregnodeinfo,
-nodetypestr,
-
-settings_schema,
-node_schema,
-
-ismetasource,
-getmeta_unsafe,
-MetaRuleError,
-
-initbuffer!,
-buffervalues,
-bufferkeys,
-buffersingle,
-PortBuffer,
-
-NodeAdded,
-NodeDeleted,
-ConnectionAdded,
-ConnectionDeleted,
-SettingsChanged,
-audit!,
-log!,
-audit_event_to_dict,
-dict_to_audit_event,
-AUDIT_EVENT_NAMES,
-=#
-#
 """
     AbstractDataNode
  
@@ -1233,6 +1161,36 @@ function unregister_all!()
 end
 
 
+"""
+    GraphCache
+
+The graph of a workflow, cached: the directed graph itself and, derived from
+it, whether the graph is acyclic and a topological order of its nodes.
+
+Held by [`Workflow`](@ref) in its `graph` field and never built by hand. Read
+it through [`makegraph`](@ref), [`is_cyclic`](@ref is_cyclic(::Workflow)) and
+[`topological_sort`](@ref topological_sort(::Workflow)), each of which
+recomputes its own part when that part is out of date.
+
+# Fields
+- `graph`, `is_cyclic`, `topological_sort` - the three cached values.
+- `ver`, `ic_ver`, `ts_ver` - the `Workflow.ver` each of them was computed at.
+  A value is current when its version equals the workflow's, so the three are
+  refreshed independently: asking whether the graph is cyclic does not pay for
+  a topological sort.
+
+# Staleness
+`Workflow.ver` is raised by the four functions that edit a graph, and only by
+them, so a cached value is stale exactly when the structure changed through
+them.
+
+A new workflow starts at version `0` with all three values already set - the
+empty graph, `false`, and an empty order - which is what an empty workflow's
+answers are, so nothing is computed until the first edit. The cache is
+therefore correct for as long as every edit goes through the editing
+functions, and silently wrong as soon as one does not: see *Editing the graph*
+in [`Workflow`](@ref).
+"""
 mutable struct GraphCache
     ver::Int
     ic_ver::Int
@@ -2366,7 +2324,7 @@ Directed graph representation of workflow: node identifiers become vertex
 names and every connection becomes an edge.
  
 Built once per structural change and kept in `model.graph`; a call that finds
-the cache current does no work at all. See [`Graph`](@ref).
+the cache current does no work at all. See [`GraphCache`](@ref).
  
 # Returns
 The **shared** graph held by the workflow. Treat it as read-only: adding a
@@ -2402,7 +2360,7 @@ end
     is_cyclic(model::Workflow) -> Bool
  
 Whether the workflow's graph contains a cycle, from the same cache as
-[`makegraph`](@ref); see [`Graph`](@ref).
+[`makegraph`](@ref); see [`GraphCache`](@ref).
  
 A cycle must be closed through a port declared `kind = :feedback` to be
 executable, and only by [`ABW`](@ref): [`scheduler!`](@ref) on a [`DAW`](@ref)
@@ -2431,7 +2389,7 @@ end
  
 A topological order of the workflow's nodes, from the same cache as
 [`makegraph`](@ref); the order [`scheduler!`](@ref) traverses a [`DAW`](@ref)
-workflow in. See [`Graph`](@ref).
+workflow in. See [`GraphCache`](@ref).
  
 # Returns
 The **shared** order held by the workflow, as node identifiers. Treat it as
