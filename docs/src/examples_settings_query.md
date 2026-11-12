@@ -238,3 +238,15 @@ consumer it feeds, and two producers of the same type cannot be confused.
 * The shape of a description — here a `NamedTuple` with a `columns` field — is
   a contract between nodes sharing a port datatype. The engine does not define
   it, and neither does it define how the result is turned into a settings form.
+
+## The graph
+
+The graph the settings came from: See [Drawing a workflow](guide.md#Drawing-a-workflow) for the helper this uses.
+
+```@setup mfmeta
+include(joinpath(pkgdir(MetidaFlows), "docs", "plotgraph.jl"))
+```
+
+```@example mfmeta
+plotworkflow(w)
+```

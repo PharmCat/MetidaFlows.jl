@@ -117,6 +117,18 @@ println("Removed:", ri)
 df[1:3, :]
 ```
 
+The graph itself, after the run - green is `:clean`, and the orange arc is the
+`:feedback` edge that closes the loop. See
+[Drawing a workflow](guide.md#Drawing-a-workflow) for the helper this uses.
+
+```@setup mfexample
+include(joinpath(pkgdir(MetidaFlows), "docs", "plotgraph.jl"))
+```
+
+```@example mfexample
+plotworkflow(w)
+```
+
 One call to [`scheduler!`](@ref) runs the whole loop to completion.
 
 ### How the scheduler drives it

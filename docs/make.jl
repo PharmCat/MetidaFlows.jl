@@ -15,7 +15,13 @@ makedocs(;
     ),
     pages=[
         "Home" => "index.md",
-        "Guide" => "guide.md",
+        "Guide" => [
+            "User guide" => "guide.md",
+            "Execution model" => "guide_execution.md",
+            "Ports and cycles" => "guide_ports.md",
+            "Serialization and schemas" => "guide_serialization.md",
+            "Logs" => "guide_logs.md",
+        ],
         "Typed containers" => "typed_containers.md",
         "Examples" => [
             "AWB cycle" => "examples_abw_cycle.md",

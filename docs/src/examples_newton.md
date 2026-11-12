@@ -12,7 +12,7 @@ x' = x - \frac{f(x)}{f'(x)} = x - \frac{x^2 - c}{2x}
 
 It is the smallest algorithm that has a *real* failure mode: `f'(x) = 2x`
 becomes zero, and the step is undefined. This example routes that failure
-through an `:error` port, which the [guide](guide.md#Error-routing-with-:error-ports)
+through an `:error` port, which the [guide](guide_ports.md#Error-routing-with-:error-ports)
 describes in general: the engine never writes to such a port, so the node that
 can fail catches its own failure and publishes it instead of the normal
 result.
@@ -439,9 +439,24 @@ which is exactly why the handler reports `x` and not only a reason.
 * **A raised exception is not routed anywhere.** It gives the node `:failed`,
   adds one record to the log and stops the dependent subtree — which here is
   the whole graph, since every node descends from the source that failed. See
-  [what a failure does to the rest of the run](guide.md#What-a-failure-does-to-the-rest-of-the-run);
+  [what a failure does to the rest of the run](guide_ports.md#What-a-failure-does-to-the-rest-of-the-run);
   `scheduler!(w; strict = true)` is the way to have it reported rather than
   only logged. That is the whole reason `NStep` catches its own failure.
 
 * **`:error` edges are invisible to cycle detection**, so one can close a loop
   even in a `DAW` graph. Convenient, and easy to forget.
+
+## The graph
+
+The graph, with the `:error` routing in red: that edge carries a value, not a
+failure, so the node it leaves still ends `:clean`. See [Drawing a workflow](guide.md#Drawing-a-workflow) for the helper this uses.
+
+```@setup newton
+include(joinpath(pkgdir(MetidaFlows), "docs", "plotgraph.jl"))
+```
+
+```@example newton
+gp = build_newton()
+scheduler!(gp.w; maxiter = 200_000)
+plotworkflow(gp.w; label = :id)
+```

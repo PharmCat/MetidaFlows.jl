@@ -537,3 +537,17 @@ getdata(w1, gate1, :sorted)
 
 * **`DAW` will not take this graph.** A cycle closed by a `:feedback` port is
   still a cycle, and the `DAW` scheduler rejects it by design.
+
+## The graph
+
+The graph, after a run: See [Drawing a workflow](guide.md#Drawing-a-workflow) for the helper this uses.
+
+```@setup bubble
+include(joinpath(pkgdir(MetidaFlows), "docs", "plotgraph.jl"))
+```
+
+```@example bubble
+wp = first(bubble_graph([3, 1, 2]))
+scheduler!(wp; maxiter = 20_000)
+plotworkflow(wp; label = :id)
+```
