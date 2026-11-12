@@ -105,6 +105,9 @@ target node and all downstream nodes are invalidated via
   configuration inside a workflow.
 - Settings are **merged**: only the keys present in `settings` are
   overwritten, the rest are kept.
+- The keys are **not** checked against the list in [`NodeSpec`](@ref): that
+  list is a declaration, and an unknown key is simply stored. Enforce what
+  matters in [`validate_settings`](@ref).
  
 # Returns
 The node.

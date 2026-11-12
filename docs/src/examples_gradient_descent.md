@@ -401,3 +401,18 @@ like the rest of the graph.
 * **A full reset starts over.** `reset_mode = :full` clears the feedback
   buffers, so a second [`scheduler!`](@ref) call repeats the descent;
   `:soft` keeps the loop state and continues from the last point.
+
+## The graph
+
+The descent graph. The loop is closed by the orange `:feedback` edges, and
+the two central nodes are the finite-difference pair. See [Drawing a workflow](guide.md#Drawing-a-workflow) for the helper this uses.
+
+```@setup descent
+include(joinpath(pkgdir(MetidaFlows), "docs", "plotgraph.jl"))
+```
+
+```@example descent
+gp = descent_graph()
+scheduler!(gp.w; maxiter = 200_000)
+plotworkflow(gp.w; label = :id)
+```

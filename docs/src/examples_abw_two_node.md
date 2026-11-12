@@ -185,3 +185,16 @@ joins the loop.
 
 The rule is one line long: **an edge is either a barrier or a delay.** Mark as
 `:feedback` exactly the edges that close a cycle, and no others.
+
+## The graph
+
+The two-node loop as the engine sees it. The orange arc is the `:feedback`
+edge; everything else is an ordinary `:normal` connection. See [Drawing a workflow](guide.md#Drawing-a-workflow) for the helper this uses.
+
+```@setup mfexample
+include(joinpath(pkgdir(MetidaFlows), "docs", "plotgraph.jl"))
+```
+
+```@example mfexample
+plotworkflow(w)
+```

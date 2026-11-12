@@ -149,6 +149,16 @@ Read inputs with [`getinputdata`](@ref), write results with
 produced. That vector is the contract with the engine: it is stored as the
 `ready_ports` state and only connections leaving these ports are refreshed by
 [`push_buffer!`](@ref). Returning a subset of the output ports is allowed.
+
+# The returned labels are taken on trust
+Name only what you actually wrote. A label you did not publish - or one that
+is not an output port at all - is **not** reported: the node ends `:clean`,
+and a consumer of that port silently gets nothing, because the connection was
+refreshed from a port that holds no new value. The symptom appears one node
+downstream, which is a long way from the typo.
+
+The vector itself is checked, though: returning a bare `Symbol` instead of a
+`Vector{Symbol}` raises inside the engine and leaves the node `:executing`.
  
 # Example
 ```julia

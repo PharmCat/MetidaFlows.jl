@@ -358,3 +358,20 @@ minimum or a concatenation over however many producers are attached.
   A port kind lives in the spec and a spec is shared by all nodes of its type —
   see [Horner's scheme](examples_horner.md) for what that costs when only one
   instance should have a terminal output.
+
+## The graph
+
+The lattice for two short words. The characters and constants sit on the
+left, the cells fan out to the right, and the layers are the order in which
+the cells can be computed. Green is `:clean`: one pass, every cell exactly
+once. See [Drawing a workflow](guide.md#Drawing-a-workflow) for the helper this uses.
+
+```@setup edit
+include(joinpath(pkgdir(MetidaFlows), "docs", "plotgraph.jl"))
+```
+
+```@example edit
+g2 = build_edit_distance("ab", "b")
+scheduler!(g2.w)
+plotworkflow(g2.w; label = :id)
+```

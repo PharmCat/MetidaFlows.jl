@@ -25,7 +25,7 @@ multiplications — which is the only thing it was ever cheap in.
 
 ### Both idioms, and both load-bearing
 
-The [guide](guide.md#Conditional-evaluation) describes two ways to make a
+The [guide](guide_execution.md#Conditional-evaluation) describes two ways to make a
 computation conditional. This graph uses one of each, and the choice between
 them is forced:
 
@@ -389,3 +389,18 @@ node that did not run. That is why the flag is opt-in rather than the default.
   is simply not ready on an even turn: the value is not coming, the node does
   not run, and the loop stops. The flag is the whole difference between "this
   may be absent" and "wait for it".
+
+## The graph
+
+The graph for one exponent. The orange arcs carry the loop state; the red one,
+if present, is `:error` routing. See [Drawing a workflow](guide.md#Drawing-a-workflow) for the helper this uses.
+
+```@setup power
+include(joinpath(pkgdir(MetidaFlows), "docs", "plotgraph.jl"))
+```
+
+```@example power
+gp = build_power(7, 13, 1_000_003)
+scheduler!(gp.w; maxiter = 1_000_000)
+plotworkflow(gp.w; label = :id)
+```

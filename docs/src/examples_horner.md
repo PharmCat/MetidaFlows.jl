@@ -336,3 +336,19 @@ elementary nodes. Anything a compiler would have fused, a graph cannot.
 * **Cancellation is not the engine's problem.** Near a root of high
   multiplicity both Horner and naive summation lose everything; the graph
   faithfully reproduces whichever scheme you wired.
+
+## The graph
+
+The graph for a cubic. Horner's scheme is a chain, and the drawing shows
+why the result cannot be computed in parallel: every node waits for the one
+before it. See [Drawing a workflow](guide.md#Drawing-a-workflow) for the helper this uses.
+
+```@setup horner
+include(joinpath(pkgdir(MetidaFlows), "docs", "plotgraph.jl"))
+```
+
+```@example horner
+gp = build_horner([3.0, -2.0, 0.5, 7.0], 2.0)
+scheduler!(gp.w)
+plotworkflow(gp.w; label = :id)
+```

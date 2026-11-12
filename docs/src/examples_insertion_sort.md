@@ -456,3 +456,20 @@ r = insertion_sort(Int[])
 
 * **`maxiter` of the scheduler is not the length of the sort.** It counts queue
   operations: about eighteen per turn here.
+
+## The graph
+
+The whole machine, after sorting `[3, 1, 2]`. The one orange arc from the gate
+back to the head stands for all four `:feedback` connections - array, `i`, `j`
+and the epoch counter: connections between the same pair of nodes are one edge
+in a drawing, and the loop state travels along it. See [Drawing a workflow](guide.md#Drawing-a-workflow) for the helper this uses.
+
+```@setup insertion
+include(joinpath(pkgdir(MetidaFlows), "docs", "plotgraph.jl"))
+```
+
+```@example insertion
+gp = build_insertion_sort([3, 1, 2])
+scheduler!(gp.w; maxiter = 100_000)
+plotworkflow(gp.w; label = :id)
+```

@@ -373,3 +373,16 @@ half-described graph; see [`MetaRuleError`](@ref) below.
 * **Intervals are the cheapest useful abstract domain, not the best one.**
   Everything above holds for any lattice with a rule per node type — units,
   signs, schemas, shapes. What changes is only what `getmeta_unsafe` returns.
+
+## The graph
+
+The polynomial graph. Nothing here has been executed - the colours are
+`:idle`/`:dirty`, and the interval bounds came from metadata alone. See [Drawing a workflow](guide.md#Drawing-a-workflow) for the helper this uses.
+
+```@setup iv
+include(joinpath(pkgdir(MetidaFlows), "docs", "plotgraph.jl"))
+```
+
+```@example iv
+plotworkflow(p.w; label = :id)
+```
