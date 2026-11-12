@@ -6,7 +6,7 @@ CurrentModule = MetidaFlows
 
 **Nothing on this page is part of the public API.** These are the engine's own
 functions: they may change behaviour, change signature or disappear in any
-release, including a patch release, and the changelog will not mention it. They
+release, including a patch release, and nothing announces it. They
 are documented because the engine's own invariants are worth writing down - the
 order in which the scheduler invalidates and publishes *is* the execution
 model - not because anything outside the package should call them.

@@ -313,6 +313,20 @@ end
 #  `getfield` — loading a workflow must not be able to run anything.
 # ==========================================================================
 
+"""
+    SNAPSHOT_FORMAT_VERSION
+
+The snapshot format this version of the package writes, and the newest it
+reads.
+
+[`workflow_to_dict`](@ref) stamps it into every snapshot under
+`"format_version"`, and [`dict_to_workflow`](@ref) refuses a file whose stamp
+is **higher** than this number: a format from the future may mean things this
+code does not know. A lower stamp, and a file with no stamp at all, are read as
+the formats they are.
+
+So a snapshot travels forward between versions, never backward.
+"""
 const SNAPSHOT_FORMAT_VERSION = 1
 
 const VALUE_TYPES = Dict{String, Type}(

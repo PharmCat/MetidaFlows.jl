@@ -591,9 +591,9 @@ end
     @test sort(actual) == sort(EXPORTED)
     @test length(actual) == 27
     @test allunique(actual)
-    #  Каждое экспортируемое имя определено и документировано: `api.md`
-    #  идёт через @autodocs, а он берёт имена из словаря докстрингов
-    #  модуля, поэтому недокументированное имя в справочник не попадёт.
+    #  Каждое экспортируемое имя определено и документировано: справочник
+    #  собран явными блоками `@docs`, и имя без докстринга в такой блок не
+    #  поставить — сборка упадёт на разрешении этого имени.
     documented = Set(string(k.var) for k in keys(Base.Docs.meta(MetidaFlows)))
     for n in EXPORTED
         @test isdefined(MetidaFlows, n)
@@ -604,6 +604,12 @@ end
     #  фиксирует текущее положение — а заодно и то, что проверить его можно
     #  не везде: `Base.ispublic` появился только в 1.11, а минимум по compat
     #  — 1.10, где самого ключевого слова тоже нет и проверять нечего.
+    #
+    #  «Держится документацией» — не на честном слове: справочник собран
+    #  явными блоками `@docs`, и докстринг, не попавший ни на одну страницу,
+    #  роняет сборку (`[:missing_docs]`). То есть уровень у новой функции
+    #  выбирается принудительно, в `docs/src/api_*.md` против
+    #  `docs/src/api_internals.md`, и забыть про это нельзя.
     if isdefined(Base, :ispublic)
         @test isempty(filter(n -> Base.ispublic(MetidaFlows, n) && !(n in actual) &&
                                   n !== :MetidaFlows, names(MetidaFlows; all = true)))
