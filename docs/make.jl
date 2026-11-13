@@ -44,6 +44,7 @@ makedocs(;
             "Execution" => "api_execution.md",
             "Port metadata" => "api_meta.md",
             "Serialization and schemas" => "api_serialization.md",
+            "Internals" => "api_internals.md",
         ],
     ],
 )

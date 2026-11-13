@@ -129,7 +129,7 @@ result = getdata(workflow, output_id, :result)
 function scheduler!(model::Workflow{DAW}; reset_mode::Symbol = :full, throw_error::Bool = false, strict::Bool = false, release_optional::Bool = false)
     #g = makegraph(model)
     if is_cyclic(model) error("workflow is cyclic") end
-    if reset_mode ∉ (:full, :soft, :none) error("Wrong reset mode: $reset_mode , only :full, :soft, :none availabel.") end
+    if reset_mode ∉ (:full, :soft, :none) error("Wrong reset mode: $reset_mode , only :full, :soft, :none available.") end
     soft_reset = false
     # change to thread safe
     model.run_id = rand(UInt64)
@@ -216,7 +216,8 @@ several times during one call.
  
 # Execution Steps
 1. Generate a new workflow `run_id` and apply `reset_mode`.
-2. Seed the queue with every node that has no input ports.
+2. Seed the queue with every node that has no input ports, in ascending id
+   order, so a run does not depend on `model.nodes` iteration order.
 3. Pop a node and execute it when [`isready`](@ref) reports that every
    producer connected through a `:normal` port is `:clean`; otherwise drop it -
    a producer finishing later re-queues it. Stop serving the queue if the node
@@ -319,14 +320,14 @@ scheduler!(w; throw_warn = false)         # a deliberately unseeded graph
 ```
 """
 function scheduler!(model::Workflow{ABW}; reset_mode::Symbol = :full, maxiter = 1000, throw_error::Bool = false, throw_warn::Bool = true, strict::Bool = false, release_optional::Bool = false)
-    if reset_mode ∉ (:full, :soft, :none) error("Wrong reset mode: $reset_mode , only :full, :soft, :none availabel.") end
+    if reset_mode ∉ (:full, :soft, :none) error("Wrong reset mode: $reset_mode , only :full, :soft, :none available.") end
     soft_reset = false
     # change to thread safe
     model.run_id = rand(UInt64)
     if reset_mode == :soft soft_reset = true end
     if reset_mode != :none reset!(model; soft = soft_reset) end
 
-    queued = Set{Int}() # Ноды которые уже добавлены - не реализовано
+    queued = Set{Int}()     # уже в очереди: защита от повторного добавления
     queue = Int[]
     #
     for (id, node) in model.nodes
@@ -335,6 +336,7 @@ function scheduler!(model::Workflow{ABW}; reset_mode::Symbol = :full, maxiter = 
             push!(queued, id)
         end
     end
+    sort!(queue)   # порядок обхода Dict машинно-зависим, порядок засева — нет
     if throw_warn && length(queue) == 0 @warn "No nodes in queue..." end
     # execute
     iter = 0
