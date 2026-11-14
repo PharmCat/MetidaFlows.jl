@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="UTF-8"/><meta name="viewport" content="width=device-width, initial-scale=1.0"/><meta name="referrer" content="no-referrer"/><title>AWB cycle · MetidaFlows.jl</title><meta name="title" content="AWB cycle · MetidaFlows.jl"/><meta property="og:title" content="AWB cycle · MetidaFlows.jl"/><meta property="twitter:title" content="AWB cycle · MetidaFlows.jl"/><meta name="description" content="Documentation for MetidaFlows.jl."/><meta property="og:description" content="Documentation for MetidaFlows.jl."/><meta property="twitter:description" content="Documentation for MetidaFlows.jl."/><meta property="og:url" content="https://PharmCat.github.io/MetidaFlows.jl/examples_abw_cycle/"/><meta property="twitter:url" content="https://PharmCat.github.io/MetidaFlows.jl/examples_abw_cycle/"/><link rel="canonical" href="https://PharmCat.github.io/MetidaFlows.jl/examples_abw_cycle/"/><script data-outdated-warner src="../assets/warner.js"></script><link href="https://cdnjs.cloudflare.com/ajax/libs/lato-font/3.0.0/css/lato-font.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/juliamono/0.63.2/juliamono.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/fontawesome.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/solid.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/brands.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.8/katex.min.css" rel="stylesheet" type="text/css"/><script>documenterBaseURL=".."</script><script src="https://cdnjs.cloudflare.com/ajax/libs/require.js/2.3.6/require.min.js" data-main="../assets/documenter.js"></script><script src="../search_index.js"></script><script src="../siteinfo.js"></script><script src="../../versions.js"></script><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../assets/themes/catppuccin-mocha.css" data-theme-name="catppuccin-mocha"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../assets/themes/catppuccin-macchiato.css" data-theme-name="catppuccin-macchiato"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../assets/themes/catppuccin-frappe.css" data-theme-name="catppuccin-frappe"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../assets/themes/catppuccin-latte.css" data-theme-name="catppuccin-latte"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../assets/themes/documenter-dark.css" data-theme-name="documenter-dark" data-theme-primary-dark/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../assets/themes/documenter-light.css" data-theme-name="documenter-light" data-theme-primary/><script src="../assets/themeswap.js"></script></head><body><div id="documenter"><nav class="docs-sidebar"><div class="docs-package-name"><span class="docs-autofit"><a href="../">MetidaFlows.jl</a></span></div><button class="docs-search-query input is-rounded is-small is-clickable my-2 mx-auto py-1 px-2" id="documenter-search-query">Search docs (Ctrl + /)</button><ul class="docs-menu"><li><a class="tocitem" href="../">Home</a></li><li><span class="tocitem">Guide</span><ul><li><a class="tocitem" href="../guide/">User guide</a></li><li><a class="tocitem" href="../guide_execution/">Execution model</a></li><li><a class="tocitem" href="../guide_ports/">Ports and cycles</a></li><li><a class="tocitem" href="../guide_serialization/">Serialization and schemas</a></li><li><a class="tocitem" href="../guide_logs/">Logs</a></li></ul></li><li><a class="tocitem" href="../typed_containers/">Typed containers</a></li><li><span class="tocitem">Examples</span><ul><li class="is-active"><a class="tocitem" href>AWB cycle</a><ul class="internal"><li><a class="tocitem" href="#ABW-—-a-cyclic-graph-with-a-feedback-port"><span>ABW — a cyclic graph with a feedback port</span></a></li></ul></li><li><a class="tocitem" href="../examples_abw_two_node/">AWB two node cycle</a></li><li><a class="tocitem" href="../examples_settings_query/">Querying settings</a></li><li><a class="tocitem" href="../examples_bubble_sort/">Bubble sort as a graph</a></li><li><a class="tocitem" href="../examples_insertion_sort/">Insertion sort: nested loops</a></li><li><a class="tocitem" href="../examples_gradient_descent/">Gradient descent on a graph</a></li><li><a class="tocitem" href="../examples_newton/">Newton&#39;s method and :error ports</a></li><li><a class="tocitem" href="../examples_horner/">Horner&#39;s scheme on DAW</a></li><li><a class="tocitem" href="../examples_edit_distance/">Edit distance: dynamic programming</a></li><li><a class="tocitem" href="../examples_intervals/">Interval arithmetic: metadata</a></li><li><a class="tocitem" href="../examples_power/">Modular exponentiation: skipping work</a></li></ul></li><li><span class="tocitem">API</span><ul><li><a class="tocitem" href="../api/">Overview</a></li><li><a class="tocitem" href="../api_types/">Types</a></li><li><a class="tocitem" href="../api_core/">Graph and nodes</a></li><li><a class="tocitem" href="../api_access/">Reading and writing a node</a></li><li><a class="tocitem" href="../api_execution/">Execution</a></li><li><a class="tocitem" href="../api_meta/">Port metadata</a></li><li><a class="tocitem" href="../api_serialization/">Serialization and schemas</a></li><li><a class="tocitem" href="../api_internals/">Internals</a></li></ul></li></ul><div class="docs-version-selector field has-addons"><div class="control"><span class="docs-label button is-static is-size-7">Version</span></div><div class="docs-selector control is-expanded"><div class="select is-fullwidth is-size-7"><select id="documenter-version-selector"></select></div></div></div></nav><div class="docs-main"><header class="docs-navbar"><a class="docs-sidebar-button docs-navbar-link fa-solid fa-bars is-hidden-desktop" id="documenter-sidebar-button" href="#"></a><nav class="breadcrumb"><ul class="is-hidden-mobile"><li><a class="is-disabled">Examples</a></li><li class="is-active"><a href>AWB cycle</a></li></ul><ul class="is-hidden-tablet"><li class="is-active"><a href>AWB cycle</a></li></ul></nav><div class="docs-right"><a class="docs-navbar-link" href="https://github.com/PharmCat/MetidaFlows.jl" title="View the repository on GitHub"><span class="docs-icon fa-brands"></span><span class="docs-label is-hidden-touch">GitHub</span></a><a class="docs-navbar-link" href="https://github.com/PharmCat/MetidaFlows.jl/blob/main/docs/src/examples_abw_cycle.md" title="Edit source on GitHub"><span class="docs-icon fa-solid"></span></a><a class="docs-settings-button docs-navbar-link fa-solid fa-gear" id="documenter-settings-button" href="#" title="Settings"></a><a class="docs-article-toggle-button fa-solid fa-chevron-up" id="documenter-article-toggle-button" href="javascript:;" title="Collapse all docstrings"></a></div></header><article class="content" id="documenter-page"><h2 id="ABW-—-a-cyclic-graph-with-a-feedback-port"><a class="docs-heading-anchor" href="#ABW-—-a-cyclic-graph-with-a-feedback-port">ABW — a cyclic graph with a feedback port</a><a id="ABW-—-a-cyclic-graph-with-a-feedback-port-1"></a><a class="docs-heading-anchor-permalink" href="#ABW-—-a-cyclic-graph-with-a-feedback-port" title="Permalink"></a></h2><p><code>DAW</code> rejects cycles: it needs a topological order. <code>ABW</code> executes a cycle if the edge that closes it enters a port declared with <code>kind = :feedback</code>. Such a port carries the value of the <strong>previous</strong> iteration, so it is excluded from the readiness check — the loop is broken by construction, exactly like a unit delay in a block diagram.</p><p>This workflow trims outliers one observation at a time and stops either when the data is clean or when the iteration budget runs out:</p><pre><code class="nohighlight hljs">LoadData ──:table──▶ TrimLoop ──:result──▶ (terminal)
+                       ▲    │
+                       └────┘  :state ──▶ :previous  (kind = :feedback)</code></pre><p><code>TrimLoop</code> decides on every pass which port to publish, and that choice is the control flow: publishing <code>:state</code> keeps the loop running, publishing <code>:result</code> ends it.</p><h3 id="State-carried-by-the-loop"><a class="docs-heading-anchor" href="#State-carried-by-the-loop">State carried by the loop</a><a id="State-carried-by-the-loop-1"></a><a class="docs-heading-anchor-permalink" href="#State-carried-by-the-loop" title="Permalink"></a></h3><pre><code class="language-julia hljs">using MetidaFlows
+using CSV, DataFrames, Statistics
+
+struct LoadData &lt;: AbstractNodeType end
+struct TrimLoop &lt;: AbstractNodeType end
+
+# everything the next iteration needs to continue
+struct TrimState
+    table::DataFrame
+    iter::Int
+    zmax::Float64
+end
+
+zscores(c) = abs.(c .- mean(c)) ./ std(c)</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi">zscores (generic function with 1 method)</code></pre><h3 id="Interfaces"><a class="docs-heading-anchor" href="#Interfaces">Interfaces</a><a id="Interfaces-1"></a><a class="docs-heading-anchor-permalink" href="#Interfaces" title="Permalink"></a></h3><pre><code class="language-julia hljs">load_spec = NodeSpec(&quot;Load data&quot;,
+    PortSpec[],
+    [PortSpec(&quot;Table&quot;, DataFrame, :table)],
+    [:file])
+
+trim_spec = NodeSpec(&quot;Trim loop&quot;,
+    [PortSpec(&quot;Table&quot;,     DataFrame, :table),
+     PortSpec(&quot;Previous&quot;,  TrimState, :previous; kind = :feedback)],
+    [PortSpec(&quot;State&quot;,      TrimState, :state),
+     PortSpec(&quot;Result&quot;,     DataFrame, :result;     kind = :terminal),
+     PortSpec(&quot;Iterations&quot;, Int,       :iterations; kind = :terminal)],
+    [:z, :maxiter])</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi">     Name: Trim loop
+     Input ports: 
+        #1 Port name: Table; label: &quot;table&quot;; datatype: DataFrames.DataFrame (required, normal).
+        #2 Port name: Previous; label: &quot;previous&quot;; datatype: Main.TrimState (required, feedback).
+     Output ports: 
+        #1 Port name: State; label: &quot;state&quot;; datatype: Main.TrimState (required, normal).
+        #2 Port name: Result; label: &quot;result&quot;; datatype: DataFrames.DataFrame (required, terminal).
+        #3 Port name: Iterations; label: &quot;iterations&quot;; datatype: Int64 (required, terminal).
+     Available settings: [:z, :maxiter]
+</code></pre><p><code>:previous</code> is the loop-carried input. <code>:result</code> and <code>:iterations</code> are terminal: they hold the answer and are not meant to be connected.</p><h3 id="Behaviour"><a class="docs-heading-anchor" href="#Behaviour">Behaviour</a><a id="Behaviour-1"></a><a class="docs-heading-anchor-permalink" href="#Behaviour" title="Permalink"></a></h3><pre><code class="language-julia hljs">function MetidaFlows.execute_unsafe!(node::DataNode{LoadData})
+    setdata!(node, :table, DataFrame(CSV.File(node.settings[:file])))
+    return [:table]
+end
+
+function MetidaFlows.execute_unsafe!(node::DataNode{TrimLoop})
+    previous = getinputdata(node, :previous)
+
+    # first pass: the feedback buffer is empty, start from the normal input
+    state = previous === nothing ? TrimState(getinputdata(node, :table), 0, Inf) : previous
+
+    z    = zscores(state.table.Concentration)
+    i    = argmax(z)
+    zmax = z[i]
+
+    converged = zmax &lt;= node.settings[:z]
+    exhausted = state.iter &gt;= node.settings[:maxiter]
+
+    if converged || exhausted
+        setdata!(node, :result, state.table)
+        setdata!(node, :iterations, state.iter)
+        return [:result, :iterations]        # nothing is published into the loop
+    end
+
+    setdata!(node, :state, TrimState(state.table[Not(i), :], state.iter + 1, zmax))
+    return [:state]                          # one more turn
+end</code></pre><h3 id="Assembling-and-running"><a class="docs-heading-anchor" href="#Assembling-and-running">Assembling and running</a><a id="Assembling-and-running-1"></a><a class="docs-heading-anchor-permalink" href="#Assembling-and-running" title="Permalink"></a></h3><pre><code class="language-julia hljs">w = Workflow(3; type = :ABW)
+w.name = &quot;Iterative trimming&quot;
+
+load = add_node!(w, DataNode(LoadData, load_spec))
+trim = add_node!(w, DataNode(TrimLoop, trim_spec))
+
+add_connection!(w, load, :table, trim, :table)
+add_connection!(w, trim, :state, trim, :previous)     # the cycle
+
+setsettings!(w, load, Dict(:file =&gt; PKCSV_PATH))      # asume you have file PKCSV_PATH
+setsettings!(w, trim, Dict(:z =&gt; 1.6, :maxiter =&gt; 10))
+
+scheduler!(w, throw_error = true)
+
+ri = getdata(w, trim, :iterations)      # how many observations were removed
+df = getdata(w, trim, :result)          # the trimmed dataset
+println(&quot;Removed:&quot;, ri)
+df[1:3, :]</code></pre><div><div style = "float: left;"><span>3×2 DataFrame</span></div><div style = "clear: both;"></div></div><div class = "data-frame" style = "overflow-x: scroll;"><table class = "data-frame" style = "margin-bottom: 6px;"><thead><tr class = "columnLabelRow"><th class = "stubheadLabel" style = "font-weight: bold; text-align: right;">Row</th><th style = "text-align: left;">id</th><th style = "text-align: left;">Concentration</th></tr><tr class = "columnLabelRow"><th class = "stubheadLabel" style = "font-weight: bold; text-align: right;"></th><th title = "Int64" style = "text-align: left;">Int64</th><th title = "Float64" style = "text-align: left;">Float64</th></tr></thead><tbody><tr class = "dataRow"><td class = "rowLabel" style = "font-weight: bold; text-align: right;">1</td><td style = "text-align: right;">1</td><td style = "text-align: right;">0.34</td></tr><tr class = "dataRow"><td class = "rowLabel" style = "font-weight: bold; text-align: right;">2</td><td style = "text-align: right;">2</td><td style = "text-align: right;">0.7</td></tr><tr class = "dataRow"><td class = "rowLabel" style = "font-weight: bold; text-align: right;">3</td><td style = "text-align: right;">3</td><td style = "text-align: right;">0.67</td></tr></tbody></table></div><p>The graph itself, after the run - green is <code>:clean</code>, and the orange arc is the <code>:feedback</code> edge that closes the loop. See <a href="../guide/#Drawing-a-workflow">Drawing a workflow</a> for the helper this uses.</p><pre><code class="language-julia hljs">plotworkflow(w)</code></pre><img src='data:image/svg+xml;utf-8,<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg"
+     xmlns:xlink="http://www.w3.org/1999/xlink"
+     version="1.2"
+     width="100mm" height="60mm" viewBox="0 0 100 60"
+     stroke="none"
+     fill="%23000000"
+     stroke-width="0.3"
+     font-size="3.88"
+>
+<defs>
+  <marker id="arrow" markerWidth="15" markerHeight="7" refX="5" refY="3.5" orient="auto" markerUnits="strokeWidth">
+    <path d="M0,0 L15,3.5 L0,7 z" stroke="context-stroke" fill="context-stroke"/>
+  </marker>
+</defs>
+<g fill="%23000000" fill-opacity="0.000" id="img-af736960-1">
+  <g transform="translate(50,17.5)">
+    <path d="M-50,-30 L50,-30 50,30 -50,30  z" class="primitive"/>
+  </g>
+</g>
+<g stroke-width="1" id="img-af736960-2">
+  <g transform="translate(48.78,28.16)" stroke="%2378909C">
+    <path fill="none" d="M-26.37,-1.67 C0.53,1.4 -0.53,1.67 26.37,-1.4" class="primitive"/>
+  </g>
+  <g transform="translate(82.11,27.66)" stroke="%23EF6C00">
+    <path fill="none" d="M6.97,-1.17 C25.01,0.89 -25.01,1.17 -6.97,-0.89" class="primitive"/>
+  </g>
+</g>
+<g stroke-width="1" id="img-af736960-3">
+</g>
+<g transform="translate(75.96,26.67)" fill="%2378909C">
+  <path d="M-1.02,-0.35 L1.63,-0.19 -0.61,0.54  z" class="primitive"/>
+</g>
+<g transform="translate(75.96,26.67)" fill="%23EF6C00">
+  <path d="M-1.02,-0.35 L1.63,-0.19 -0.61,0.54  z" class="primitive"/>
+</g>
+<g font-size="4" fill="%23000000" id="img-af736960-4">
+</g>
+<g stroke-width="1" stroke="%2337474F" id="img-af736960-5">
+  <g transform="translate(16.67,25.83)" fill="%2381C784">
+    <circle cx="0" cy="0" r="5.66" class="primitive"/>
+  </g>
+  <g transform="translate(83.33,25.83)" fill="%2381C784">
+    <circle cx="0" cy="0" r="5.66" class="primitive"/>
+  </g>
+</g>
+<g font-family="Helvetica" font-size="4" fill="%23000000" id="img-af736960-6">
+  <g transform="translate(16.67,15.03)">
+    <g class="primitive">
+      <text text-anchor="middle" dy="0.35em">1 Load data</text>
+    </g>
+  </g>
+  <g transform="translate(83.33,15.03)">
+    <g class="primitive">
+      <text text-anchor="middle" dy="0.35em">2 Trim loop</text>
+    </g>
+  </g>
+</g>
+<g font-family="Helvetica" font-size="4" fill="%23000000" id="img-af736960-7">
+  <g transform="translate(50,-2.5)">
+    <g class="primitive">
+      <text text-anchor="middle" dy="0.35em"></text>
+    </g>
+  </g>
+</g>
+</svg>
+'/><p>One call to <a href="../api_execution/#MetidaFlows.scheduler!"><code>scheduler!</code></a> runs the whole loop to completion.</p><h3 id="How-the-scheduler-drives-it"><a class="docs-heading-anchor" href="#How-the-scheduler-drives-it">How the scheduler drives it</a><a id="How-the-scheduler-drives-it-1"></a><a class="docs-heading-anchor-permalink" href="#How-the-scheduler-drives-it" title="Permalink"></a></h3><pre><code class="nohighlight hljs">queue := [LoadData]                      only nodes without normal inputs are seeded
+
+pop LoadData → executes → pushes :table  → enqueues TrimLoop
+pop TrimLoop → isready: :table normal, LoadData is :clean → ready
+                        :previous is :feedback → not checked
+             → executes, publishes :state
+             → the child of :state is TrimLoop itself, through a :feedback port
+             → the scheduler marks it :dirty again and re-enqueues it
+pop TrimLoop → executes, now :previous holds the previous state
+...
+pop TrimLoop → publishes :result instead of :state
+             → :result has no connections → nothing is enqueued
+queue is empty → scheduler! returns true</code></pre><p>Two independent stops guard the loop. The node&#39;s own <code>:maxiter</code> is the intended one. The scheduler&#39;s <code>maxiter</code> keyword (1000 by default) is a backstop: if a node keeps publishing into the loop forever, the run aborts with an error instead of hanging.</p><h3 id="Counting-iterations-instead-of-testing-convergence"><a class="docs-heading-anchor" href="#Counting-iterations-instead-of-testing-convergence">Counting iterations instead of testing convergence</a><a id="Counting-iterations-instead-of-testing-convergence-1"></a><a class="docs-heading-anchor-permalink" href="#Counting-iterations-instead-of-testing-convergence" title="Permalink"></a></h3><p>If the process should simply run a fixed number of times, drop the condition and keep the counter:</p><pre><code class="language-julia hljs">state.iter &gt;= node.settings[:iterations] &amp;&amp; return [:result, :iterations]</code></pre><p>The counter travels inside <code>TrimState</code>, so it is part of the loop rather than hidden node state — a restarted workflow starts counting from zero.</p><h3 id="Restriction:-the-loop-body-must-be-one-node"><a class="docs-heading-anchor" href="#Restriction:-the-loop-body-must-be-one-node">Restriction: the loop body must be one node</a><a id="Restriction:-the-loop-body-must-be-one-node-1"></a><a class="docs-heading-anchor-permalink" href="#Restriction:-the-loop-body-must-be-one-node" title="Permalink"></a></h3><p>A cycle spanning two nodes does not iterate yet. Only a node reached through a <strong>non-normal</strong> port is marked <code>:dirty</code> again by the scheduler; a node reached through an ordinary port stays <code>:clean</code>, and <a href="../api_execution/#MetidaFlows.execute!"><code>execute!</code></a> then returns its stored <code>ready_ports</code> without recomputing. The second node in the loop would replay its first decision forever, and the run would end on the scheduler&#39;s <code>maxiter</code>.</p><p>Until that is lifted, keep the loop body in a single node and use the feedback port to carry its state, as above.</p></article><nav class="docs-footer"><a class="docs-footer-prevpage" href="../typed_containers/">« Typed containers</a><a class="docs-footer-nextpage" href="../examples_abw_two_node/">AWB two node cycle »</a><div class="flexbox-break"></div><p class="footer-message">Powered by <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> and the <a href="https://julialang.org/">Julia Programming Language</a>.</p></nav></div><div class="modal" id="documenter-settings"><div class="modal-background"></div><div class="modal-card"><header class="modal-card-head"><p class="modal-card-title">Settings</p><button class="delete"></button></header><section class="modal-card-body"><p><label class="label">Theme</label><div class="select"><select id="documenter-themepicker"><option value="auto">Automatic (OS)</option><option value="documenter-light">documenter-light</option><option value="documenter-dark">documenter-dark</option><option value="catppuccin-latte">catppuccin-latte</option><option value="catppuccin-frappe">catppuccin-frappe</option><option value="catppuccin-macchiato">catppuccin-macchiato</option><option value="catppuccin-mocha">catppuccin-mocha</option></select></div></p><hr/><p>This document was generated with <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> version 1.20.0 on <span class="colophon-date" title="Saturday 14 November 2026 00:25">Saturday 14 November 2026</span>. Using Julia version 1.13.4.</p></section><footer class="modal-card-foot"></footer></div></div></div></body></html>

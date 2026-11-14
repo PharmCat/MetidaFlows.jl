@@ -1,0 +1,290 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="UTF-8"/><meta name="viewport" content="width=device-width, initial-scale=1.0"/><meta name="referrer" content="no-referrer"/><title>Newton&#39;s method and :error ports · MetidaFlows.jl</title><meta name="title" content="Newton&#39;s method and :error ports · MetidaFlows.jl"/><meta property="og:title" content="Newton&#39;s method and :error ports · MetidaFlows.jl"/><meta property="twitter:title" content="Newton&#39;s method and :error ports · MetidaFlows.jl"/><meta name="description" content="Documentation for MetidaFlows.jl."/><meta property="og:description" content="Documentation for MetidaFlows.jl."/><meta property="twitter:description" content="Documentation for MetidaFlows.jl."/><meta property="og:url" content="https://PharmCat.github.io/MetidaFlows.jl/examples_newton/"/><meta property="twitter:url" content="https://PharmCat.github.io/MetidaFlows.jl/examples_newton/"/><link rel="canonical" href="https://PharmCat.github.io/MetidaFlows.jl/examples_newton/"/><script data-outdated-warner src="../assets/warner.js"></script><link href="https://cdnjs.cloudflare.com/ajax/libs/lato-font/3.0.0/css/lato-font.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/juliamono/0.63.2/juliamono.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/fontawesome.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/solid.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/brands.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.8/katex.min.css" rel="stylesheet" type="text/css"/><script>documenterBaseURL=".."</script><script src="https://cdnjs.cloudflare.com/ajax/libs/require.js/2.3.6/require.min.js" data-main="../assets/documenter.js"></script><script src="../search_index.js"></script><script src="../siteinfo.js"></script><script src="../../versions.js"></script><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../assets/themes/catppuccin-mocha.css" data-theme-name="catppuccin-mocha"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../assets/themes/catppuccin-macchiato.css" data-theme-name="catppuccin-macchiato"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../assets/themes/catppuccin-frappe.css" data-theme-name="catppuccin-frappe"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../assets/themes/catppuccin-latte.css" data-theme-name="catppuccin-latte"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../assets/themes/documenter-dark.css" data-theme-name="documenter-dark" data-theme-primary-dark/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../assets/themes/documenter-light.css" data-theme-name="documenter-light" data-theme-primary/><script src="../assets/themeswap.js"></script></head><body><div id="documenter"><nav class="docs-sidebar"><div class="docs-package-name"><span class="docs-autofit"><a href="../">MetidaFlows.jl</a></span></div><button class="docs-search-query input is-rounded is-small is-clickable my-2 mx-auto py-1 px-2" id="documenter-search-query">Search docs (Ctrl + /)</button><ul class="docs-menu"><li><a class="tocitem" href="../">Home</a></li><li><span class="tocitem">Guide</span><ul><li><a class="tocitem" href="../guide/">User guide</a></li><li><a class="tocitem" href="../guide_execution/">Execution model</a></li><li><a class="tocitem" href="../guide_ports/">Ports and cycles</a></li><li><a class="tocitem" href="../guide_serialization/">Serialization and schemas</a></li><li><a class="tocitem" href="../guide_logs/">Logs</a></li></ul></li><li><a class="tocitem" href="../typed_containers/">Typed containers</a></li><li><span class="tocitem">Examples</span><ul><li><a class="tocitem" href="../examples_abw_cycle/">AWB cycle</a></li><li><a class="tocitem" href="../examples_abw_two_node/">AWB two node cycle</a></li><li><a class="tocitem" href="../examples_settings_query/">Querying settings</a></li><li><a class="tocitem" href="../examples_bubble_sort/">Bubble sort as a graph</a></li><li><a class="tocitem" href="../examples_insertion_sort/">Insertion sort: nested loops</a></li><li><a class="tocitem" href="../examples_gradient_descent/">Gradient descent on a graph</a></li><li class="is-active"><a class="tocitem" href>Newton&#39;s method and :error ports</a><ul class="internal"><li><a class="tocitem" href="#Newton&#39;s-method-and-:error-ports"><span>Newton&#39;s method and <code>:error</code> ports</span></a></li><li><a class="tocitem" href="#The-graph-2"><span>The graph</span></a></li></ul></li><li><a class="tocitem" href="../examples_horner/">Horner&#39;s scheme on DAW</a></li><li><a class="tocitem" href="../examples_edit_distance/">Edit distance: dynamic programming</a></li><li><a class="tocitem" href="../examples_intervals/">Interval arithmetic: metadata</a></li><li><a class="tocitem" href="../examples_power/">Modular exponentiation: skipping work</a></li></ul></li><li><span class="tocitem">API</span><ul><li><a class="tocitem" href="../api/">Overview</a></li><li><a class="tocitem" href="../api_types/">Types</a></li><li><a class="tocitem" href="../api_core/">Graph and nodes</a></li><li><a class="tocitem" href="../api_access/">Reading and writing a node</a></li><li><a class="tocitem" href="../api_execution/">Execution</a></li><li><a class="tocitem" href="../api_meta/">Port metadata</a></li><li><a class="tocitem" href="../api_serialization/">Serialization and schemas</a></li><li><a class="tocitem" href="../api_internals/">Internals</a></li></ul></li></ul><div class="docs-version-selector field has-addons"><div class="control"><span class="docs-label button is-static is-size-7">Version</span></div><div class="docs-selector control is-expanded"><div class="select is-fullwidth is-size-7"><select id="documenter-version-selector"></select></div></div></div></nav><div class="docs-main"><header class="docs-navbar"><a class="docs-sidebar-button docs-navbar-link fa-solid fa-bars is-hidden-desktop" id="documenter-sidebar-button" href="#"></a><nav class="breadcrumb"><ul class="is-hidden-mobile"><li><a class="is-disabled">Examples</a></li><li class="is-active"><a href>Newton&#39;s method and :error ports</a></li></ul><ul class="is-hidden-tablet"><li class="is-active"><a href>Newton&#39;s method and :error ports</a></li></ul></nav><div class="docs-right"><a class="docs-navbar-link" href="https://github.com/PharmCat/MetidaFlows.jl" title="View the repository on GitHub"><span class="docs-icon fa-brands"></span><span class="docs-label is-hidden-touch">GitHub</span></a><a class="docs-navbar-link" href="https://github.com/PharmCat/MetidaFlows.jl/blob/main/docs/src/examples_newton.md" title="Edit source on GitHub"><span class="docs-icon fa-solid"></span></a><a class="docs-settings-button docs-navbar-link fa-solid fa-gear" id="documenter-settings-button" href="#" title="Settings"></a><a class="docs-article-toggle-button fa-solid fa-chevron-up" id="documenter-article-toggle-button" href="javascript:;" title="Collapse all docstrings"></a></div></header><article class="content" id="documenter-page"><h2 id="Newton&#39;s-method-and-:error-ports"><a class="docs-heading-anchor" href="#Newton&#39;s-method-and-:error-ports">Newton&#39;s method and <code>:error</code> ports</a><a id="Newton&#39;s-method-and-:error-ports-1"></a><a class="docs-heading-anchor-permalink" href="#Newton&#39;s-method-and-:error-ports" title="Permalink"></a></h2><p>Newton&#39;s method for <code>f(x) = x² - c</code> — that is, for <code>√c</code>:</p><p class="math-container">\[x&#39; = x - \frac{f(x)}{f&#39;(x)} = x - \frac{x^2 - c}{2x}\]</p><p>It is the smallest algorithm that has a <em>real</em> failure mode: <code>f&#39;(x) = 2x</code> becomes zero, and the step is undefined. This example routes that failure through an <code>:error</code> port, which the <a href="../guide_ports/#Error-routing-with-:error-ports">guide</a> describes in general: the engine never writes to such a port, so the node that can fail catches its own failure and publishes it instead of the normal result.</p><p>One graph gives three different outcomes, chosen by settings alone:</p><table><tr><th style="text-align: left">settings</th><th style="text-align: left">outcome</th></tr><tr><td style="text-align: left"><code>c = 2, x₀ = 1</code></td><td style="text-align: left">converges to <code>√2</code></td></tr><tr><td style="text-align: left"><code>c = -1, x₀ = 1</code></td><td style="text-align: left">no real root: Newton walks into <code>x = 0</code> and stalls on the second turn</td></tr><tr><td style="text-align: left"><code>c = 0, x₀ = 1</code></td><td style="text-align: left">a double root: convergence is linear, and with a tight <code>tol</code> the diagnosis arrives first</td></tr></table><h3 id="The-exception-the-port-carries"><a class="docs-heading-anchor" href="#The-exception-the-port-carries">The exception the port carries</a><a id="The-exception-the-port-carries-1"></a><a class="docs-heading-anchor-permalink" href="#The-exception-the-port-carries" title="Permalink"></a></h3><p>An <code>:error</code> port must be <code>required = false</code> and its datatype must be a subtype of <code>Exception</code>. A custom exception is the natural choice, because it is also the only thing the handler will receive:</p><pre><code class="language-julia hljs">using MetidaFlows
+import MetidaFlows: PortSpec, getportspec, getstatus, isready, getnode
+
+struct NewtonStall &lt;: Exception
+    x::Float64
+    iter::Int
+    f::Float64
+    df::Float64
+    eps::Float64
+end
+
+Base.showerror(io::IO, e::NewtonStall) = print(io,
+    &quot;NewtonStall: |f&#39;(x)| = &quot;, abs(e.df), &quot; &lt; &quot;, e.eps,
+    &quot; at x = &quot;, e.x, &quot; (iteration &quot;, e.iter, &quot;, f = &quot;, e.f, &quot;)&quot;)</code></pre><h3 id="The-nodes"><a class="docs-heading-anchor" href="#The-nodes">The nodes</a><a id="The-nodes-1"></a><a class="docs-heading-anchor-permalink" href="#The-nodes" title="Permalink"></a></h3><pre><code class="language-julia hljs">struct NConstF      &lt;: AbstractNodeType end  # a Float64 source
+struct NConstI      &lt;: AbstractNodeType end  # an Int source
+struct NewtonState  &lt;: AbstractNodeType end  # the loop state (x, iter)
+struct NMul         &lt;: AbstractNodeType end  # a * b
+struct NSub         &lt;: AbstractNodeType end  # a - b
+struct NAbs         &lt;: AbstractNodeType end  # |a|
+struct NLess        &lt;: AbstractNodeType end  # a &lt; b
+struct NAddI        &lt;: AbstractNodeType end  # a + b, integers
+struct NNotLessI    &lt;: AbstractNodeType end  # a &gt;= b, integers
+struct NOr          &lt;: AbstractNodeType end  # a || b
+struct NStep        &lt;: AbstractNodeType end  # f/f&#39; OR an :error
+struct NewtonGate   &lt;: AbstractNodeType end  # the branch of a turn
+struct NewtonRescue &lt;: AbstractNodeType end  # the error handler</code></pre><p><code>NStep</code> is the only node with an <code>:error</code> output. The context of the failure (<code>x</code>, <code>iter</code>) is an input to it, because the exception has to carry that context to the handler — the handler has no other inputs, and that is on purpose:</p><pre><code class="language-julia hljs">spec_nstep() = NodeSpec(&quot;N step&quot;,
+    [PortSpec(&quot;F&quot;,         Float64, :f),
+     PortSpec(&quot;Df&quot;,        Float64, :df),
+     PortSpec(&quot;Eps&quot;,       Float64, :eps),
+     PortSpec(&quot;X&quot;,         Float64, :x),
+     PortSpec(&quot;Iteration&quot;, Int,     :iter)],
+    [PortSpec(&quot;Out&quot;,   Float64,     :out),
+     PortSpec(&quot;Error&quot;, NewtonStall, :err; kind = :error, required = false)])
+
+# the handler has ONE input, and it is :error. isready does not hold it back,
+# but nothing enqueues it on a normal turn either.
+spec_newtonrescue() = NodeSpec(&quot;Newton rescue&quot;,
+    [PortSpec(&quot;Error&quot;, NewtonStall, :err; kind = :error, required = false)],
+    [PortSpec(&quot;Reason&quot;,     Symbol,  :reason;     kind = :terminal),
+     PortSpec(&quot;X&quot;,          Float64, :x;          kind = :terminal),
+     PortSpec(&quot;Iterations&quot;, Int,     :iterations; kind = :terminal),
+     PortSpec(&quot;Derivative&quot;, Float64, :derivative; kind = :terminal),
+     PortSpec(&quot;Restart&quot;,    Float64, :restart;    kind = :terminal)])</code></pre><pre><code class="language-julia hljs">spec_nconstf() = NodeSpec(&quot;N const float&quot;, PortSpec[],
+    [PortSpec(&quot;Out&quot;, Float64, :out)], [:value])
+spec_nconsti() = NodeSpec(&quot;N const int&quot;, PortSpec[],
+    [PortSpec(&quot;Out&quot;, Int, :out)], [:value])
+
+spec_newtonstate() = NodeSpec(&quot;Newton state&quot;,
+    [PortSpec(&quot;Initial x&quot;,    Float64, :init_x),
+     PortSpec(&quot;Initial iter&quot;, Int,     :init_iter),
+     PortSpec(&quot;X&quot;,         Float64, :x;    kind = :feedback, required = false),
+     PortSpec(&quot;Iteration&quot;, Int,     :iter; kind = :feedback, required = false)],
+    [PortSpec(&quot;X&quot;,         Float64, :x),
+     PortSpec(&quot;Iteration&quot;, Int,     :iter)])
+
+n_binary_float(name, out) = NodeSpec(name,
+    [PortSpec(&quot;A&quot;, Float64, :a), PortSpec(&quot;B&quot;, Float64, :b)],
+    [PortSpec(&quot;Out&quot;, out, :out)])
+
+spec_nmul()  = n_binary_float(&quot;N mul&quot;,  Float64)
+spec_nsub()  = n_binary_float(&quot;N sub&quot;,  Float64)
+spec_nless() = n_binary_float(&quot;N less&quot;, Bool)
+spec_nabs()  = NodeSpec(&quot;N abs&quot;, [PortSpec(&quot;A&quot;, Float64, :a)],
+                                 [PortSpec(&quot;Out&quot;, Float64, :out)])
+spec_naddi() = NodeSpec(&quot;N add int&quot;,
+    [PortSpec(&quot;A&quot;, Int, :a), PortSpec(&quot;B&quot;, Int, :b)],
+    [PortSpec(&quot;Out&quot;, Int, :out)])
+spec_nnotlessi() = NodeSpec(&quot;N not less int&quot;,
+    [PortSpec(&quot;A&quot;, Int, :a), PortSpec(&quot;B&quot;, Int, :b)],
+    [PortSpec(&quot;Out&quot;, Bool, :out)])
+spec_nor() = NodeSpec(&quot;N or&quot;,
+    [PortSpec(&quot;A&quot;, Bool, :a), PortSpec(&quot;B&quot;, Bool, :b)],
+    [PortSpec(&quot;Out&quot;, Bool, :out)])
+
+spec_newtongate() = NodeSpec(&quot;Newton gate&quot;,
+    [PortSpec(&quot;Stop&quot;,      Bool,    :stop),
+     PortSpec(&quot;Converged&quot;, Bool,    :converged),
+     PortSpec(&quot;X&quot;,         Float64, :x),
+     PortSpec(&quot;X next&quot;,    Float64, :x_next),
+     PortSpec(&quot;Iteration&quot;, Int,     :iter),
+     PortSpec(&quot;Iter next&quot;, Int,     :iter_next)],
+    [PortSpec(&quot;X&quot;,          Float64, :x),
+     PortSpec(&quot;Iteration&quot;,  Int,     :iter),
+     PortSpec(&quot;Root&quot;,       Float64, :root;       kind = :terminal),
+     PortSpec(&quot;Iterations&quot;, Int,     :iterations; kind = :terminal),
+     PortSpec(&quot;Reason&quot;,     Symbol,  :reason;     kind = :terminal)])</code></pre><p>The node that can fail decides which port to publish. Nothing else in the graph needs to know:</p><pre><code class="language-julia hljs">NEWTON_TRACE = Float64[]
+
+function MetidaFlows.execute_unsafe!(node::DataNode{NStep})
+    f   = getinputdata(node, :f)
+    df  = getinputdata(node, :df)
+    eps = getinputdata(node, :eps)
+    if abs(df) &lt; eps
+        setdata!(node, :err, NewtonStall(getinputdata(node, :x),
+                                         getinputdata(node, :iter), f, df, eps))
+        return [:err]
+    end
+    setdata!(node, :out, f / df)
+    return [:out]
+end
+
+function MetidaFlows.execute_unsafe!(node::DataNode{NewtonRescue})
+    e = getinputdata(node, :err)
+    setdata!(node, :reason,     :stalled)
+    setdata!(node, :x,          e.x)
+    setdata!(node, :iterations, e.iter)
+    setdata!(node, :derivative, e.df)
+    # where to restart is the algorithm&#39;s business, not the engine&#39;s
+    setdata!(node, :restart,    e.x + 1.0)
+    return [:reason, :x, :iterations, :derivative, :restart]
+end
+
+function MetidaFlows.execute_unsafe!(node::DataNode{NewtonGate})
+    x    = getinputdata(node, :x)
+    iter = getinputdata(node, :iter)
+    push!(NEWTON_TRACE, x)
+    if getinputdata(node, :stop)
+        setdata!(node, :root,       x)
+        setdata!(node, :iterations, iter)
+        setdata!(node, :reason,
+                 getinputdata(node, :converged) ? :converged : :exhausted)
+        return [:root, :iterations, :reason]
+    end
+    setdata!(node, :x,    getinputdata(node, :x_next))
+    setdata!(node, :iter, getinputdata(node, :iter_next))
+    return [:x, :iter]
+end
+
+function MetidaFlows.execute_unsafe!(node::DataNode{NewtonState})
+    back = getinputdata(node, :x)
+    if back === nothing
+        setdata!(node, :x,    getinputdata(node, :init_x))
+        setdata!(node, :iter, getinputdata(node, :init_iter))
+    else
+        setdata!(node, :x,    back)
+        setdata!(node, :iter, getinputdata(node, :iter))
+    end
+    return [:x, :iter]
+end
+
+MetidaFlows.execute_unsafe!(n::DataNode{NConstF}) =
+    (setdata!(n, :out, Float64(n.settings[:value])); [:out])
+MetidaFlows.execute_unsafe!(n::DataNode{NConstI}) =
+    (setdata!(n, :out, Int(n.settings[:value])); [:out])
+MetidaFlows.execute_unsafe!(n::DataNode{NMul}) =
+    (setdata!(n, :out, getinputdata(n, :a) * getinputdata(n, :b)); [:out])
+MetidaFlows.execute_unsafe!(n::DataNode{NSub}) =
+    (setdata!(n, :out, getinputdata(n, :a) - getinputdata(n, :b)); [:out])
+MetidaFlows.execute_unsafe!(n::DataNode{NAbs}) =
+    (setdata!(n, :out, abs(getinputdata(n, :a))); [:out])
+MetidaFlows.execute_unsafe!(n::DataNode{NLess}) =
+    (setdata!(n, :out, getinputdata(n, :a) &lt; getinputdata(n, :b)); [:out])
+MetidaFlows.execute_unsafe!(n::DataNode{NAddI}) =
+    (setdata!(n, :out, getinputdata(n, :a) + getinputdata(n, :b)); [:out])
+MetidaFlows.execute_unsafe!(n::DataNode{NNotLessI}) =
+    (setdata!(n, :out, getinputdata(n, :a) &gt;= getinputdata(n, :b)); [:out])
+MetidaFlows.execute_unsafe!(n::DataNode{NOr}) =
+    (setdata!(n, :out, getinputdata(n, :a) || getinputdata(n, :b)); [:out])</code></pre><h3 id="The-graph"><a class="docs-heading-anchor" href="#The-graph">The graph</a><a id="The-graph-1"></a><a class="docs-heading-anchor-permalink" href="#The-graph" title="Permalink"></a></h3><pre><code class="nohighlight hljs"> ConstF(x0) ────▶ head.init_x          ┌──▶ NMul (sq = x·x) ──┐
+ ConstI(0) ─────▶ head.init_iter       │                      ├─▶ NSub (f = sq − c)
+                                       │   ConstF(c) ─────────┘        │
+                      NewtonState ─────┤                               ├──▶ NAbs ─▶ NLess ─┐
+                      (x, iter)        │   ConstF(two) ───────┐        │     ConstF(tol)   │
+                           ▲           ├──▶ NMul (df = 2·x) ──┘        │                   ├─▶ NOr ─┐
+                           │           │                               │   ConstI(maxiter) │        │
+                           │           ├──▶ NAddInt (iter + 1)         │     NNotLessI ────┘        │
+                           │           │        ConstI(1) ─────────────┘                            │
+                           │           │                                                            │
+                           │           └──▶ NStep (f/f&#39;, ConstF(eps)) ──▶ NSub (x − step)──┐        │
+                           │                      │                                        │        │
+                           │                      │ :error                         NewtonGate ◀─────┘
+                           │                      ▼                                        │
+                           │                NewtonRescue ──▶ :reason, :x, :iterations,     │
+                           │                                 :derivative, :restart         │
+                           └───────────── :feedback (x, iter) ─────────────────────────────┘</code></pre><p>Twenty-one nodes, thirty-three connections, exactly one <code>:error</code> edge.</p><pre><code class="language-julia hljs">function build_newton(; x0 = 1.0, c = 2.0, tol = 1e-10, eps = 1e-8, maxiter = 100)
+    w      = Workflow(0; type = :ABW)
+    w.name = &quot;Newton-Raphson&quot;
+
+    cx0  = add_node!(w, DataNode(NConstF, spec_nconstf()))
+    cc   = add_node!(w, DataNode(NConstF, spec_nconstf()))
+    ctol = add_node!(w, DataNode(NConstF, spec_nconstf()))
+    ceps = add_node!(w, DataNode(NConstF, spec_nconstf()))
+    ctwo = add_node!(w, DataNode(NConstF, spec_nconstf()))
+    ci0  = add_node!(w, DataNode(NConstI, spec_nconsti()))
+    cone = add_node!(w, DataNode(NConstI, spec_nconsti()))
+    cmax = add_node!(w, DataNode(NConstI, spec_nconsti()))
+
+    head = add_node!(w, DataNode(NewtonState, spec_newtonstate()))
+    sq    = add_node!(w, DataNode(NMul,  spec_nmul()))
+    f     = add_node!(w, DataNode(NSub,  spec_nsub()))
+    df    = add_node!(w, DataNode(NMul,  spec_nmul()))
+    af    = add_node!(w, DataNode(NAbs,  spec_nabs()))
+    conv  = add_node!(w, DataNode(NLess, spec_nless()))
+    nexti = add_node!(w, DataNode(NAddI, spec_naddi()))
+    exh   = add_node!(w, DataNode(NNotLessI, spec_nnotlessi()))
+    stop  = add_node!(w, DataNode(NOr,   spec_nor()))
+    step  = add_node!(w, DataNode(NStep, spec_nstep()))
+    nextx = add_node!(w, DataNode(NSub,  spec_nsub()))
+    gate   = add_node!(w, DataNode(NewtonGate,   spec_newtongate()))
+    rescue = add_node!(w, DataNode(NewtonRescue, spec_newtonrescue()))
+
+    setsettings!(w, cx0,  Dict(:value =&gt; x0))
+    setsettings!(w, cc,   Dict(:value =&gt; c))
+    setsettings!(w, ctol, Dict(:value =&gt; tol))
+    setsettings!(w, ceps, Dict(:value =&gt; eps))
+    setsettings!(w, ctwo, Dict(:value =&gt; 2.0))
+    setsettings!(w, ci0,  Dict(:value =&gt; 0))
+    setsettings!(w, cone, Dict(:value =&gt; 1))
+    setsettings!(w, cmax, Dict(:value =&gt; maxiter))
+
+    add_connection!(w, cx0, :out, head, :init_x)
+    add_connection!(w, ci0, :out, head, :init_iter)
+
+    add_connection!(w, head, :x,   sq, :a)       # f(x) = x·x − c
+    add_connection!(w, head, :x,   sq, :b)
+    add_connection!(w, sq,   :out, f,  :a)
+    add_connection!(w, cc,   :out, f,  :b)
+
+    add_connection!(w, ctwo, :out, df, :a)       # f&#39;(x) = 2·x
+    add_connection!(w, head, :x,   df, :b)
+
+    add_connection!(w, f,    :out, af,   :a)     # |f| &lt; tol
+    add_connection!(w, af,   :out, conv, :a)
+    add_connection!(w, ctol, :out, conv, :b)
+
+    add_connection!(w, head, :iter, nexti, :a)
+    add_connection!(w, cone, :out,  nexti, :b)
+    add_connection!(w, head, :iter, exh,   :a)
+    add_connection!(w, cmax, :out,  exh,   :b)
+    add_connection!(w, conv, :out,  stop,  :a)
+    add_connection!(w, exh,  :out,  stop,  :b)
+
+    add_connection!(w, f,    :out,  step, :f)    # the step, which can fail
+    add_connection!(w, df,   :out,  step, :df)
+    add_connection!(w, ceps, :out,  step, :eps)
+    add_connection!(w, head, :x,    step, :x)
+    add_connection!(w, head, :iter, step, :iter)
+    add_connection!(w, head, :x,    nextx, :a)
+    add_connection!(w, step, :out,  nextx, :b)
+
+    add_connection!(w, stop,  :out,  gate, :stop)
+    add_connection!(w, conv,  :out,  gate, :converged)
+    add_connection!(w, head,  :x,    gate, :x)
+    add_connection!(w, nextx, :out,  gate, :x_next)
+    add_connection!(w, head,  :iter, gate, :iter)
+    add_connection!(w, nexti, :out,  gate, :iter_next)
+
+    add_connection!(w, step, :err, rescue, :err)   # the only :error edge
+
+    add_connection!(w, gate, :x,    head, :x)
+    add_connection!(w, gate, :iter, head, :iter)
+
+    return (w = w, cx0 = cx0, head = head, step = step, nextx = nextx,
+            f = f, conv = conv, gate = gate, rescue = rescue)
+end
+
+function newton(; kw...)
+    empty!(NEWTON_TRACE)
+    g = build_newton(; kw...)
+    scheduler!(g.w; maxiter = 200_000)
+    stalled = getdata(g.w, g.rescue, :reason) !== nothing
+    (reason  = stalled ? getdata(g.w, g.rescue, :reason) : getdata(g.w, g.gate, :reason),
+     x       = stalled ? getdata(g.w, g.rescue, :x)      : getdata(g.w, g.gate, :root),
+     iter    = stalled ? getdata(g.w, g.rescue, :iterations)
+                       : getdata(g.w, g.gate, :iterations),
+     restart = stalled ? getdata(g.w, g.rescue, :restart) : nothing,
+     g       = g)
+end
+
+r = newton(x0 = 1.0, c = 2.0, tol = 1e-12)
+(reason = r.reason, x = r.x, iter = r.iter, error = r.x - sqrt(2.0))</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi">(reason = :converged, x = 1.4142135623730951, iter = 5, error = 0.0)</code></pre><p>Note that the caller reads the outcome from one of two places. Which one fired is itself the answer, so a wrapper that normalises both into the same shape — as <code>newton</code> does above — is worth writing once.</p><h3 id="A-failure-that-is-routed,-not-raised"><a class="docs-heading-anchor" href="#A-failure-that-is-routed,-not-raised">A failure that is routed, not raised</a><a id="A-failure-that-is-routed,-not-raised-1"></a><a class="docs-heading-anchor-permalink" href="#A-failure-that-is-routed,-not-raised" title="Permalink"></a></h3><p>With <code>c = -1</code> there is no real root. Newton goes from <code>1</code> straight to <code>0</code>, and on the next turn <code>f&#39;(0) = 0</code>:</p><pre><code class="language-julia hljs">r = newton(x0 = 1.0, c = -1.0)
+(reason = r.reason, stalled_at = r.x, iter = r.iter, restart = r.restart,
+ trace = copy(NEWTON_TRACE))</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi">(reason = :stalled, stalled_at = 0.0, iter = 1, restart = 1.0, trace = [1.0])</code></pre><p>Nothing failed in the engine&#39;s sense. No node has the status <code>:failed</code> and the log is empty — the failure travelled as data:</p><pre><code class="language-julia hljs">(failed_nodes = [id for (id, n) in r.g.w.nodes if getstatus(n) === :failed],
+ error_log    = count(m -&gt; m.level === :error, r.g.w.log))</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi">(failed_nodes = Int64[], error_log = 0)</code></pre><p>The normal branch of that turn simply did not run, and it still holds the values of the previous one:</p><pre><code class="language-julia hljs">(nextx = getstatus(getnode(r.g.w, r.g.nextx)),   # never ran this turn
+ gate  = getstatus(getnode(r.g.w, r.g.gate)),
+ f     = getstatus(getnode(r.g.w, r.g.f)),       # does not depend on the step
+ gate_root = getdata(r.g.w, r.g.gate, :root),    # nothing: the gate never published
+ rescue_runs = getnode(r.g.w, r.g.rescue).state.exec_n,
+ step_runs   = getnode(r.g.w, r.g.step).state.exec_n)</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi">(nextx = :dirty, gate = :dirty, f = :clean, gate_root = nothing, rescue_runs = 1, step_runs = 2)</code></pre><p>The trace above is also one point short of the mathematics: it is collected in the gate, and on the failing turn the gate does not run. The point where it stalled exists only in the exception, which is why the handler republishes it.</p><p>On a converging run the handler never executes at all, even though <code>isready</code> would have let it:</p><pre><code class="language-julia hljs">r2 = newton(x0 = 1.0, c = 2.0, tol = 1e-12)
+(rescue_ready = isready(r2.g.w, r2.g.rescue),
+ rescue_runs  = getnode(r2.g.w, r2.g.rescue).state.exec_n,
+ rescue_status = getstatus(getnode(r2.g.w, r2.g.rescue)))</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi">(rescue_ready = true, rescue_runs = 0, rescue_status = :dirty)</code></pre><h3 id="Recovery-is-the-caller&#39;s"><a class="docs-heading-anchor" href="#Recovery-is-the-caller&#39;s">Recovery is the caller&#39;s</a><a id="Recovery-is-the-caller&#39;s-1"></a><a class="docs-heading-anchor-permalink" href="#Recovery-is-the-caller&#39;s" title="Permalink"></a></h3><p>The handler publishes a point worth restarting from; the decision is outside the graph:</p><pre><code class="language-julia hljs">bad  = newton(x0 = 0.0, c = 4.0)              # f&#39;(0) = 0 on the very first turn
+good = newton(x0 = bad.restart, c = 4.0)
+(first = (bad.reason, bad.x, bad.restart),
+ then  = (good.reason, good.x))</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi">(first = (:stalled, 0.0, 1.0), then = (:converged, 2.000000000000002))</code></pre><h3 id="A-double-root:-the-diagnosis-arrives-first"><a class="docs-heading-anchor" href="#A-double-root:-the-diagnosis-arrives-first">A double root: the diagnosis arrives first</a><a id="A-double-root:-the-diagnosis-arrives-first-1"></a><a class="docs-heading-anchor-permalink" href="#A-double-root:-the-diagnosis-arrives-first" title="Permalink"></a></h3><p>With <code>c = 0</code> the root is double. Newton halves <code>x</code> every turn instead of squaring the error, and <code>f&#39;(x) = 2x</code> goes to zero along with it. With a loose <code>tol</code> convergence wins; with a tight one the stall does:</p><pre><code class="language-julia hljs">loose = newton(x0 = 1.0, c = 0.0, tol = 1e-10)
+tight = newton(x0 = 1.0, c = 0.0, tol = 1e-30)
+(loose = (loose.reason, loose.x),
+ tight = (tight.reason, tight.x, residual = tight.x^2))</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi">(loose = (:converged, 7.62939453125e-6), tight = (reason = :stalled, x = 3.725290298461914e-9, residual = 1.3877787807814457e-17))</code></pre><p>At the moment of the diagnosis the answer was already good — just not good enough for the tolerance that was asked for. That is the price of &quot;stop with a diagnosis&quot;: the graph cannot weigh &quot;close enough&quot; against &quot;cannot continue&quot;, because the gate that knows about the tolerance never ran. The caller can, which is exactly why the handler reports <code>x</code> and not only a reason.</p><h3 id="Things-to-watch"><a class="docs-heading-anchor" href="#Things-to-watch">Things to watch</a><a id="Things-to-watch-1"></a><a class="docs-heading-anchor-permalink" href="#Things-to-watch" title="Permalink"></a></h3><ul><li><p><strong><code>eps</code> is not optional.</strong> Set it to <code>0</code> and the guard never fires: the step divides by zero, <code>Inf</code> or <code>NaN</code> flows on, and the graph reports success.</p><pre><code class="language-julia hljs">r3 = newton(x0 = 0.0, c = 4.0, eps = 0.0, maxiter = 3)
+(reason = r3.reason, x = r3.x, rescue = getdata(r3.g.w, r3.g.rescue, :reason))</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi">(reason = :exhausted, x = NaN, rescue = nothing)</code></pre></li><li><p><strong>A raised exception is not routed anywhere.</strong> It gives the node <code>:failed</code>, adds one record to the log and stops the dependent subtree — which here is the whole graph, since every node descends from the source that failed. See <a href="../guide_ports/#What-a-failure-does-to-the-rest-of-the-run">what a failure does to the rest of the run</a>; <code>scheduler!(w; strict = true)</code> is the way to have it reported rather than only logged. That is the whole reason <code>NStep</code> catches its own failure.</p></li><li><p><strong><code>:error</code> edges are invisible to cycle detection</strong>, so one can close a loop even in a <code>DAW</code> graph. Convenient, and easy to forget.</p></li></ul><h2 id="The-graph-2"><a class="docs-heading-anchor" href="#The-graph-2">The graph</a><a class="docs-heading-anchor-permalink" href="#The-graph-2" title="Permalink"></a></h2><p>The graph, with the <code>:error</code> routing in red: that edge carries a value, not a failure, so the node it leaves still ends <code>:clean</code>. See <a href="../guide/#Drawing-a-workflow">Drawing a workflow</a> for the helper this uses.</p><pre><code class="language-julia hljs">gp = build_newton()
+scheduler!(gp.w; maxiter = 200_000)
+plotworkflow(gp.w; label = :id)</code></pre><img src="0b7cfaa9.svg" alt="Example block output"/></article><nav class="docs-footer"><a class="docs-footer-prevpage" href="../examples_gradient_descent/">« Gradient descent on a graph</a><a class="docs-footer-nextpage" href="../examples_horner/">Horner&#39;s scheme on DAW »</a><div class="flexbox-break"></div><p class="footer-message">Powered by <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> and the <a href="https://julialang.org/">Julia Programming Language</a>.</p></nav></div><div class="modal" id="documenter-settings"><div class="modal-background"></div><div class="modal-card"><header class="modal-card-head"><p class="modal-card-title">Settings</p><button class="delete"></button></header><section class="modal-card-body"><p><label class="label">Theme</label><div class="select"><select id="documenter-themepicker"><option value="auto">Automatic (OS)</option><option value="documenter-light">documenter-light</option><option value="documenter-dark">documenter-dark</option><option value="catppuccin-latte">catppuccin-latte</option><option value="catppuccin-frappe">catppuccin-frappe</option><option value="catppuccin-macchiato">catppuccin-macchiato</option><option value="catppuccin-mocha">catppuccin-mocha</option></select></div></p><hr/><p>This document was generated with <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> version 1.20.0 on <span class="colophon-date" title="Saturday 14 November 2026 00:25">Saturday 14 November 2026</span>. Using Julia version 1.13.4.</p></section><footer class="modal-card-foot"></footer></div></div></div></body></html>

@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="UTF-8"/><meta name="viewport" content="width=device-width, initial-scale=1.0"/><meta name="referrer" content="no-referrer"/><title>Querying settings · MetidaFlows.jl</title><meta name="title" content="Querying settings · MetidaFlows.jl"/><meta property="og:title" content="Querying settings · MetidaFlows.jl"/><meta property="twitter:title" content="Querying settings · MetidaFlows.jl"/><meta name="description" content="Documentation for MetidaFlows.jl."/><meta property="og:description" content="Documentation for MetidaFlows.jl."/><meta property="twitter:description" content="Documentation for MetidaFlows.jl."/><meta property="og:url" content="https://PharmCat.github.io/MetidaFlows.jl/examples_settings_query/"/><meta property="twitter:url" content="https://PharmCat.github.io/MetidaFlows.jl/examples_settings_query/"/><link rel="canonical" href="https://PharmCat.github.io/MetidaFlows.jl/examples_settings_query/"/><script data-outdated-warner src="../assets/warner.js"></script><link href="https://cdnjs.cloudflare.com/ajax/libs/lato-font/3.0.0/css/lato-font.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/juliamono/0.63.2/juliamono.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/fontawesome.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/solid.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/brands.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.8/katex.min.css" rel="stylesheet" type="text/css"/><script>documenterBaseURL=".."</script><script src="https://cdnjs.cloudflare.com/ajax/libs/require.js/2.3.6/require.min.js" data-main="../assets/documenter.js"></script><script src="../search_index.js"></script><script src="../siteinfo.js"></script><script src="../../versions.js"></script><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../assets/themes/catppuccin-mocha.css" data-theme-name="catppuccin-mocha"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../assets/themes/catppuccin-macchiato.css" data-theme-name="catppuccin-macchiato"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../assets/themes/catppuccin-frappe.css" data-theme-name="catppuccin-frappe"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../assets/themes/catppuccin-latte.css" data-theme-name="catppuccin-latte"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../assets/themes/documenter-dark.css" data-theme-name="documenter-dark" data-theme-primary-dark/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../assets/themes/documenter-light.css" data-theme-name="documenter-light" data-theme-primary/><script src="../assets/themeswap.js"></script></head><body><div id="documenter"><nav class="docs-sidebar"><div class="docs-package-name"><span class="docs-autofit"><a href="../">MetidaFlows.jl</a></span></div><button class="docs-search-query input is-rounded is-small is-clickable my-2 mx-auto py-1 px-2" id="documenter-search-query">Search docs (Ctrl + /)</button><ul class="docs-menu"><li><a class="tocitem" href="../">Home</a></li><li><span class="tocitem">Guide</span><ul><li><a class="tocitem" href="../guide/">User guide</a></li><li><a class="tocitem" href="../guide_execution/">Execution model</a></li><li><a class="tocitem" href="../guide_ports/">Ports and cycles</a></li><li><a class="tocitem" href="../guide_serialization/">Serialization and schemas</a></li><li><a class="tocitem" href="../guide_logs/">Logs</a></li></ul></li><li><a class="tocitem" href="../typed_containers/">Typed containers</a></li><li><span class="tocitem">Examples</span><ul><li><a class="tocitem" href="../examples_abw_cycle/">AWB cycle</a></li><li><a class="tocitem" href="../examples_abw_two_node/">AWB two node cycle</a></li><li class="is-active"><a class="tocitem" href>Querying settings</a><ul class="internal"><li><a class="tocitem" href="#Querying-settings-before-execution"><span>Querying settings before execution</span></a></li><li><a class="tocitem" href="#The-graph"><span>The graph</span></a></li></ul></li><li><a class="tocitem" href="../examples_bubble_sort/">Bubble sort as a graph</a></li><li><a class="tocitem" href="../examples_insertion_sort/">Insertion sort: nested loops</a></li><li><a class="tocitem" href="../examples_gradient_descent/">Gradient descent on a graph</a></li><li><a class="tocitem" href="../examples_newton/">Newton&#39;s method and :error ports</a></li><li><a class="tocitem" href="../examples_horner/">Horner&#39;s scheme on DAW</a></li><li><a class="tocitem" href="../examples_edit_distance/">Edit distance: dynamic programming</a></li><li><a class="tocitem" href="../examples_intervals/">Interval arithmetic: metadata</a></li><li><a class="tocitem" href="../examples_power/">Modular exponentiation: skipping work</a></li></ul></li><li><span class="tocitem">API</span><ul><li><a class="tocitem" href="../api/">Overview</a></li><li><a class="tocitem" href="../api_types/">Types</a></li><li><a class="tocitem" href="../api_core/">Graph and nodes</a></li><li><a class="tocitem" href="../api_access/">Reading and writing a node</a></li><li><a class="tocitem" href="../api_execution/">Execution</a></li><li><a class="tocitem" href="../api_meta/">Port metadata</a></li><li><a class="tocitem" href="../api_serialization/">Serialization and schemas</a></li><li><a class="tocitem" href="../api_internals/">Internals</a></li></ul></li></ul><div class="docs-version-selector field has-addons"><div class="control"><span class="docs-label button is-static is-size-7">Version</span></div><div class="docs-selector control is-expanded"><div class="select is-fullwidth is-size-7"><select id="documenter-version-selector"></select></div></div></div></nav><div class="docs-main"><header class="docs-navbar"><a class="docs-sidebar-button docs-navbar-link fa-solid fa-bars is-hidden-desktop" id="documenter-sidebar-button" href="#"></a><nav class="breadcrumb"><ul class="is-hidden-mobile"><li><a class="is-disabled">Examples</a></li><li class="is-active"><a href>Querying settings</a></li></ul><ul class="is-hidden-tablet"><li class="is-active"><a href>Querying settings</a></li></ul></nav><div class="docs-right"><a class="docs-navbar-link" href="https://github.com/PharmCat/MetidaFlows.jl" title="View the repository on GitHub"><span class="docs-icon fa-brands"></span><span class="docs-label is-hidden-touch">GitHub</span></a><a class="docs-navbar-link" href="https://github.com/PharmCat/MetidaFlows.jl/blob/main/docs/src/examples_settings_query.md" title="Edit source on GitHub"><span class="docs-icon fa-solid"></span></a><a class="docs-settings-button docs-navbar-link fa-solid fa-gear" id="documenter-settings-button" href="#" title="Settings"></a><a class="docs-article-toggle-button fa-solid fa-chevron-up" id="documenter-article-toggle-button" href="javascript:;" title="Collapse all docstrings"></a></div></header><article class="content" id="documenter-page"><h2 id="Querying-settings-before-execution"><a class="docs-heading-anchor" href="#Querying-settings-before-execution">Querying settings before execution</a><a id="Querying-settings-before-execution-1"></a><a class="docs-heading-anchor-permalink" href="#Querying-settings-before-execution" title="Permalink"></a></h2><p>A node often has to be configured with something only its producer knows. The node that averages a column needs a column name; the column names live in a CSV file that has not been read yet.</p><p>Two functions answer that without executing anything:</p><ul><li><a href="../api_meta/#MetidaFlows.getmeta"><code>getmeta</code></a> — what a node <strong>will produce</strong> on one of its output ports;</li><li><a href="../api_meta/#MetidaFlows.getinputmeta"><code>getinputmeta</code></a> — what <strong>will arrive</strong> at every input port of a node.</li></ul><p>Both walk up the graph, asking each node to describe itself. What is done with the answer — a dropdown in a graph editor, a validation message, a printed summary — is left to the caller: the engine reports facts about the graph and does not define how settings are presented.</p><pre><code class="nohighlight hljs">ReadCSV ──:table──▶ Join ──:table──▶ MeanColumn
+ReadCSV ──:table──▶</code></pre><p>Two sources are joined, and the node at the end has to be told which column to average — a column that only exists after the join.</p><h3 id="Node-types-and-interfaces"><a class="docs-heading-anchor" href="#Node-types-and-interfaces">Node types and interfaces</a><a id="Node-types-and-interfaces-1"></a><a class="docs-heading-anchor-permalink" href="#Node-types-and-interfaces" title="Permalink"></a></h3><pre><code class="language-julia hljs">using MetidaFlows, CSV, DataFrames, Statistics
+import MetidaFlows: getmeta_unsafe, ismetasource
+
+struct ReadCSV    &lt;: AbstractNodeType end
+struct JoinOn     &lt;: AbstractNodeType end
+struct MeanColumn &lt;: AbstractNodeType end
+
+read_spec = NodeSpec(&quot;Read CSV&quot;,
+    PortSpec[],
+    [PortSpec(&quot;Table&quot;, DataFrame, :table)],
+    [:file])
+
+join_spec = NodeSpec(&quot;Join&quot;,
+    [PortSpec(&quot;Left&quot;,  DataFrame, :left),
+     PortSpec(&quot;Right&quot;, DataFrame, :right)],
+    [PortSpec(&quot;Table&quot;, DataFrame, :table)],
+    [:on])
+
+mean_spec = NodeSpec(&quot;Mean of column&quot;,
+    [PortSpec(&quot;Table&quot;, DataFrame, :input_data)],
+    [PortSpec(&quot;Mean&quot;, Float64, :mean; kind = :terminal)],
+    [:column])</code></pre><h3 id="Execution"><a class="docs-heading-anchor" href="#Execution">Execution</a><a id="Execution-1"></a><a class="docs-heading-anchor-permalink" href="#Execution" title="Permalink"></a></h3><pre><code class="language-julia hljs">function MetidaFlows.execute_unsafe!(node::DataNode{ReadCSV})
+    setdata!(node, :table, DataFrame(CSV.File(node.settings[:file])))
+    return [:table]
+end
+
+function MetidaFlows.execute_unsafe!(node::DataNode{JoinOn})
+    l = getinputdata(node, :left)
+    r = getinputdata(node, :right)
+    setdata!(node, :table, innerjoin(l, r; on = node.settings[:on]))
+    return [:table]
+end
+
+function MetidaFlows.execute_unsafe!(node::DataNode{MeanColumn})
+    df = getinputdata(node, :input_data)
+    setdata!(node, :mean, mean(df[!, node.settings[:column]]))
+    return [:mean]
+end</code></pre><h3 id="Metadata"><a class="docs-heading-anchor" href="#Metadata">Metadata</a><a id="Metadata-1"></a><a class="docs-heading-anchor-permalink" href="#Metadata" title="Permalink"></a></h3><p>Each node describes only itself. The source reads a header instead of a whole file, and declares itself a metadata source so the walk stops there:</p><pre><code class="language-julia hljs">MetidaFlows.ismetasource(node::DataNode{ReadCSV}, ::Symbol) = haskey(node.settings, :file)
+
+function MetidaFlows.getmeta_unsafe(node::DataNode{ReadCSV}, ::Symbol, inmeta)
+    path = get(node.settings, :file, nothing)
+    (path === nothing || !isfile(path)) &amp;&amp; return nothing
+    return (columns = propertynames(CSV.File(path; limit = 0)),)
+end</code></pre><p><code>JoinOn</code> changes the schema, so it describes the result instead of passing an input description through — the key column appears once, not twice:</p><pre><code class="language-julia hljs">function MetidaFlows.getmeta_unsafe(node::DataNode{JoinOn}, ::Symbol, inmeta)
+    l, r = inmeta[:left], inmeta[:right]
+    (l === nothing || r === nothing) &amp;&amp; return nothing
+    on = get(node.settings, :on, nothing)
+    on === nothing &amp;&amp; return (columns = intersect(l.columns, r.columns),)
+    return (columns = vcat(l.columns, setdiff(r.columns, [on])),)
+end</code></pre><p>Before <code>:on</code> is chosen the node reports the columns the two tables have in common — exactly the candidates for a join key. Once it is chosen, it reports the real result schema.</p><p><code>MeanColumn</code> produces a scalar, so there is nothing to describe and the default <code>nothing</code> is correct. A node that does not implement <a href="../api_meta/#MetidaFlows.getmeta_unsafe"><code>getmeta_unsafe</code></a> breaks the chain the same way: the caller offers no completion rather than a wrong one.</p><hr/><h3 id="Building-the-graph"><a class="docs-heading-anchor" href="#Building-the-graph">Building the graph</a><a id="Building-the-graph-1"></a><a class="docs-heading-anchor-permalink" href="#Building-the-graph" title="Permalink"></a></h3><pre><code class="language-julia hljs">w     = Workflow(1)
+left  = add_node!(w, DataNode(ReadCSV,    read_spec))
+right = add_node!(w, DataNode(ReadCSV,    read_spec))
+join  = add_node!(w, DataNode(JoinOn,     join_spec))
+avg   = add_node!(w, DataNode(MeanColumn, mean_spec))
+
+add_connection!(w, left,  :table, join, :left)
+add_connection!(w, right, :table, join, :right)
+add_connection!(w, join,  :table, avg,  :input_data)</code></pre><p>Nothing has been executed and no source has been configured yet, so nothing is known — <code>nothing</code> propagates instead of an error:</p><pre><code class="language-julia hljs">getinputmeta(w, join)</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi">Dict{Symbol, Any} with 2 entries:
+  :left  =&gt; nothing
+  :right =&gt; nothing</code></pre><p>Both keys are present even though neither producer can answer: an unconnected or silent single port maps to <code>nothing</code>, so a caller can always index by port label.</p><h3 id="Querying-settings,-step-by-step"><a class="docs-heading-anchor" href="#Querying-settings,-step-by-step">Querying settings, step by step</a><a id="Querying-settings,-step-by-step-1"></a><a class="docs-heading-anchor-permalink" href="#Querying-settings,-step-by-step" title="Permalink"></a></h3><p>Configure the sources — still without executing anything:</p><pre><code class="language-julia hljs">setsettings!(w, left,  Dict(:file =&gt; DATA_PATH))
+setsettings!(w, right, Dict(:file =&gt; CONC_PATH))
+
+getmeta(w, left, :table)</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi">(columns = [:id, :length],)</code></pre><p>A source has no input ports, so <a href="../api_meta/#MetidaFlows.getinputmeta"><code>getinputmeta</code></a> would return an empty dictionary for it — <a href="../api_meta/#MetidaFlows.getmeta"><code>getmeta</code></a> is the way to ask what a node emits.</p><p>Now the join can be offered a list of usable keys. Deriving it is the caller&#39;s job, and it is a one-liner over the input descriptions:</p><pre><code class="language-julia hljs">function join_key_options(w, id)
+    m = getinputmeta(w, id)
+    l, r = m[:left], m[:right]
+    (l === nothing || r === nothing) &amp;&amp; return Symbol[]
+    return intersect(l.columns, r.columns)
+end
+
+join_key_options(w, join)</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi">1-element Vector{Symbol}:
+ :id</code></pre><p>Pick one of the offered values and ask the join what it will produce:</p><pre><code class="language-julia hljs">setsettings!(w, join, Dict(:on =&gt; :id))
+
+getmeta(w, join, :table)</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi">(columns = [:id, :length, :Concentration],)</code></pre><p>The last node offers the columns of the joined table. Here the description arrives at an input port, so <a href="../api_meta/#MetidaFlows.getinputmeta"><code>getinputmeta</code></a> is the right call:</p><pre><code class="language-julia hljs">function column_options(w, id, port)
+    m = getinputmeta(w, id)[port]
+    m === nothing ? Symbol[] : m.columns
+end
+
+column_options(w, avg, :input_data)</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi">3-element Vector{Symbol}:
+ :id
+ :length
+ :Concentration</code></pre><pre><code class="language-julia hljs">setsettings!(w, avg, Dict(:column =&gt; :Concentration))</code></pre><p>Only now is anything computed:</p><pre><code class="language-julia hljs">scheduler!(w)
+getdata(w, avg, :mean)</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi">0.57</code></pre><hr/><h3 id="Which-function-to-call"><a class="docs-heading-anchor" href="#Which-function-to-call">Which function to call</a><a id="Which-function-to-call-1"></a><a class="docs-heading-anchor-permalink" href="#Which-function-to-call" title="Permalink"></a></h3><table><tr><th style="text-align: right"></th><th style="text-align: right"><a href="../api_meta/#MetidaFlows.getmeta"><code>getmeta</code></a></th><th style="text-align: right"><a href="../api_meta/#MetidaFlows.getinputmeta"><code>getinputmeta</code></a></th></tr><tr><td style="text-align: right">Answers</td><td style="text-align: right">what node <code>id</code> emits on <code>port</code></td><td style="text-align: right">what arrives at every input port of node <code>id</code></td></tr><tr><td style="text-align: right">Keyed by</td><td style="text-align: right">one output port label</td><td style="text-align: right">the node&#39;s own input port labels</td></tr><tr><td style="text-align: right">Use for</td><td style="text-align: right">sources, nodes with several outputs, previewing a configured result</td><td style="text-align: right">filling a settings form from upstream</td></tr><tr><td style="text-align: right">On a node without input ports</td><td style="text-align: right">works</td><td style="text-align: right">returns an empty dictionary</td></tr></table><p><code>getinputmeta</code> is <a href="../api_meta/#MetidaFlows.getmeta"><code>getmeta</code></a> applied to every incoming connection, arranged by input port label — so a producer never learns which port of which consumer it feeds, and two producers of the same type cannot be confused.</p><h3 id="Notes"><a class="docs-heading-anchor" href="#Notes">Notes</a><a id="Notes-1"></a><a class="docs-heading-anchor-permalink" href="#Notes" title="Permalink"></a></h3><ul><li>Metadata is computed on request and never stored, so it cannot go stale — if a file changes on disk, the next query sees it. Within a single call each node is described once, so a diamond does not describe a shared ancestor twice.</li><li><a href="../api_meta/#MetidaFlows.ismetasource"><code>ismetasource</code></a> stops the upward walk at a node that can answer on its own; without it the walk continues to the top of the graph. <code>maxdepth</code> (1000 by default) bounds it in any case.</li><li>Ports of kind <code>:feedback</code> are never followed, so metadata queries terminate on cyclic <code>ABW</code> workflows as well.</li><li>The shape of a description — here a <code>NamedTuple</code> with a <code>columns</code> field — is a contract between nodes sharing a port datatype. The engine does not define it, and neither does it define how the result is turned into a settings form.</li></ul><h2 id="The-graph"><a class="docs-heading-anchor" href="#The-graph">The graph</a><a id="The-graph-1"></a><a class="docs-heading-anchor-permalink" href="#The-graph" title="Permalink"></a></h2><p>The graph the settings came from: See <a href="../guide/#Drawing-a-workflow">Drawing a workflow</a> for the helper this uses.</p><pre><code class="language-julia hljs">plotworkflow(w)</code></pre><img src='data:image/svg+xml;utf-8,<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg"
+     xmlns:xlink="http://www.w3.org/1999/xlink"
+     version="1.2"
+     width="130mm" height="76mm" viewBox="0 0 130 76"
+     stroke="none"
+     fill="%23000000"
+     stroke-width="0.3"
+     font-size="3.88"
+>
+<defs>
+  <marker id="arrow" markerWidth="15" markerHeight="7" refX="5" refY="3.5" orient="auto" markerUnits="strokeWidth">
+    <path d="M0,0 L15,3.5 L0,7 z" stroke="context-stroke" fill="context-stroke"/>
+  </marker>
+</defs>
+<g fill="%23000000" fill-opacity="0.000" id="img-508213df-1">
+  <g transform="translate(65,38)">
+    <path d="M-65,-38 L65,-38 65,38 -65,38  z" class="primitive"/>
+  </g>
+</g>
+<g stroke-width="1" id="img-508213df-2">
+  <g transform="translate(44.18,51.94)" stroke="%2378909C">
+    <path fill="none" d="M-20.16,7.84 C2.55,0.57 1.67,1.57 15.94,-9.99" class="primitive"/>
+  </g>
+  <g transform="translate(37.61,27.4)" stroke="%2378909C">
+    <path fill="none" d="M-15.4,-10.26 C-1.13,1.3 -3.09,0.85 19.62,8.12" class="primitive"/>
+  </g>
+  <g transform="translate(86.24,39.83)" stroke="%2378909C">
+    <path fill="none" d="M-15.65,-1.18 C1.25,0.79 -1.25,1.18 15.65,-0.79" class="primitive"/>
+  </g>
+</g>
+<g stroke-width="1" id="img-508213df-3">
+</g>
+<g transform="translate(60.73,41.46)" fill="%2378909C">
+  <path d="M-1.67,0.16 L1.22,-0.99 0.45,0.83  z" class="primitive"/>
+</g>
+<g transform="translate(58.2,35.83)" fill="%2378909C">
+  <path d="M-0.31,-0.85 L1.94,0.62 -1.64,0.23  z" class="primitive"/>
+</g>
+<g transform="translate(103.01,38.91)" fill="%2378909C">
+  <path d="M-1.4,-0.49 L2.24,-0.26 -0.84,0.75  z" class="primitive"/>
+</g>
+<g font-size="4" fill="%23000000" id="img-508213df-4">
+</g>
+<g stroke-width="1" stroke="%2337474F" id="img-508213df-5">
+  <g transform="translate(19.17,61.33)" fill="%2381C784">
+    <circle cx="0" cy="0" r="5.5" class="primitive"/>
+  </g>
+  <g transform="translate(19.17,14.67)" fill="%2381C784">
+    <circle cx="0" cy="0" r="5.5" class="primitive"/>
+  </g>
+  <g transform="translate(65,38)" fill="%2381C784">
+    <circle cx="0" cy="0" r="5.5" class="primitive"/>
+  </g>
+  <g transform="translate(110.83,38)" fill="%2381C784">
+    <circle cx="0" cy="0" r="5.5" class="primitive"/>
+  </g>
+</g>
+<g font-family="Helvetica" font-size="4" fill="%23000000" id="img-508213df-6">
+  <g transform="translate(19.17,50.36)">
+    <g class="primitive">
+      <text text-anchor="middle" dy="0.35em">1 Read CSV</text>
+    </g>
+  </g>
+  <g transform="translate(19.17,3.69)">
+    <g class="primitive">
+      <text text-anchor="middle" dy="0.35em">2 Read CSV</text>
+    </g>
+  </g>
+  <g transform="translate(65,27.02)">
+    <g class="primitive">
+      <text text-anchor="middle" dy="0.35em">3 Join</text>
+    </g>
+  </g>
+  <g transform="translate(110.83,27.02)">
+    <g class="primitive">
+      <text text-anchor="middle" dy="0.35em">4 Mean of column</text>
+    </g>
+  </g>
+</g>
+<g font-family="Helvetica" font-size="4" fill="%23000000" id="img-508213df-7">
+  <g transform="translate(65,10)">
+    <g class="primitive">
+      <text text-anchor="middle" dy="0.35em"></text>
+    </g>
+  </g>
+</g>
+</svg>
+'/></article><nav class="docs-footer"><a class="docs-footer-prevpage" href="../examples_abw_two_node/">« AWB two node cycle</a><a class="docs-footer-nextpage" href="../examples_bubble_sort/">Bubble sort as a graph »</a><div class="flexbox-break"></div><p class="footer-message">Powered by <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> and the <a href="https://julialang.org/">Julia Programming Language</a>.</p></nav></div><div class="modal" id="documenter-settings"><div class="modal-background"></div><div class="modal-card"><header class="modal-card-head"><p class="modal-card-title">Settings</p><button class="delete"></button></header><section class="modal-card-body"><p><label class="label">Theme</label><div class="select"><select id="documenter-themepicker"><option value="auto">Automatic (OS)</option><option value="documenter-light">documenter-light</option><option value="documenter-dark">documenter-dark</option><option value="catppuccin-latte">catppuccin-latte</option><option value="catppuccin-frappe">catppuccin-frappe</option><option value="catppuccin-macchiato">catppuccin-macchiato</option><option value="catppuccin-mocha">catppuccin-mocha</option></select></div></p><hr/><p>This document was generated with <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> version 1.20.0 on <span class="colophon-date" title="Saturday 14 November 2026 00:25">Saturday 14 November 2026</span>. Using Julia version 1.13.4.</p></section><footer class="modal-card-foot"></footer></div></div></div></body></html>

@@ -1,0 +1,387 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="UTF-8"/><meta name="viewport" content="width=device-width, initial-scale=1.0"/><meta name="referrer" content="no-referrer"/><title>Interval arithmetic: metadata · MetidaFlows.jl</title><meta name="title" content="Interval arithmetic: metadata · MetidaFlows.jl"/><meta property="og:title" content="Interval arithmetic: metadata · MetidaFlows.jl"/><meta property="twitter:title" content="Interval arithmetic: metadata · MetidaFlows.jl"/><meta name="description" content="Documentation for MetidaFlows.jl."/><meta property="og:description" content="Documentation for MetidaFlows.jl."/><meta property="twitter:description" content="Documentation for MetidaFlows.jl."/><meta property="og:url" content="https://PharmCat.github.io/MetidaFlows.jl/examples_intervals/"/><meta property="twitter:url" content="https://PharmCat.github.io/MetidaFlows.jl/examples_intervals/"/><link rel="canonical" href="https://PharmCat.github.io/MetidaFlows.jl/examples_intervals/"/><script data-outdated-warner src="../assets/warner.js"></script><link href="https://cdnjs.cloudflare.com/ajax/libs/lato-font/3.0.0/css/lato-font.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/juliamono/0.63.2/juliamono.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/fontawesome.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/solid.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/brands.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.8/katex.min.css" rel="stylesheet" type="text/css"/><script>documenterBaseURL=".."</script><script src="https://cdnjs.cloudflare.com/ajax/libs/require.js/2.3.6/require.min.js" data-main="../assets/documenter.js"></script><script src="../search_index.js"></script><script src="../siteinfo.js"></script><script src="../../versions.js"></script><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../assets/themes/catppuccin-mocha.css" data-theme-name="catppuccin-mocha"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../assets/themes/catppuccin-macchiato.css" data-theme-name="catppuccin-macchiato"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../assets/themes/catppuccin-frappe.css" data-theme-name="catppuccin-frappe"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../assets/themes/catppuccin-latte.css" data-theme-name="catppuccin-latte"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../assets/themes/documenter-dark.css" data-theme-name="documenter-dark" data-theme-primary-dark/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../assets/themes/documenter-light.css" data-theme-name="documenter-light" data-theme-primary/><script src="../assets/themeswap.js"></script></head><body><div id="documenter"><nav class="docs-sidebar"><div class="docs-package-name"><span class="docs-autofit"><a href="../">MetidaFlows.jl</a></span></div><button class="docs-search-query input is-rounded is-small is-clickable my-2 mx-auto py-1 px-2" id="documenter-search-query">Search docs (Ctrl + /)</button><ul class="docs-menu"><li><a class="tocitem" href="../">Home</a></li><li><span class="tocitem">Guide</span><ul><li><a class="tocitem" href="../guide/">User guide</a></li><li><a class="tocitem" href="../guide_execution/">Execution model</a></li><li><a class="tocitem" href="../guide_ports/">Ports and cycles</a></li><li><a class="tocitem" href="../guide_serialization/">Serialization and schemas</a></li><li><a class="tocitem" href="../guide_logs/">Logs</a></li></ul></li><li><a class="tocitem" href="../typed_containers/">Typed containers</a></li><li><span class="tocitem">Examples</span><ul><li><a class="tocitem" href="../examples_abw_cycle/">AWB cycle</a></li><li><a class="tocitem" href="../examples_abw_two_node/">AWB two node cycle</a></li><li><a class="tocitem" href="../examples_settings_query/">Querying settings</a></li><li><a class="tocitem" href="../examples_bubble_sort/">Bubble sort as a graph</a></li><li><a class="tocitem" href="../examples_insertion_sort/">Insertion sort: nested loops</a></li><li><a class="tocitem" href="../examples_gradient_descent/">Gradient descent on a graph</a></li><li><a class="tocitem" href="../examples_newton/">Newton&#39;s method and :error ports</a></li><li><a class="tocitem" href="../examples_horner/">Horner&#39;s scheme on DAW</a></li><li><a class="tocitem" href="../examples_edit_distance/">Edit distance: dynamic programming</a></li><li class="is-active"><a class="tocitem" href>Interval arithmetic: metadata</a><ul class="internal"><li><a class="tocitem" href="#Interval-arithmetic:-an-algorithm-the-scheduler-never-runs"><span>Interval arithmetic: an algorithm the scheduler never runs</span></a></li><li><a class="tocitem" href="#The-graph-2"><span>The graph</span></a></li></ul></li><li><a class="tocitem" href="../examples_power/">Modular exponentiation: skipping work</a></li></ul></li><li><span class="tocitem">API</span><ul><li><a class="tocitem" href="../api/">Overview</a></li><li><a class="tocitem" href="../api_types/">Types</a></li><li><a class="tocitem" href="../api_core/">Graph and nodes</a></li><li><a class="tocitem" href="../api_access/">Reading and writing a node</a></li><li><a class="tocitem" href="../api_execution/">Execution</a></li><li><a class="tocitem" href="../api_meta/">Port metadata</a></li><li><a class="tocitem" href="../api_serialization/">Serialization and schemas</a></li><li><a class="tocitem" href="../api_internals/">Internals</a></li></ul></li></ul><div class="docs-version-selector field has-addons"><div class="control"><span class="docs-label button is-static is-size-7">Version</span></div><div class="docs-selector control is-expanded"><div class="select is-fullwidth is-size-7"><select id="documenter-version-selector"></select></div></div></div></nav><div class="docs-main"><header class="docs-navbar"><a class="docs-sidebar-button docs-navbar-link fa-solid fa-bars is-hidden-desktop" id="documenter-sidebar-button" href="#"></a><nav class="breadcrumb"><ul class="is-hidden-mobile"><li><a class="is-disabled">Examples</a></li><li class="is-active"><a href>Interval arithmetic: metadata</a></li></ul><ul class="is-hidden-tablet"><li class="is-active"><a href>Interval arithmetic: metadata</a></li></ul></nav><div class="docs-right"><a class="docs-navbar-link" href="https://github.com/PharmCat/MetidaFlows.jl" title="View the repository on GitHub"><span class="docs-icon fa-brands"></span><span class="docs-label is-hidden-touch">GitHub</span></a><a class="docs-navbar-link" href="https://github.com/PharmCat/MetidaFlows.jl/blob/main/docs/src/examples_intervals.md" title="Edit source on GitHub"><span class="docs-icon fa-solid"></span></a><a class="docs-settings-button docs-navbar-link fa-solid fa-gear" id="documenter-settings-button" href="#" title="Settings"></a><a class="docs-article-toggle-button fa-solid fa-chevron-up" id="documenter-article-toggle-button" href="javascript:;" title="Collapse all docstrings"></a></div></header><article class="content" id="documenter-page"><h2 id="Interval-arithmetic:-an-algorithm-the-scheduler-never-runs"><a class="docs-heading-anchor" href="#Interval-arithmetic:-an-algorithm-the-scheduler-never-runs">Interval arithmetic: an algorithm the scheduler never runs</a><a id="Interval-arithmetic:-an-algorithm-the-scheduler-never-runs-1"></a><a class="docs-heading-anchor-permalink" href="#Interval-arithmetic:-an-algorithm-the-scheduler-never-runs" title="Permalink"></a></h2><p>Every other example in this section is computed by a scheduler. This one is computed by <a href="../api_meta/#MetidaFlows.getmeta"><code>getmeta</code></a>, and <strong>not one node is executed</strong>.</p><p>That is what the metadata mechanism is, named properly: <code>getmeta</code> walks up the graph, asks the producers, and hands their answers to <a href="../api_meta/#MetidaFlows.getmeta_unsafe"><code>getmeta_unsafe</code></a> as <code>inmeta</code>. It is <strong>abstract interpretation</strong> — a second, parallel semantics of the same graph, in which descriptions travel where values normally do, and <code>nothing</code> is the top of the lattice, &quot;unknown&quot;.</p><p>Interval arithmetic is the most revealing algorithm to put in that second semantics, for one reason: its answer is <em>checkable by the first one</em>. An estimate is not merely plausible — it must contain the result for every input from the declared ranges, and a run of the graph either confirms that or refutes it.</p><pre><code class="nohighlight hljs">values:     f(x, y) = (x · y + x) / (y − 2)
+metadata:   [lo, hi] of every port, by the rules of interval arithmetic</code></pre><h3 id="The-rules"><a class="docs-heading-anchor" href="#The-rules">The rules</a><a id="The-rules-1"></a><a class="docs-heading-anchor-permalink" href="#The-rules" title="Permalink"></a></h3><pre><code class="language-julia hljs">using MetidaFlows
+import MetidaFlows: PortSpec, getmeta, getinputmeta, ismetasource, getnode, getstatus
+
+struct IvConst &lt;: AbstractNodeType end
+struct IvAdd   &lt;: AbstractNodeType end
+struct IvSub   &lt;: AbstractNodeType end
+struct IvMul   &lt;: AbstractNodeType end
+struct IvDiv   &lt;: AbstractNodeType end
+struct IvOut   &lt;: AbstractNodeType end
+
+spec_const() = NodeSpec(&quot;Iv const&quot;, PortSpec[],
+    [PortSpec(&quot;Out&quot;, Float64, :out)], [:value, :lo, :hi])
+spec_bin(name) = NodeSpec(name,
+    [PortSpec(&quot;A&quot;, Float64, :a), PortSpec(&quot;B&quot;, Float64, :b)],
+    [PortSpec(&quot;Out&quot;, Float64, :out)])
+spec_out() = NodeSpec(&quot;Iv out&quot;, [PortSpec(&quot;In&quot;, Float64, :in)],
+    [PortSpec(&quot;Out&quot;, Float64, :out; kind = :terminal)])
+
+# the ordinary semantics
+MetidaFlows.execute_unsafe!(n::DataNode{IvConst}) =
+    (setdata!(n, :out, Float64(n.settings[:value])); [:out])
+MetidaFlows.execute_unsafe!(n::DataNode{IvAdd}) =
+    (setdata!(n, :out, getinputdata(n, :a) + getinputdata(n, :b)); [:out])
+MetidaFlows.execute_unsafe!(n::DataNode{IvSub}) =
+    (setdata!(n, :out, getinputdata(n, :a) - getinputdata(n, :b)); [:out])
+MetidaFlows.execute_unsafe!(n::DataNode{IvMul}) =
+    (setdata!(n, :out, getinputdata(n, :a) * getinputdata(n, :b)); [:out])
+MetidaFlows.execute_unsafe!(n::DataNode{IvDiv}) =
+    (setdata!(n, :out, getinputdata(n, :a) / getinputdata(n, :b)); [:out])
+MetidaFlows.execute_unsafe!(n::DataNode{IvOut}) =
+    (setdata!(n, :out, getinputdata(n, :in)); [:out])</code></pre><p>The second semantics is one method per node type. A constant describes itself — but only once its range is set, which is what <a href="../api_meta/#MetidaFlows.ismetasource"><code>ismetasource</code></a> is for:</p><pre><code class="language-julia hljs">MetidaFlows.ismetasource(n::DataNode{IvConst}, ::Symbol) =
+    haskey(n.settings, :lo) &amp;&amp; haskey(n.settings, :hi)
+
+# NOTE: total, not merely consistent with `ismetasource` — see below
+function MetidaFlows.getmeta_unsafe(n::DataNode{IvConst}, ::Symbol, inmeta)
+    (haskey(n.settings, :lo) &amp;&amp; haskey(n.settings, :hi)) || return nothing
+    (lo = Float64(n.settings[:lo]), hi = Float64(n.settings[:hi]))
+end
+
+both(m) = (a = m[:a]; b = m[:b]; (isnothing(a) || isnothing(b)) ? nothing : (a, b))
+
+MetidaFlows.getmeta_unsafe(n::DataNode{IvAdd}, ::Symbol, m) =
+    (p = both(m); isnothing(p) ? nothing :
+        (lo = p[1].lo + p[2].lo, hi = p[1].hi + p[2].hi))
+
+# subtraction flips the ends of the subtrahend
+MetidaFlows.getmeta_unsafe(n::DataNode{IvSub}, ::Symbol, m) =
+    (p = both(m); isnothing(p) ? nothing :
+        (lo = p[1].lo - p[2].hi, hi = p[1].hi - p[2].lo))
+
+# multiplication is not monotone in sign: all four products of the ends
+function MetidaFlows.getmeta_unsafe(n::DataNode{IvMul}, ::Symbol, m)
+    p = both(m); isnothing(p) &amp;&amp; return nothing
+    a, b = p
+    q = (a.lo*b.lo, a.lo*b.hi, a.hi*b.lo, a.hi*b.hi)
+    (lo = minimum(q), hi = maximum(q))
+end
+
+# and division refuses, instead of answering, when the divisor may be zero
+function MetidaFlows.getmeta_unsafe(n::DataNode{IvDiv}, ::Symbol, m)
+    p = both(m); isnothing(p) &amp;&amp; return nothing
+    a, b = p
+    b.lo &lt;= 0 &lt;= b.hi &amp;&amp;
+        error(&quot;Division by an interval containing zero: [$(b.lo), $(b.hi)]&quot;)
+    q = (a.lo/b.lo, a.lo/b.hi, a.hi/b.lo, a.hi/b.hi)
+    (lo = minimum(q), hi = maximum(q))
+end
+
+MetidaFlows.getmeta_unsafe(n::DataNode{IvOut}, ::Symbol, m) = m[:in]</code></pre><h3 id="The-graph"><a class="docs-heading-anchor" href="#The-graph">The graph</a><a id="The-graph-1"></a><a class="docs-heading-anchor-permalink" href="#The-graph" title="Permalink"></a></h3><p>Eight nodes, nine connections. <code>x</code> feeds two consumers and so does <code>y</code> — two diamonds, and the second one turns out to matter more than the first:</p><pre><code class="nohighlight hljs"> x   → mul·a      y   → mul·b
+ mul → add·a      x   → add·b      ← x arrives twice
+ y   → sub·a      k   → sub·b      ← y arrives twice
+ add → div·a      sub → div·b
+ div → out·in                      :out is terminal</code></pre><pre><code class="language-julia hljs">function build(; xlo = 1.0, xhi = 3.0, ylo = 4.0, yhi = 5.0, shift = 2.0)
+    w = Workflow(0; type = :DAW)
+    cx = add_node!(w, DataNode(IvConst, spec_const()))
+    cy = add_node!(w, DataNode(IvConst, spec_const()))
+    ck = add_node!(w, DataNode(IvConst, spec_const()))
+    setsettings!(w, cx, Dict(:value =&gt; (xlo+xhi)/2, :lo =&gt; xlo, :hi =&gt; xhi))
+    setsettings!(w, cy, Dict(:value =&gt; (ylo+yhi)/2, :lo =&gt; ylo, :hi =&gt; yhi))
+    setsettings!(w, ck, Dict(:value =&gt; shift, :lo =&gt; shift, :hi =&gt; shift))
+    mul = add_node!(w, DataNode(IvMul, spec_bin(&quot;Iv mul&quot;)))
+    add = add_node!(w, DataNode(IvAdd, spec_bin(&quot;Iv add&quot;)))
+    sub = add_node!(w, DataNode(IvSub, spec_bin(&quot;Iv sub&quot;)))
+    div = add_node!(w, DataNode(IvDiv, spec_bin(&quot;Iv div&quot;)))
+    out = add_node!(w, DataNode(IvOut, spec_out()))
+    add_connection!(w, cx, :out, mul, :a); add_connection!(w, cy, :out, mul, :b)
+    add_connection!(w, mul, :out, add, :a); add_connection!(w, cx, :out, add, :b)
+    add_connection!(w, cy, :out, sub, :a);  add_connection!(w, ck, :out, sub, :b)
+    add_connection!(w, add, :out, div, :a); add_connection!(w, sub, :out, div, :b)
+    add_connection!(w, div, :out, out, :in)
+    (w = w, cx = cx, cy = cy, mul = mul, add = add, sub = sub, div = div, out = out)
+end
+
+evaluate!(g, xv, yv) = begin
+    setsettings!(g.w, g.cx, Dict(:value =&gt; xv))
+    setsettings!(g.w, g.cy, Dict(:value =&gt; yv))
+    scheduler!(g.w)
+    getdata(g.w, g.out, :out)
+end</code></pre><h3 id="An-answer-with-no-work-done"><a class="docs-heading-anchor" href="#An-answer-with-no-work-done">An answer with no work done</a><a id="An-answer-with-no-work-done-1"></a><a class="docs-heading-anchor-permalink" href="#An-answer-with-no-work-done" title="Permalink"></a></h3><pre><code class="language-julia hljs">g    = build()
+pred = getmeta(g.w, g.out, :out)
+
+(predicted = pred,
+ executions = sum(n -&gt; n.state.exec_n, values(g.w.nodes)),
+ clean_nodes = count(n -&gt; getstatus(n) === :clean, values(g.w.nodes)),
+ run_id = g.w.run_id)</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi">(predicted = (lo = 1.6666666666666667, hi = 9.0), executions = 0, clean_nodes = 0, run_id = 0x0000000000000000)</code></pre><p>Every intermediate port answers the same way, and still nothing runs:</p><pre><code class="language-julia hljs">(mul = getmeta(g.w, g.mul, :out),
+ add = getmeta(g.w, g.add, :out),
+ sub = getmeta(g.w, g.sub, :out),
+ executions_after_all_that = sum(n -&gt; n.state.exec_n, values(g.w.nodes)))</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi">(mul = (lo = 4.0, hi = 15.0), add = (lo = 5.0, hi = 18.0), sub = (lo = 2.0, hi = 3.0), executions_after_all_that = 0)</code></pre><h3 id="Checked-by-the-first-semantics"><a class="docs-heading-anchor" href="#Checked-by-the-first-semantics">Checked by the first semantics</a><a id="Checked-by-the-first-semantics-1"></a><a class="docs-heading-anchor-permalink" href="#Checked-by-the-first-semantics" title="Permalink"></a></h3><p>A grid over the declared box — not random points, so the check is the same on every machine and every Julia version — and every value must land inside:</p><pre><code class="language-julia hljs">function sweep!(g, pred, m)
+    lo, hi, inside, total = Inf, -Inf, 0, 0
+    for i in 0:m, j in 0:m
+        v = evaluate!(g, 1.0 + 2.0*i/m, 4.0 + 1.0*j/m)
+        lo = min(lo, v); hi = max(hi, v)
+        total += 1
+        pred.lo &lt;= v &lt;= pred.hi &amp;&amp; (inside += 1)
+    end
+    (observed_lo = lo, observed_hi = hi, inside = inside, total = total)
+end
+sweep!(g, pred, 44)</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi">(observed_lo = 2.0, observed_hi = 7.5, inside = 2025, total = 2025)</code></pre><h3 id="Neither-bound-is-reached,-and-that-is-the-interesting-part"><a class="docs-heading-anchor" href="#Neither-bound-is-reached,-and-that-is-the-interesting-part">Neither bound is reached, and that is the interesting part</a><a id="Neither-bound-is-reached,-and-that-is-the-interesting-part-1"></a><a class="docs-heading-anchor-permalink" href="#Neither-bound-is-reached,-and-that-is-the-interesting-part" title="Permalink"></a></h3><p>The estimate is <code>[5/3, 9]</code>, the truth is <code>[2, 7.5]</code>. The gap is not slack in the implementation — it is the <strong>dependency problem</strong>, and this graph shows it twice over.</p><p><code>f(x, y) = x·(y+1)/(y−2)</code> grows with <code>x</code> and falls with <code>y</code>, so the real extremes sit at the corners <code>(3, 4)</code> and <code>(1, 5)</code>:</p><pre><code class="language-julia hljs">(at_3_4 = evaluate!(g, 3.0, 4.0), at_1_5 = evaluate!(g, 1.0, 5.0),
+ predicted = pred)</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi">(at_3_4 = 7.5, at_1_5 = 2.0, predicted = (lo = 1.6666666666666667, hi = 9.0))</code></pre><p>The predicted maximum of <code>9</code> would need <code>y = 5</code> in the numerator and <code>y = 4</code> in the denominator <strong>at the same time</strong>. For the metadata pass those are two independent arrivals of <code>y</code>: it propagates ranges, not identities. The same thing in its purest form — <code>x − x</code> can only be zero, and the estimate cannot know it:</p><pre><code class="language-julia hljs">w  = Workflow(0; type = :DAW)
+cx = add_node!(w, DataNode(IvConst, spec_const()))
+setsettings!(w, cx, Dict(:value =&gt; 0.5, :lo =&gt; 0.0, :hi =&gt; 1.0))
+sb = add_node!(w, DataNode(IvSub, spec_bin(&quot;Iv sub&quot;)))
+ou = add_node!(w, DataNode(IvOut, spec_out()))
+add_connection!(w, cx, :out, sb, :a)
+add_connection!(w, cx, :out, sb, :b)      # the same node into both inputs
+add_connection!(w, sb, :out, ou, :in)
+
+predicted = getmeta(w, ou, :out)
+scheduler!(w)
+(predicted = predicted, actual = getdata(w, ou, :out))</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi">(predicted = (lo = -1.0, hi = 1.0), actual = 0.0)</code></pre><p>An estimate that is too wide is correct; one that is too narrow would be a bug. That asymmetry is the whole discipline of abstract interpretation, and it is why the containment check above is the test that matters.</p><h3 id="Refusing-before-the-data-is-touched"><a class="docs-heading-anchor" href="#Refusing-before-the-data-is-touched">Refusing before the data is touched</a><a id="Refusing-before-the-data-is-touched-1"></a><a class="docs-heading-anchor-permalink" href="#Refusing-before-the-data-is-touched" title="Permalink"></a></h3><p>This is the practical payoff. Widen <code>y</code> so that <code>y − 2</code> can be zero, and the metadata pass refuses to produce an answer — with nothing executed:</p><pre><code class="language-julia hljs">g2 = build(ylo = 1.0, yhi = 5.0)
+(divisor = getmeta(g2.w, g2.sub, :out),
+ verdict = try
+     getmeta(g2.w, g2.out, :out)
+ catch e
+     sprint(showerror, e)
+ end,
+ executions = sum(n -&gt; n.state.exec_n, values(g2.w.nodes)))</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi">(divisor = (lo = -1.0, hi = 3.0), verdict = &quot;Node 7 metadata rule for port `:out`: Division by an interval containing zero: [-1.0, 3.0]&quot;, executions = 0)</code></pre><p>The refusal is earned: the run really does blow up inside that box.</p><pre><code class="language-julia hljs">evaluate!(g2, 2.0, 2.0)</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi">Inf</code></pre><h3 id="Unknown-propagates,-and-the-rule-must-be-total"><a class="docs-heading-anchor" href="#Unknown-propagates,-and-the-rule-must-be-total">Unknown propagates, and the rule must be total</a><a id="Unknown-propagates,-and-the-rule-must-be-total-1"></a><a class="docs-heading-anchor-permalink" href="#Unknown-propagates,-and-the-rule-must-be-total" title="Permalink"></a></h3><p>Take the range off <code>y</code>. It stops being a metadata source, the walk continues past it, and — because a constant has no inputs — <code>getmeta_unsafe</code> is called with an <strong>empty</strong> <code>inmeta</code>:</p><pre><code class="language-julia hljs">g3 = build()
+yn = getnode(g3.w, g3.cy)
+delete!(yn.settings, :lo); delete!(yn.settings, :hi)
+
+(is_source = ismetasource(yn, :out),
+ y_itself  = getmeta(g3.w, g3.cy, :out),
+ whole_expression = getmeta(g3.w, g3.out, :out),
+ branch_not_using_y = getmeta(g3.w, g3.cx, :out))</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi">(is_source = false, y_itself = nothing, whole_expression = nothing, branch_not_using_y = (lo = 1.0, hi = 3.0))</code></pre><div class="admonition is-warning" id="getmeta_unsafe-must-be-total-ecd03c5edbf9b4b"><header class="admonition-header">`getmeta_unsafe` must be total<a class="admonition-anchor" href="#getmeta_unsafe-must-be-total-ecd03c5edbf9b4b" title="Permalink"></a></header><div class="admonition-body"><p>The <a href="../api_meta/#MetidaFlows.ismetasource"><code>ismetasource</code></a> docstring warns against reading <code>inmeta[:label]</code> in a branch declared a metadata source — the dictionary there is empty. The mirror half is just as easy to get wrong, and it is what the <code>|| return nothing</code> above is for: the method is <strong>also</strong> called on the <em>not a source</em> branch, where the settings it wants may be missing. Reaching for <code>settings[:lo]</code> unconditionally raises <code>KeyError</code> instead of answering <code>nothing</code>, from inside the walk, far from the node that caused it.</p><p>Write the method so that it answers for every state the node can be in, not only for the states in which <code>ismetasource</code> returns <code>true</code>.</p></div></div><h3 id="The-same-rules-over-a-polynomial"><a class="docs-heading-anchor" href="#The-same-rules-over-a-polynomial">The same rules over a polynomial</a><a id="The-same-rules-over-a-polynomial-1"></a><a class="docs-heading-anchor-permalink" href="#The-same-rules-over-a-polynomial" title="Permalink"></a></h3><p>Nothing about the two semantics is tied to one expression. Build Horner&#39;s scheme out of the same nodes and the metadata pass answers &quot;what are the bounds of <code>P(x)</code> on this interval&quot; — again without running:</p><pre><code class="language-julia hljs">function build_poly(coeffs; xlo = 0.0, xhi = 4.0)
+    w  = Workflow(0; type = :DAW)
+    cx = add_node!(w, DataNode(IvConst, spec_const()))
+    setsettings!(w, cx, Dict(:value =&gt; (xlo+xhi)/2, :lo =&gt; xlo, :hi =&gt; xhi))
+    prev = add_node!(w, DataNode(IvConst, spec_const()))
+    setsettings!(w, prev, Dict(:value =&gt; coeffs[1], :lo =&gt; coeffs[1], :hi =&gt; coeffs[1]))
+    for k in 2:length(coeffs)
+        ca = add_node!(w, DataNode(IvConst, spec_const()))
+        setsettings!(w, ca, Dict(:value =&gt; coeffs[k], :lo =&gt; coeffs[k], :hi =&gt; coeffs[k]))
+        m = add_node!(w, DataNode(IvMul, spec_bin(&quot;Iv mul&quot;)))
+        a = add_node!(w, DataNode(IvAdd, spec_bin(&quot;Iv add&quot;)))
+        add_connection!(w, prev, :out, m, :a); add_connection!(w, cx, :out, m, :b)
+        add_connection!(w, m, :out, a, :a);    add_connection!(w, ca, :out, a, :b)
+        prev = a
+    end
+    out = add_node!(w, DataNode(IvOut, spec_out()))
+    add_connection!(w, prev, :out, out, :in)
+    (w = w, cx = cx, out = out)
+end
+
+# (x−1)(x−2)(x−3) on [0, 4], coefficients from the leading one down
+p = build_poly([1.0, -6.0, 11.0, -6.0]; xlo = 0.0, xhi = 4.0)
+(bounds = getmeta(p.w, p.out, :out),
+ nodes = length(p.w.nodes),
+ executions = sum(n -&gt; n.state.exec_n, values(p.w.nodes)))</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi">(bounds = (lo = -58.0, hi = 38.0), nodes = 12, executions = 0)</code></pre><p>A degenerate interval makes the estimate exact, which is the sanity check that the two semantics agree where they must:</p><pre><code class="language-julia hljs">q = build_poly([1.0, -6.0, 11.0, -6.0]; xlo = 2.5, xhi = 2.5)
+est = getmeta(q.w, q.out, :out)
+setsettings!(q.w, q.cx, Dict(:value =&gt; 2.5))
+scheduler!(q.w)
+(estimate = est, actual = getdata(q.w, q.out, :out))</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi">(estimate = (lo = -0.375, hi = -0.375), actual = -0.375)</code></pre><h3 id="Describing-the-whole-graph-at-once"><a class="docs-heading-anchor" href="#Describing-the-whole-graph-at-once">Describing the whole graph at once</a><a id="Describing-the-whole-graph-at-once-1"></a><a class="docs-heading-anchor-permalink" href="#Describing-the-whole-graph-at-once" title="Permalink"></a></h3><p>Asking port by port re-walks the graph from the top every time. The memo lives for one call, so a chain of <code>n</code> nodes costs <code>n</code> walks of <code>O(n)</code> where one walk would do. <a href="../api_meta/#MetidaFlows.getmeta"><code>getmeta(model)</code></a> asks once and returns every output port of every node, keyed by <code>(node id, port label)</code>:</p><pre><code class="language-julia hljs">d = getmeta(p.w)
+(ports = length(d), estimate_at_output = d[(p.out, :out)])</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi">(ports = 12, estimate_at_output = (lo = -58.0, hi = 38.0))</code></pre><p>The gap is quadratic in the length of the graph: the test suite pins an 8-node chain at 8 rule invocations against 36 asked port by port, and a 101-node chain at 101 against 5151. The answers are identical to the port-by-port ones — same memo, same rules, asked in one pass.</p><p>A rule that raises takes the whole call with it rather than returning a half-described graph; see <a href="../api_meta/#MetidaFlows.MetaRuleError"><code>MetaRuleError</code></a> below.</p><h3 id="Things-to-watch"><a class="docs-heading-anchor" href="#Things-to-watch">Things to watch</a><a id="Things-to-watch-1"></a><a class="docs-heading-anchor-permalink" href="#Things-to-watch" title="Permalink"></a></h3><ul><li><p><strong>The walk does not cache between calls.</strong> Each <code>getmeta</code> recomputes; within one call a shared ancestor is described once, which is why the eight rules of this graph fire eight times even though <code>x</code> and <code>y</code> are each needed twice. Memoize inside the node if describing a source is expensive, and use the whole-graph form above instead of a loop over ports.</p></li><li><p><strong>An error from a rule names its node.</strong> The walk is recursive, so a <code>KeyError</code> from a rule would otherwise surface with nothing to say about where it came from. <a href="../api_meta/#MetidaFlows.MetaRuleError"><code>MetaRuleError</code></a> wraps it with the node id and the port and keeps the original in <code>.cause</code> — that is what the refusal above printed. Errors from the walk itself (an unknown port label, <code>maxdepth</code>) are not wrapped: they already name their node.</p></li><li><p><strong>A metadata source cuts the walk short.</strong> Everything above a node that returns <code>true</code> from <a href="../api_meta/#MetidaFlows.ismetasource"><code>ismetasource</code></a> is never visited — which is the point when the node <em>is</em> the authority on what it produces, and a trap when it is not.</p></li><li><p><strong><code>:feedback</code> and <code>:error</code> edges are not followed</strong>, so this pass is acyclic even in a cyclic <code>ABW</code> workflow. It also means a loop cannot be <em>analysed</em> by it: there is no fixed-point iteration here, only one upward pass.</p></li><li><p><strong>Intervals are the cheapest useful abstract domain, not the best one.</strong> Everything above holds for any lattice with a rule per node type — units, signs, schemas, shapes. What changes is only what <code>getmeta_unsafe</code> returns.</p></li></ul><h2 id="The-graph-2"><a class="docs-heading-anchor" href="#The-graph-2">The graph</a><a class="docs-heading-anchor-permalink" href="#The-graph-2" title="Permalink"></a></h2><p>The polynomial graph. Nothing here has been executed - the colours are <code>:idle</code>/<code>:dirty</code>, and the interval bounds came from metadata alone. See <a href="../guide/#Drawing-a-workflow">Drawing a workflow</a> for the helper this uses.</p><pre><code class="language-julia hljs">plotworkflow(p.w; label = :id)</code></pre><img src='data:image/svg+xml;utf-8,<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg"
+     xmlns:xlink="http://www.w3.org/1999/xlink"
+     version="1.2"
+     width="280mm" height="93.33mm" viewBox="0 0 280 93.33"
+     stroke="none"
+     fill="%23000000"
+     stroke-width="0.3"
+     font-size="3.88"
+>
+<defs>
+  <marker id="arrow" markerWidth="15" markerHeight="7" refX="5" refY="3.5" orient="auto" markerUnits="strokeWidth">
+    <path d="M0,0 L15,3.5 L0,7 z" stroke="context-stroke" fill="context-stroke"/>
+  </marker>
+</defs>
+<g fill="%23000000" fill-opacity="0.000" id="img-3344879d-1">
+  <g transform="translate(140,46.67)">
+    <path d="M-140,-46.67 L140,-46.67 140,46.67 -140,46.67  z" class="primitive"/>
+  </g>
+</g>
+<g stroke-width="1" id="img-3344879d-2">
+  <g transform="translate(60.41,48.33)" stroke="%2378909C">
+    <path fill="none" d="M-25.95,26.83 C10.52,0.02 11.91,0.88 3.52,-27.73" class="primitive"/>
+  </g>
+  <g transform="translate(90.24,49.35)" stroke="%2378909C">
+    <path fill="none" d="M-53.97,26.09 C10.92,0.95 11.63,1.78 31.42,-28.81" class="primitive"/>
+  </g>
+  <g transform="translate(120.26,50.3)" stroke="%2378909C">
+    <path fill="none" d="M-82.74,25.46 C11.1,1.95 11.62,2.63 60.02,-30.04" class="primitive"/>
+  </g>
+  <g transform="translate(43.17,17.1)" stroke="%2378909C">
+    <path fill="none" d="M-3.88,-0.5 C3.77,-0.01 -3.77,0.5 3.88,0.01" class="primitive"/>
+  </g>
+  <g transform="translate(84.76,63.65)" stroke="%2378909C">
+    <path fill="none" d="M-18.37,11.64 C5.1,-0.4 5.33,1.24 7.95,-12.48" class="primitive"/>
+  </g>
+  <g transform="translate(69.25,30.94)" stroke="%2378909C">
+    <path fill="none" d="M-6.21,-12.62 C-3.58,1.1 -6.84,-0.26 16.63,11.78" class="primitive"/>
+  </g>
+  <g transform="translate(115.71,33.09)" stroke="%2378909C">
+    <path fill="none" d="M-18.37,11.64 C5.1,-0.4 5.33,1.24 7.95,-12.48" class="primitive"/>
+  </g>
+  <g transform="translate(146.66,63.65)" stroke="%2378909C">
+    <path fill="none" d="M-18.37,11.64 C5.1,-0.4 5.33,1.24 7.95,-12.48" class="primitive"/>
+  </g>
+  <g transform="translate(131.15,30.94)" stroke="%2378909C">
+    <path fill="none" d="M-6.21,-12.62 C-3.58,1.1 -6.84,-0.26 16.63,11.78" class="primitive"/>
+  </g>
+  <g transform="translate(177.62,33.09)" stroke="%2378909C">
+    <path fill="none" d="M-18.37,11.64 C5.1,-0.4 5.33,1.24 7.95,-12.48" class="primitive"/>
+  </g>
+  <g transform="translate(208.57,63.65)" stroke="%2378909C">
+    <path fill="none" d="M-18.37,11.64 C5.1,-0.4 5.33,1.24 7.95,-12.48" class="primitive"/>
+  </g>
+  <g transform="translate(193.06,30.94)" stroke="%2378909C">
+    <path fill="none" d="M-6.21,-12.62 C-3.58,1.1 -6.84,-0.26 16.63,11.78" class="primitive"/>
+  </g>
+  <g transform="translate(228.89,47.66)" stroke="%2378909C">
+    <path fill="none" d="M-3.88,-0.5 C3.77,-0.01 -3.77,0.5 3.88,0.01" class="primitive"/>
+  </g>
+</g>
+<g stroke-width="1" id="img-3344879d-3">
+</g>
+<g transform="translate(63.71,19.83)" fill="%2378909C">
+  <path d="M-2.73,0.83 L-0.45,-1.53 3.18,0.69  z" class="primitive"/>
+</g>
+<g transform="translate(122.15,19.79)" fill="%2378909C">
+  <path d="M-3.4,0.6 L0.97,-1.51 2.43,0.9  z" class="primitive"/>
+</g>
+<g transform="translate(181.32,19.56)" fill="%2378909C">
+  <path d="M-3.78,0.38 L2.09,-1.41 1.69,1.03  z" class="primitive"/>
+</g>
+<g transform="translate(49.7,16.94)" fill="%2378909C">
+  <path d="M-3.31,-0.64 L5.29,-0.34 -1.99,0.99  z" class="primitive"/>
+</g>
+<g transform="translate(92.86,50.4)" fill="%2378909C">
+  <path d="M-3.11,0.72 L0.29,-1.53 2.81,0.81  z" class="primitive"/>
+</g>
+<g transform="translate(87.19,43.39)" fill="%2378909C">
+  <path d="M1.29,-1.07 L2.62,1.34 -3.91,-0.27  z" class="primitive"/>
+</g>
+<g transform="translate(123.81,19.84)" fill="%2378909C">
+  <path d="M-3.11,0.72 L0.29,-1.53 2.81,0.81  z" class="primitive"/>
+</g>
+<g transform="translate(154.76,50.4)" fill="%2378909C">
+  <path d="M-3.11,0.72 L0.29,-1.53 2.81,0.81  z" class="primitive"/>
+</g>
+<g transform="translate(149.09,43.39)" fill="%2378909C">
+  <path d="M1.29,-1.07 L2.62,1.34 -3.91,-0.27  z" class="primitive"/>
+</g>
+<g transform="translate(185.71,19.84)" fill="%2378909C">
+  <path d="M-3.11,0.72 L0.29,-1.53 2.81,0.81  z" class="primitive"/>
+</g>
+<g transform="translate(216.67,50.4)" fill="%2378909C">
+  <path d="M-3.11,0.72 L0.29,-1.53 2.81,0.81  z" class="primitive"/>
+</g>
+<g transform="translate(211,43.39)" fill="%2378909C">
+  <path d="M1.29,-1.07 L2.62,1.34 -3.91,-0.27  z" class="primitive"/>
+</g>
+<g transform="translate(235.42,47.5)" fill="%2378909C">
+  <path d="M-3.31,-0.64 L5.29,-0.34 -1.99,0.99  z" class="primitive"/>
+</g>
+<g font-size="4" fill="%23000000" id="img-3344879d-4">
+</g>
+<g stroke-width="1" stroke="%2337474F" id="img-3344879d-5">
+  <g transform="translate(31.67,77.22)" fill="%23FFD54F">
+    <circle cx="0" cy="0" r="7.51" class="primitive"/>
+  </g>
+  <g transform="translate(31.67,16.11)" fill="%23FFD54F">
+    <circle cx="0" cy="0" r="7.51" class="primitive"/>
+  </g>
+  <g transform="translate(62.62,77.22)" fill="%23FFD54F">
+    <circle cx="0" cy="0" r="7.51" class="primitive"/>
+  </g>
+  <g transform="translate(62.62,16.11)" fill="%23FFD54F">
+    <circle cx="0" cy="0" r="7.51" class="primitive"/>
+  </g>
+  <g transform="translate(93.57,46.67)" fill="%23FFD54F">
+    <circle cx="0" cy="0" r="7.51" class="primitive"/>
+  </g>
+  <g transform="translate(124.52,77.22)" fill="%23FFD54F">
+    <circle cx="0" cy="0" r="7.51" class="primitive"/>
+  </g>
+  <g transform="translate(124.52,16.11)" fill="%23FFD54F">
+    <circle cx="0" cy="0" r="7.51" class="primitive"/>
+  </g>
+  <g transform="translate(155.48,46.67)" fill="%23FFD54F">
+    <circle cx="0" cy="0" r="7.51" class="primitive"/>
+  </g>
+  <g transform="translate(186.43,77.22)" fill="%23FFD54F">
+    <circle cx="0" cy="0" r="7.51" class="primitive"/>
+  </g>
+  <g transform="translate(186.43,16.11)" fill="%23FFD54F">
+    <circle cx="0" cy="0" r="7.51" class="primitive"/>
+  </g>
+  <g transform="translate(217.38,46.67)" fill="%23FFD54F">
+    <circle cx="0" cy="0" r="7.51" class="primitive"/>
+  </g>
+  <g transform="translate(248.33,46.67)" fill="%23FFD54F">
+    <circle cx="0" cy="0" r="7.51" class="primitive"/>
+  </g>
+</g>
+<g font-family="Helvetica" font-size="4" fill="%23000000" id="img-3344879d-6">
+  <g transform="translate(31.67,62.67)">
+    <g class="primitive">
+      <text text-anchor="middle" dy="0.35em">1</text>
+    </g>
+  </g>
+  <g transform="translate(31.67,1.56)">
+    <g class="primitive">
+      <text text-anchor="middle" dy="0.35em">2</text>
+    </g>
+  </g>
+  <g transform="translate(62.62,62.67)">
+    <g class="primitive">
+      <text text-anchor="middle" dy="0.35em">3</text>
+    </g>
+  </g>
+  <g transform="translate(62.62,1.56)">
+    <g class="primitive">
+      <text text-anchor="middle" dy="0.35em">4</text>
+    </g>
+  </g>
+  <g transform="translate(93.57,32.11)">
+    <g class="primitive">
+      <text text-anchor="middle" dy="0.35em">5</text>
+    </g>
+  </g>
+  <g transform="translate(124.52,62.67)">
+    <g class="primitive">
+      <text text-anchor="middle" dy="0.35em">6</text>
+    </g>
+  </g>
+  <g transform="translate(124.52,1.56)">
+    <g class="primitive">
+      <text text-anchor="middle" dy="0.35em">7</text>
+    </g>
+  </g>
+  <g transform="translate(155.48,32.11)">
+    <g class="primitive">
+      <text text-anchor="middle" dy="0.35em">8</text>
+    </g>
+  </g>
+  <g transform="translate(186.43,62.67)">
+    <g class="primitive">
+      <text text-anchor="middle" dy="0.35em">9</text>
+    </g>
+  </g>
+  <g transform="translate(186.43,1.56)">
+    <g class="primitive">
+      <text text-anchor="middle" dy="0.35em">10</text>
+    </g>
+  </g>
+  <g transform="translate(217.38,32.11)">
+    <g class="primitive">
+      <text text-anchor="middle" dy="0.35em">11</text>
+    </g>
+  </g>
+  <g transform="translate(248.33,32.11)">
+    <g class="primitive">
+      <text text-anchor="middle" dy="0.35em">12</text>
+    </g>
+  </g>
+</g>
+<g font-family="Helvetica" font-size="4" fill="%23000000" id="img-3344879d-7">
+  <g transform="translate(140,10)">
+    <g class="primitive">
+      <text text-anchor="middle" dy="0.35em"></text>
+    </g>
+  </g>
+</g>
+</svg>
+'/></article><nav class="docs-footer"><a class="docs-footer-prevpage" href="../examples_edit_distance/">« Edit distance: dynamic programming</a><a class="docs-footer-nextpage" href="../examples_power/">Modular exponentiation: skipping work »</a><div class="flexbox-break"></div><p class="footer-message">Powered by <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> and the <a href="https://julialang.org/">Julia Programming Language</a>.</p></nav></div><div class="modal" id="documenter-settings"><div class="modal-background"></div><div class="modal-card"><header class="modal-card-head"><p class="modal-card-title">Settings</p><button class="delete"></button></header><section class="modal-card-body"><p><label class="label">Theme</label><div class="select"><select id="documenter-themepicker"><option value="auto">Automatic (OS)</option><option value="documenter-light">documenter-light</option><option value="documenter-dark">documenter-dark</option><option value="catppuccin-latte">catppuccin-latte</option><option value="catppuccin-frappe">catppuccin-frappe</option><option value="catppuccin-macchiato">catppuccin-macchiato</option><option value="catppuccin-mocha">catppuccin-mocha</option></select></div></p><hr/><p>This document was generated with <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> version 1.20.0 on <span class="colophon-date" title="Saturday 14 November 2026 00:25">Saturday 14 November 2026</span>. Using Julia version 1.13.4.</p></section><footer class="modal-card-foot"></footer></div></div></div></body></html>
