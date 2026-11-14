@@ -13,12 +13,12 @@
     <path d="M0,0 L15,3.5 L0,7 z" stroke="context-stroke" fill="context-stroke"/>
   </marker>
 </defs>
-<g fill="#000000" fill-opacity="0.000" id="img-6fff16e7-1">
+<g fill="#000000" fill-opacity="0.000" id="img-9fbd08b9-1">
   <g transform="translate(150,50)">
     <path d="M-150,-50 L150,-50 150,50 -150,50  z" class="primitive"/>
   </g>
 </g>
-<g stroke-width="1" id="img-6fff16e7-2">
+<g stroke-width="1" id="img-9fbd08b9-2">
   <g transform="translate(48.8,34.86)" stroke="#78909C">
     <path fill="none" d="M-13,13.25 C5.16,-0.66 6.3,1.1 1.54,-13.68" class="primitive"/>
   </g>
@@ -86,7 +86,7 @@
     <path fill="none" d="M89.94,3.27 C-1.91,-2.72 1.91,-3.27 -89.94,2.72" class="primitive"/>
   </g>
 </g>
-<g stroke-width="1" id="img-6fff16e7-3">
+<g stroke-width="1" id="img-9fbd08b9-3">
 </g>
 <g transform="translate(50.07,20.34)" fill="#78909C">
   <path d="M-2.91,0.92 L-0.54,-1.66 3.45,0.75  z" class="primitive"/>
@@ -154,9 +154,9 @@
 <g transform="translate(77.04,49.18)" fill="#EF6C00">
   <path d="M3.56,0.7 L-5.7,0.37 2.14,-1.08  z" class="primitive"/>
 </g>
-<g font-size="4" fill="#000000" id="img-6fff16e7-4">
+<g font-size="4" fill="#000000" id="img-9fbd08b9-4">
 </g>
-<g stroke-width="1" stroke="#37474F" id="img-6fff16e7-5">
+<g stroke-width="1" stroke="#37474F" id="img-9fbd08b9-5">
   <g transform="translate(33.33,50)" fill="#81C784">
     <circle cx="0" cy="0" r="6.79" class="primitive"/>
   </g>
@@ -209,7 +209,7 @@
     <circle cx="0" cy="0" r="6.79" class="primitive"/>
   </g>
 </g>
-<g font-family="Helvetica" font-size="4" fill="#000000" id="img-6fff16e7-6">
+<g font-family="Helvetica" font-size="4" fill="#000000" id="img-9fbd08b9-6">
   <g transform="translate(33.33,36.66)">
     <g class="primitive">
       <text text-anchor="middle" dy="0.35em">1</text>
@@ -296,7 +296,7 @@
     </g>
   </g>
 </g>
-<g font-family="Helvetica" font-size="4" fill="#000000" id="img-6fff16e7-7">
+<g font-family="Helvetica" font-size="4" fill="#000000" id="img-9fbd08b9-7">
   <g transform="translate(150,10)">
     <g class="primitive">
       <text text-anchor="middle" dy="0.35em"></text>
