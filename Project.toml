@@ -2,8 +2,8 @@ name = "MetidaFlows"
 uuid = "755c5ba7-8e48-4bab-b874-155758dbfa11"
 authors = ["Vladimir Arnautov"]
 version = "0.4.0"
-
 [deps]
+
 NamedGraphs = "678767b0-92e7-4007-89e4-4527a8725b19"
 Dates = "ade2ca70-3891-5945-98fb-dc099432e06a"
 
