@@ -221,6 +221,21 @@ these ports are refreshed by [`push_buffer!`](@ref), and the vector is stored
 as the `ready_ports` state. A node may legitimately return a subset of its
 output ports.
 
+[`setreadyports!`](@ref) states the same thing without building a vector:
+
+```julia
+    return MetidaFlows.setreadyports!(node, :out)
+```
+
+It writes into the node's own `ready_ports` and returns it, so a node that
+publishes the same ports every time allocates nothing for the list after its
+first execution - on a chain of a thousand such nodes, 175 bytes per node per
+run against 111. It also **checks** each label against the spec, which a
+returned vector does not: a label that is not an output port raises inside the
+node, so the node ends `:failed` and the message names the label, instead of
+ending `:clean` while a consumer silently gets nothing. Returning a vector goes
+on working and means exactly the same to the engine.
+
 Four optional hooks specialise validation; all default to `true`:
 
 | Hook | When | Status on failure |

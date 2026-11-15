@@ -152,8 +152,9 @@ end
     @test setstate!(node, :execution_id, UInt64(5)) === node
     @test getstate(node, :execution_id) == UInt64(5)
 
-    # setreadyports! переиспользует существующий вектор.
-    @test setreadyports!(node, [:a, :b]) === node
+    #  setreadyports! переиспользует существующий вектор и его же возвращает,
+    #  поэтому `return setreadyports!(node, :out)` в теле узла не выделяет памяти.
+    @test setreadyports!(node, [:a, :b]) === getstate(node, :ready_ports)
     @test getstate(node, :ready_ports) == [:a, :b]
     setreadyports!(node, Symbol[])
     @test isempty(getstate(node, :ready_ports))
