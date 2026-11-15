@@ -48,5 +48,6 @@ getportconnections
 get_parents
 get_children
 setposition!
+setreadyports!
 setinputbuffer!
 ```

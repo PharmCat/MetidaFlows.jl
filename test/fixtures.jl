@@ -57,6 +57,11 @@ struct NeedsCfgNode   <: AbstractNodeType end  # validate_settings -> требу
 struct SelfLoopNode   <: AbstractNodeType end  # :in -> :out, для защиты от рекурсии
 struct SchemaNode     <: AbstractNodeType end  # пользовательские хуки схемы
 
+# --- как возвращается список готовых портов ---------------------------
+struct ReadyVararg    <: AbstractNodeType end  # return setreadyports!(node, :out)
+struct ReadyVector    <: AbstractNodeType end  # return [:out] — прежний способ
+struct ReadyTypo      <: AbstractNodeType end  # setreadyports! с чужой меткой
+
 # Неизменяемое состояние: проверка Dict-подобного доступа на immutable-типе.
 struct FrozenState <: AbstractNodeState
     value::Int
@@ -147,6 +152,24 @@ function MetidaFlows.execute_unsafe!(node::DataNode{DoubleNode})
     x = getinputdata(node, :in)
     setdata!(node, :out, (x === nothing ? 0 : x) * 2)
     return [:out]
+end
+
+#  Три узла делают одно и то же, различается только возврат списка портов.
+function MetidaFlows.execute_unsafe!(node::DataNode{ReadyVararg})
+    x = getinputdata(node, :in)
+    setdata!(node, :out, (x === nothing ? 0 : x) * 2)
+    return setreadyports!(node, :out)
+end
+
+function MetidaFlows.execute_unsafe!(node::DataNode{ReadyVector})
+    x = getinputdata(node, :in)
+    setdata!(node, :out, (x === nothing ? 0 : x) * 2)
+    return [:out]
+end
+
+function MetidaFlows.execute_unsafe!(node::DataNode{ReadyTypo})
+    setdata!(node, :out, 1)
+    return setreadyports!(node, :nosuchport)
 end
 
 function MetidaFlows.execute_unsafe!(node::DataNode{AddNode})

@@ -273,4 +273,45 @@ end
     @test isempty(getstate(n, :ready_ports))
 end
 
+# --------------------------------------------------------------------------
+@testset "B12. setreadyports! из тела узла                 " begin
+    #  Форма с метками: возвращает собственный вектор узла, поэтому
+    #  `return setreadyports!(node, :out)` не выделяет памяти, проверяет метки
+    #  по спеке и работает наравне с возвратом массива.
+    n = DataNode(ConstNode, spec_const())
+    portvec = getstate(n, :ready_ports)
+
+    @test setreadyports!(n, :out) === portvec
+    @test portvec == [:out]
+    @test setreadyports!(n) === portvec            # ничего не опубликовано
+    @test isempty(portvec)
+
+    #  Чужая метка отвергается, и вектор при этом не портится.
+    setreadyports!(n, :out)
+    @test_throws ErrorException setreadyports!(n, :out, :nosuchport)
+    @test getstate(n, :ready_ports) == [:out]
+
+    #  После прогрева повторный вызов не выделяет памяти.
+    setreadyports!(n, :out)
+    @test (@allocated setreadyports!(n, :out)) == 0
+
+    #  Сквозной прогон: узел на setreadyports! и узел на массиве ведут себя
+    #  одинаково, а узел с опечаткой падает с сообщением про порт.
+    w = Workflow(1; type = :DAW)
+    s  = add_node!(w, DataNode(ConstNode, spec_const()))
+    r1 = add_node!(w, DataNode(ReadyVararg, spec_double()))
+    r2 = add_node!(w, DataNode(ReadyVector, spec_double()))
+    r3 = add_node!(w, DataNode(ReadyTypo,   spec_double()))
+    add_connection!(w, s, :out, r1, :in)
+    add_connection!(w, s, :out, r2, :in)
+    add_connection!(w, s, :out, r3, :in)
+    scheduler!(w)
+    @test getstatus(w, r1) == :clean
+    @test getstatus(w, r2) == :clean
+    @test getstate(w, r1, :ready_ports) == getstate(w, r2, :ready_ports) == [:out]
+    @test getdata(w, r1, :out) == getdata(w, r2, :out)
+    @test getstatus(w, r3) == :failed
+    @test any(m -> occursin("nosuchport", m.message), w.log)
+end
+
 end # @testset "КРАЕВЫЕ СЛУЧАИ"

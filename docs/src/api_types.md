@@ -58,4 +58,5 @@ PortBuffer
 NodeProperties
 NODE_REGISTER
 GraphCache
+NodeExecutionEvent
 ```

@@ -417,8 +417,10 @@ end
 
 """
     ExecuteSettings(; execute_upstream = true, invalidate_downstream = true,
-                      check_cyclic = true, check_input_buffer = true)
-    ExecuteSettings(execute_upstream, invalidate_downstream, check_cyclic, check_input_buffer)
+                      check_cyclic = true, check_input_buffer = true,
+                      on_start = nothing, on_finish = nothing)
+    ExecuteSettings(execute_upstream, invalidate_downstream, check_cyclic,
+                    check_input_buffer, [on_start, on_finish])
     ExecuteSettings(all_flags::Bool)
 
 Execution flags consumed by [`execute!`](@ref):
@@ -429,25 +431,97 @@ Execution flags consumed by [`execute!`](@ref):
 - `check_input_buffer` - require data on every `required` input port.
 
 The single-argument form sets all four flags to the same value.
+
+# Watching a run
+
+`on_start` and `on_finish` are called with one
+[`NodeExecutionEvent`](@ref) each, as the engine takes a node up and as it
+lets it go. Both default to `nothing`, and the type carries them as parameters,
+so a default `ExecuteSettings` is an `ExecuteSettings{Nothing, Nothing}` and
+the engine compiles with no event code in it at all.
+
+[`scheduler!`](@ref) builds its own settings and takes the two callbacks as
+keyword arguments of its own; pass them there rather than through `settings`.
+
+A callback sees one execution, not one node: in [`ABW`](@ref) a node that runs
+forty times reports forty pairs. Nothing is buffered - whatever the callback
+does not keep is gone.
+
+The engine protects itself from the callback in two ways, and the callback
+should not rely on either:
+
+- an exception is caught and written to `model.log` at level `:error`, so a
+  broken callback does not fail the run. If `SETTINGS[:logging]` is off,
+  nothing is recorded at all;
+- editing the graph from a callback is **not allowed**. The engine compares
+  `model.ver` across the call and logs an error if it moved, because an edit
+  there invalidates the cached execution order in the middle of the walk and
+  the rest of the run means nothing. The check reports the damage; it cannot
+  undo it.
 """
-struct ExecuteSettings
+struct ExecuteSettings{S, F}
     execute_upstream::Bool
-    invalidate_downstream::Bool 
+    invalidate_downstream::Bool
     check_cyclic::Bool
     check_input_buffer::Bool
-    function ExecuteSettings(execute_upstream, invalidate_downstream, check_cyclic, check_input_buffer)
-        new(execute_upstream, invalidate_downstream, check_cyclic, check_input_buffer)
+    on_start::S
+    on_finish::F
+    function ExecuteSettings(execute_upstream, invalidate_downstream, check_cyclic,
+                             check_input_buffer, on_start::S = nothing,
+                             on_finish::F = nothing) where {S, F}
+        new{S, F}(execute_upstream, invalidate_downstream, check_cyclic,
+                  check_input_buffer, on_start, on_finish)
     end
     function ExecuteSettings(;
         execute_upstream::Bool = true,
         invalidate_downstream::Bool = true,
         check_cyclic::Bool = true,
-        check_input_buffer::Bool = true)
-        ExecuteSettings(execute_upstream, invalidate_downstream, check_cyclic, check_input_buffer)
+        check_input_buffer::Bool = true,
+        on_start = nothing,
+        on_finish = nothing)
+        ExecuteSettings(execute_upstream, invalidate_downstream, check_cyclic,
+                        check_input_buffer, on_start, on_finish)
     end
     function ExecuteSettings(all_flags::Bool)
          ExecuteSettings(all_flags, all_flags, all_flags, all_flags)
     end
+end
+
+"""
+    NodeExecutionEvent
+
+What one node's execution reports to the callbacks in
+[`ExecuteSettings`](@ref).
+
+- `id` - the node;
+- `run_id` - the run it belongs to, as `model.run_id` had it;
+- `status` - the node's status **at the moment of the event**: on the start
+  event the status the engine found it in, on the finish event the one it was
+  left in;
+- `exec_n` - the execution counter at that same moment.
+
+A start and a finish carrying the same `exec_n` mean the node was not
+re-executed: that is what a `:clean` node under `reset_mode = :none` looks
+like, and it is how a skipped node is told from one that ran. The counter is
+raised before the node's own code, so a node that raised reports a higher
+number and the status `:failed`.
+
+The start event fires as the engine takes the node up - before the `:clean`
+check and before validation - so every finish has exactly one start in front
+of it, including the runs that end by raising out of [`execute!`](@ref). A node
+the scheduler dropped from the queue without trying reports nothing: these are
+events about executions, not about queue traffic.
+
+The event is immutable and all four of its fields are concrete, so a callback
+of a concrete type receives it without an allocation: a thousand-node run with
+both callbacks set to a function that does nothing allocates the same as a run
+with no callbacks at all.
+"""
+struct NodeExecutionEvent
+    id::Int
+    run_id::UInt64
+    status::Symbol
+    exec_n::Int
 end
 # Minimal fields for NodeState
 # Dict compatible struct and minimal methods

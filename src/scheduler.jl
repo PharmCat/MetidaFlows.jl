@@ -95,6 +95,10 @@ This scheduler is designed for deterministic acyclic data-analysis workflows.
   value left in that buffer is dropped first, see
   [`invalidate_stale_optional!`](@ref). A `required` port still holds the node
   back. Without the flag such a consumer ends the run `:dirty`.
+- `on_start`, `on_finish`: called with a [`NodeExecutionEvent`](@ref) as each
+  node is taken up and let go. Off by default, and off costs nothing - the
+  engine compiles without the event code. See [`ExecuteSettings`](@ref) for
+  what the callback may and may not do.
 
 # Notes
 - Nodes are executed at most once per scheduler run.
@@ -126,7 +130,7 @@ scheduler!(workflow)
 result = getdata(workflow, output_id, :result)
 ```
 """
-function scheduler!(model::Workflow{DAW}; reset_mode::Symbol = :full, throw_error::Bool = false, strict::Bool = false, release_optional::Bool = false)
+function scheduler!(model::Workflow{DAW}; reset_mode::Symbol = :full, throw_error::Bool = false, strict::Bool = false, release_optional::Bool = false, on_start = nothing, on_finish = nothing)
     #g = makegraph(model)
     if is_cyclic(model) error("workflow is cyclic") end
     if reset_mode ∉ (:full, :soft, :none) error("Wrong reset mode: $reset_mode , only :full, :soft, :none available.") end
@@ -150,7 +154,7 @@ function scheduler!(model::Workflow{DAW}; reset_mode::Symbol = :full, throw_erro
             isready(model, id; wait_optional = false) || continue
             invalidate_stale_optional!(model, id)
         end
-        execute!(model, id; settings = ExecuteSettings(;execute_upstream = false, invalidate_downstream = false, check_cyclic = false), throw_error = throw_error)
+        execute!(model, id; settings = ExecuteSettings(;execute_upstream = false, invalidate_downstream = false, check_cyclic = false, on_start = on_start, on_finish = on_finish), throw_error = throw_error)
         #  Узел поднимает флаг остановки: обход прекращается, остальные узлы порядка  :dirty.
         if isstoprequested(getnode(model, id))
             log!(model, LogMsg(:info, "Run stopped by node (id: $(id))"))
@@ -272,6 +276,10 @@ instead of being run on nothing. See [`execution_node_validation`](@ref).
   consumer waits for a producer that was itself never executed, and the run
   stops mid-loop with no result and no error. One `:info` record is appended
   to `model.log` the first time a run releases anything.
+- `on_start`, `on_finish`: called with a [`NodeExecutionEvent`](@ref) as each
+  node is taken up and let go. Off by default, and off costs nothing. A node
+  that runs forty times reports forty pairs - the events are a stream of
+  executions, and nothing is buffered. See [`ExecuteSettings`](@ref).
 
 # Cycles
 A cycle must be closed by a connection entering a port declared with
@@ -319,7 +327,7 @@ scheduler!(w; maxiter = 10_000)           # long-running iteration
 scheduler!(w; throw_warn = false)         # a deliberately unseeded graph
 ```
 """
-function scheduler!(model::Workflow{ABW}; reset_mode::Symbol = :full, maxiter = 1000, throw_error::Bool = false, throw_warn::Bool = true, strict::Bool = false, release_optional::Bool = false)
+function scheduler!(model::Workflow{ABW}; reset_mode::Symbol = :full, maxiter = 1000, throw_error::Bool = false, throw_warn::Bool = true, strict::Bool = false, release_optional::Bool = false, on_start = nothing, on_finish = nothing)
     if reset_mode ∉ (:full, :soft, :none) error("Wrong reset mode: $reset_mode , only :full, :soft, :none available.") end
     soft_reset = false
     # change to thread safe
@@ -386,7 +394,9 @@ function scheduler!(model::Workflow{ABW}; reset_mode::Symbol = :full, maxiter = 
             ready_ports = execute!(model, id;
                 settings = ExecuteSettings(; execute_upstream = false,
                                              invalidate_downstream = false,
-                                             check_cyclic = false),
+                                             check_cyclic = false,
+                                             on_start = on_start,
+                                             on_finish = on_finish),
                 throw_error = throw_error)
             #  Узел попросил остановиться. Опубликованное им уже лежит в буферах потомков, в очередь  не попадают.
             if isstoprequested(getnode(model, id))

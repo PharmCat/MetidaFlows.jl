@@ -329,3 +329,84 @@ w.ver += 1                  # кеш графа
 ```
 
 ---
+
+## Watching a run
+
+The engine reports two moments per execution, through two callbacks on
+[`ExecuteSettings`](@ref), or as keyword arguments of
+[`scheduler!`](@ref) which builds its own settings:
+
+```@example events
+using MetidaFlows
+
+struct Step <: AbstractNodeType end
+MetidaFlows.execute_unsafe!(n::DataNode{Step}) =
+    (setdata!(n, :out, something(getinputdata(n, :in), 0) + 1);
+     MetidaFlows.setreadyports!(n, :out))
+
+spec() = NodeSpec("Step", [PortSpec("in", Int, :in; required = false)],
+                          [PortSpec("out", Int, :out)])
+
+w = Workflow(1; type = :DAW)
+a = add_node!(w, DataNode(Step, spec()))
+b = add_node!(w, DataNode(Step, spec()))
+add_connection!(w, a, :out, b, :in)
+
+seen = Tuple{Symbol, Int, Symbol, Int}[]
+scheduler!(w;
+    on_start  = ev -> push!(seen, (:start,  ev.id, ev.status, ev.exec_n)),
+    on_finish = ev -> push!(seen, (:finish, ev.id, ev.status, ev.exec_n)))
+seen
+```
+
+Each callback takes one [`NodeExecutionEvent`](@ref), which carries the node
+id, the `run_id` of the run, and the status and execution counter **as they
+were at that moment**. The start fires as the engine takes the node up, before
+the `:clean` check and before validation, so every finish has exactly one start
+in front of it.
+
+That is what makes the pair readable: `exec_n` rising across the pair means the
+node's own code ran, and the same number on both means it did not. A `:clean`
+node under `reset_mode = :none` reports a pair with no change:
+
+```@example events
+scheduler!(w; reset_mode = :none,
+    on_start  = ev -> println("start  ", ev.id, " ", ev.status, " n=", ev.exec_n),
+    on_finish = ev -> println("finish ", ev.id, " ", ev.status, " n=", ev.exec_n))
+nothing # hide
+```
+
+### What the engine does not do for you
+
+**Nothing is stored.** The events are a stream: whatever the callback does not
+keep is gone, and the engine grows no buffer of its own. A collector is a
+closure over your own container, and a bound on it is yours to set - which is
+deliberate, because a loop in [`ABW`](@ref) reports one pair per execution, and
+a five-hundred-turn descent reports a thousand events.
+
+**Durations are not measured.** Nothing in the event is a timestamp, because
+`now()` on every node is a system call in the hot path. A callback that wants
+elapsed time takes its own reading on both halves of the pair.
+
+**An exception from a callback is caught** and written to `model.log` at level
+`:error`, so a broken callback does not fail a run. With
+`SETTINGS[:logging]` off it is not recorded anywhere, so a callback you are
+still writing is better tested with logging on.
+
+**Editing the graph from a callback is not allowed.** It would raise
+`model.ver` and invalidate the cached execution order in the middle of the
+walk, and the rest of the run would mean nothing. The engine compares the
+version across the call and logs an error if it moved - it reports the damage,
+it cannot undo it.
+
+**A node the scheduler dropped reports nothing.** In `ABW` a node is popped and
+put back whenever [`isready`](@ref) refuses it, and that never reaches
+[`execute!`](@ref). The events describe executions, not queue traffic.
+
+### The cost when nobody is watching
+
+Both callbacks default to `nothing`, and `ExecuteSettings` carries their types
+as parameters, so the default is an `ExecuteSettings{Nothing, Nothing}` and the
+dispatch that fires an event resolves to a method with an empty body. The event
+itself is built inside that method, so a run with no callbacks does not even
+assemble one.

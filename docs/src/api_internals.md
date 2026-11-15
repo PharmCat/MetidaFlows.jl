@@ -41,6 +41,5 @@ release_optional_blocked!
 setid!
 setstatus!
 setstate!
-setreadyports!
 setsettings_unsafe!
 ```

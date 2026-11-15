@@ -10,6 +10,7 @@ Execute workflow node.
 Main workflow execution entry point.
  
 # Execution Stages
+0. Report the start through `settings.on_start`, if there is one.
 1. Initialize per-run execution state and logs.
 2. Optionally detect recursive cyclic execution.
 3. Skip execution for nodes already marked `:clean`.
@@ -23,6 +24,9 @@ Main workflow execution entry point.
 11. Propagate outputs downstream through input buffers.
 12. Optionally invalidate downstream nodes.
 13. Mark node as `:clean`.
+14. Report the finish through `settings.on_finish`, if there is one. This one
+    happens on every way out of the call, stages 2, 3, 6, 7, 9 and a raising
+    node included, and also when `throw_error` lets the exception through.
  
 # Arguments
 - `settings`: per-call execution flags, see [`ExecuteSettings`](@ref).
@@ -54,12 +58,49 @@ function execute!(model::Workflow, id::Int; settings::ExecuteSettings = ExecuteS
     return execute_node!(model, getnode(model, id), id, settings, throw_error)
 end
 
+#  Пуск обратного вызова о событии исполнения. Отдельный метод на `nothing`:
+#  в выключенном состоянии от события не остаётся ни ветвления, ни сборки
+#  самого события, потому что аргументы для него считаются уже внутри.
+_fire_event(::Workflow, ::Nothing, ::Int, node) = nothing
+function _fire_event(model::Workflow, cb, id::Int, node)
+    ev = NodeExecutionEvent(id, model.run_id, getstatus(node), getstate(node, :exec_n))
+    ver = model.ver
+    try
+        cb(ev)
+    catch e
+        log!(model, LogMsg(:error,
+            "Execution event callback failed on node (id: $(id)): $(e)"))
+    end
+    #  Правка графа из обратного вызова обесценивает кешированный порядок
+    #  обхода посреди прогона. Отменить её нельзя, поэтому сообщаем.
+    if model.ver != ver
+        log!(model, LogMsg(:error,
+            "Execution event callback edited the graph on node (id: $(id)): " *
+            "version $(ver) -> $(model.ver). The rest of this run is not trustworthy."))
+    end
+    return nothing
+end
+
+#  Событие начала выдаётся на входе, до проверки на `:clean` и до валидации,
+#  а событие завершения — из `finally`, поэтому оно приходит на всех семи
+#  выходах, включая `rethrow` при `throw_error = true`. Тело вынесено в
+#  отдельную функцию, чтобы барьер функции остался на нём.
+function execute_node!(model::Workflow, node::N, id::Int,
+                       settings::ExecuteSettings, throw_error::Bool) where N <: AbstractDataNode
+    _fire_event(model, settings.on_start, id, node)
+    try
+        return _execute_node_body!(model, node, id, settings, throw_error)
+    finally
+        _fire_event(model, settings.on_finish, id, node)
+    end
+end
+
 #  БАРЬЕР ФУНКЦИИ. Узел достаётся из `Dict{Int, DataNode}`, то есть приходит
 #  абстрактно типизированным, и в теле ниже к его полям обращаются много раз.
 #  Передача узла аргументом даёт компиляции его конкретный тип: один
 #  динамический диспатч на входе вместо поиска поля на каждое обращение.
 #  Аргументы позиционные — кварг в горячем пути собирает NamedTuple.
-function execute_node!(model::Workflow, node::N, id::Int,
+function _execute_node_body!(model::Workflow, node::N, id::Int,
                        settings::ExecuteSettings, throw_error::Bool) where N <: AbstractDataNode
     if getstate(node, :execution_id) != model.run_id
         empty!(getstate(node, :log))
@@ -159,6 +200,11 @@ downstream, which is a long way from the typo.
 
 The vector itself is checked, though: returning a bare `Symbol` instead of a
 `Vector{Symbol}` raises inside the engine and leaves the node `:executing`.
+
+[`setreadyports!`](@ref) is the way to be told instead: it checks each label
+against the spec, raises on a wrong one where the engine can still mark the
+node `:failed`, and returns the node's own vector, so a node that publishes
+the same ports every time allocates nothing after its first execution.
  
 # Example
 ```julia
