@@ -27,6 +27,7 @@ makedocs(;
             "AWB cycle" => "examples_abw_cycle.md",
             "AWB two node cycle" => "examples_abw_two_node.md",
             "Querying settings" => "examples_settings_query.md",
+            "Working a table in place" => "examples_handover.md",
             "Bubble sort as a graph" => "examples_bubble_sort.md",
             "Insertion sort: nested loops" => "examples_insertion_sort.md",
             "Gradient descent on a graph" => "examples_gradient_descent.md",
