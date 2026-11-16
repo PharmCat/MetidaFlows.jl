@@ -181,7 +181,7 @@ struct ConnectionDeleted <: AbstractAuditEvent
 end
 
 """
-    SettingsChanged(id, keys) <: AbstractAuditEvent
+    SettingsChanged(id, keys, replace = false) <: AbstractAuditEvent
 
 Settings of node `id` were written by [`setsettings!`](@ref). `keys` are the
 setting names that were passed, in sorted order - values are deliberately not
@@ -190,11 +190,18 @@ recorded, see [`AbstractAuditEvent`](@ref).
 Sorted rather than as given: the caller passes a `Dict`, whose iteration order
 is not the insertion order, so recording them as they came would make the log
 differ between machines on identical edits.
+
+`replace` says the write was a replacement rather than a merge, so `keys` is
+then the node's whole setting list and not just the part that moved. Without
+it the log could not be replayed: the same record would mean two different
+things, and a reader could not tell whether a key missing from it survived.
 """
 struct SettingsChanged <: AbstractAuditEvent
     id::Int
     keys::Vector{Symbol}
+    replace::Bool
 end
+SettingsChanged(id::Int, keys::Vector{Symbol}) = SettingsChanged(id, keys, false)
 
 #  Структурное равенство на всё семейство. Умолчание Julia для неизменяемой
 #  структуры сводится к `===`, а `NodeAdded` несёт `String`, а
@@ -1732,8 +1739,8 @@ function check_connection_validity(model, c::NodeConnection; throw_error::Bool =
 end
 
 """
-    add_connection!(model::Workflow, c::NodeConnection)
-    add_connection!(model::Workflow, id_out::Int, port_out::Symbol, id_in::Int, port_in::Symbol)
+    add_connection!(model::Workflow, c::NodeConnection; id = 0)
+    add_connection!(model::Workflow, id_out::Int, port_out::Symbol, id_in::Int, port_in::Symbol; id = 0)
 
 Add connection to workflow.
 
@@ -1746,14 +1753,24 @@ If the source node already has status `:clean`,
 its output data is immediately propagated into
 the target node input buffer.
 
+# Identifier
+`id` names the identifier to insert under; `0`, the default, takes the next
+free one. The rules are [`add_node!`](@ref)'s: an identifier in use is refused,
+an explicit one raises the counter.
+
+It matters more here than it does for a node. A `MultiPort` input orders its
+values by ascending connection identifier, so restoring a graph with the
+identifiers it was saved with restores that order as well - while renumbering
+could reorder the inputs of a node that nobody edited.
+
 # Returns
 Assigned connection identifier (`Int`).
 """
-function add_connection!(model::Workflow, c::NodeConnection)::Int
+function add_connection!(model::Workflow, c::NodeConnection; id::Int = 0)::Int
     check_connection_validity(model, c)
-    id = model.c_iter += 1
+    cid, model.c_iter = pickid(model.c_iter, model.connections, id, "Connection")
     model.ver += 1
-    model.connections[id] = c
+    model.connections[cid] = c
     output_node = getnode(model, c.output_id)
     # Инвалидируем дочерние ноды
     invalidate_downstream!(model, c.input_id) 
@@ -1761,17 +1778,17 @@ function add_connection!(model::Workflow, c::NodeConnection)::Int
         output_data = getdata(output_node, c.output_port)
         input_node  = getnode(model, c.input_id)
         # записываем в буфер
-        setinputbuffer!(input_node, c.input_port, id, output_data) # id - connection id 
+        setinputbuffer!(input_node, c.input_port, cid, output_data) # cid - connection id 
     end
     # Add index
-    push!(get!(model.incoming, c.input_id, Int[]), id)
-    push!(get!(model.outgoing, c.output_id, Int[]), id)
-    audit!(model, ConnectionAdded(id, c.output_id, c.output_port, c.input_id, c.input_port))
-    return id
+    push!(get!(model.incoming, c.input_id, Int[]), cid)
+    push!(get!(model.outgoing, c.output_id, Int[]), cid)
+    audit!(model, ConnectionAdded(cid, c.output_id, c.output_port, c.input_id, c.input_port))
+    return cid
 end
-function add_connection!(model::Workflow, id_out::Int, port_out::Symbol, id_in::Int, port_in::Symbol)
+function add_connection!(model::Workflow, id_out::Int, port_out::Symbol, id_in::Int, port_in::Symbol; id::Int = 0)
     connection = NodeConnection(id_out, port_out, id_in, port_in)
-    return add_connection!(model, connection)
+    return add_connection!(model, connection; id = id)
 end
 
 """
@@ -1833,13 +1850,45 @@ function delete_connection!(model::Workflow, id::Int)
 end
 
 """
-    add_node!(model::Workflow, node::AbstractDataNode)
+    pickid(iter::Int, taken, id::Int, what::String) -> (Int, Int)
+
+Resolve the identifier an insertion will use, and the counter value that must
+follow it. `id == 0` asks for the next free one; anything else is an explicit
+request, refused when it is not positive or when `taken` already holds it.
+
+The second return value is the new counter. An explicit identifier raises the
+counter to itself, so a graph rebuilt from a snapshot with high identifiers
+does not hand the same number out again on the next automatic insertion. This
+is the whole reason the counter is not simply incremented: identifiers are
+never reused, and that promise has to survive an explicit one.
+
+Not part of the public API.
+"""
+function pickid(iter::Int, taken, id::Int, what::String)
+    id == 0 && return (iter + 1, iter + 1)
+    id > 0 || error("$(what) id must be positive or 0 for the next free one, got $(id)")
+    haskey(taken, id) && error("$(what) id $(id) is already taken")
+    return (id, max(iter, id))
+end
+
+"""
+    add_node!(model::Workflow, node::AbstractDataNode; reset = :full, id = 0)
  
 Add node to workflow.
  
-Assigns a new unique node identifier and registers the node in workflow
-storage. Identifiers come from a monotonically increasing counter and are
-never reused.
+Assigns a node identifier and registers the node in workflow storage.
+Identifiers come from a monotonically increasing counter and are never reused.
+ 
+# Identifier
+`id` names the identifier to insert under; `0`, the default, takes the next
+free one. An explicit identifier is refused when it is already in use, and it
+raises the counter, so later automatic insertions keep clear of it.
+
+This is what lets a server apply the difference between two saved versions to a
+**live** graph instead of rebuilding it: the nodes it does not touch keep their
+identifiers, their cached results and their `:clean` status, and the change log
+stays one continuous sequence. Rebuilding would renumber everything and throw
+all of that away.
  
 # Notes
 A node whose status is neither `:idle` nor `:clean` is reset on insertion, at
@@ -1855,18 +1904,20 @@ it is.
 # Returns
 Assigned node identifier (`Int`).
 """
-function add_node!(model::Workflow, node::AbstractDataNode; reset::Symbol = :full)
+function add_node!(model::Workflow, node::AbstractDataNode; reset::Symbol = :full, id::Int = 0)
     #  Узел, который уже что-то считал, нельзя вносить с результатами
     #  прошлой жизни — но и настройки у него отбирать незачем.
     r = resetrank(reset)
     if r > 1 && !(getstatus(node) in (:idle, :clean)) reset_node!(node, r) end
-    id = model.n_iter += 1
+    #  Проверка до любой записи: отказ не должен оставить граф наполовину
+    #  изменённым и не должен сдвинуть счётчик.
+    nid, model.n_iter = pickid(model.n_iter, model.nodes, id, "Node")
     # Версия графа
     model.ver += 1
-    setid!(node, id)
-    model.nodes[id] = node
-    audit!(model, NodeAdded(id, nodetypestr(node)))
-    return id
+    setid!(node, nid)
+    model.nodes[nid] = node
+    audit!(model, NodeAdded(nid, nodetypestr(node)))
+    return nid
 end
 """
     delete_node!(model::Workflow, id::Int)

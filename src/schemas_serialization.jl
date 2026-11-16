@@ -287,7 +287,8 @@ audit_event_to_dict(e::ConnectionDeleted) =
     Dict{String, Any}("event" => "ConnectionDeleted", "id" => e.id)
 audit_event_to_dict(e::SettingsChanged) =
     Dict{String, Any}("event" => "SettingsChanged", "id" => e.id,
-                      "keys" => String[String(k) for k in e.keys])
+                      "keys" => String[String(k) for k in e.keys],
+                      "replace" => e.replace)
 
 """
     dict_to_audit_event(d::Dict{String}) -> AbstractAuditEvent
@@ -299,6 +300,9 @@ Rebuild one change-log record from the dictionary
 explicitly from its own fields, so a file cannot name a type to build or a
 field to fill. Port labels and setting keys are accepted as `String` or
 `Symbol`, like the rest of the loader.
+
+A `SettingsChanged` record with no `"replace"` key reads as a merge, which is
+what a record written before the key existed always was.
 """
 function dict_to_audit_event(d::Dict{String})
     haskey(d, "event") || error("Audit record has no `event` key")
@@ -311,7 +315,8 @@ function dict_to_audit_event(d::Dict{String})
                                               Int(d["input_id"]),  sym(d["input_port"]))
     elseif name == "ConnectionDeleted" return ConnectionDeleted(Int(d["id"]))
     elseif name == "SettingsChanged"   return SettingsChanged(Int(d["id"]),
-                                              Symbol[sym(k) for k in d["keys"]])
+                                              Symbol[sym(k) for k in d["keys"]],
+                                              Bool(get(d, "replace", false)))
     end
     error("Unknown audit event `$(name)`; the snapshot format knows only " *
           join(AUDIT_EVENT_NAMES, ", "))

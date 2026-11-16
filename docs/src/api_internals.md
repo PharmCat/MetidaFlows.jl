@@ -17,6 +17,7 @@ means the public API is missing something.
 ## Graph, invalidation, readiness
 
 ```@docs
+pickid
 readydeps
 hasproduced
 handover_filled
@@ -46,4 +47,5 @@ setid!
 setstatus!
 setstate!
 setsettings_unsafe!
+replacesettings_unsafe!
 ```
