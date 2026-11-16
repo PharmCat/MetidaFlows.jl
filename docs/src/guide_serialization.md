@@ -141,6 +141,63 @@ Two things to expect when you resume:
   is not saved. An algorithm that needs to know its own iteration number
   carries that number through a feedback port, and that is saved.
 
+### Restoring onto a live graph
+
+[`dict_to_workflow`](@ref) builds a **new** workflow. That is the right thing
+for opening a file, and the wrong thing for an editor that already has the
+graph open: rebuilding renumbers every node, throws away what the untouched
+ones computed, and starts the change log over.
+
+Applying the difference between two saved versions to the graph you already
+have needs three things, and all three take the identifier or the state from
+the snapshot rather than inventing it:
+
+```julia
+add_node!(w, node; id = 13)                      # under the saved identifier
+add_connection!(w, 13, :out, 12, :ins; id = 22)  # likewise, and this fixes MultiPort order
+setsettings!(w, 13, saved_settings; replace = true)   # the whole configuration
+```
+
+Each refuses an identifier already in use, raises the counter so later
+automatic insertions keep clear of it, writes its own change-log record, and
+invalidates downstream. A node the difference does not mention is not touched
+at all: it keeps its identifier, its cached result and its `:clean` status, and
+the next run does not recompute it.
+
+```julia
+#  Приводим живой граф к сохранённой версии: то, чего нет, добавляем под
+#  сохранёнными id; настройки заменяем целиком, иначе снятый ключ останется.
+for (id, spec) in added_nodes
+    add_node!(w, build_node(spec); id = id)
+    setsettings!(w, id, spec.settings; replace = true)
+end
+for (id, c) in added_connections
+    add_connection!(w, c.output_id, c.output_port, c.input_id, c.input_port; id = id)
+end
+```
+
+**Working out the difference is yours, not the package's.** What counts as the
+same node when its type changed under the same identifier, whether a settings
+edit should keep what the node computed, in which order to apply removals and
+additions, what to do with a difference that fails halfway - those are an
+application's decisions, and a package that froze one of them would be wrong
+for the next application. So there is no `restore!`: the primitives above are
+what cannot be done from outside, and the policy is what should not be done
+from inside.
+
+Two things to know before relying on this:
+
+* **`setsettings!` does not raise `model.ver`**, by design. The version counts
+  structural change, and four cached values hang on it - the graph, whether it
+  has a cycle, the topological order and the readiness map. Settings change
+  what a node computes, not what the graph looks like, so raising the version
+  would discard all four for nothing. What makes the node recompute is
+  invalidation, which `setsettings!` does;
+* **the change log is off by default.** `SETTINGS[:audit]` is `false`, and it
+  is one table for the whole process, not per workflow - see
+  [The graph change log](@ref). A server that wants a continuous history
+  sets it once at startup.
+
 ### Values a snapshot can carry
 
 Settings and feedback buffers hold user values, and a snapshot has to survive

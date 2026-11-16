@@ -229,9 +229,9 @@ end
     #  тип поля проверяется на записи — порт с чужим типом ловится сразу
     @test_throws MethodError setinputbuffer!(getnode(g.w, g.s), :in, 1, "строка")
 
-    #  reset! узла: настройки возвращаются к конструктору без аргументов
+    #  reset! на :all: настройки возвращаются к конструктору без аргументов
     node = getnode(g.w, g.s)
-    reset!(node)
+    reset!(node; level = :all)
     @test node.settings[:factor] == 1 && node.settings[:label] === :none
     @test node.data[:out] === nothing
 end

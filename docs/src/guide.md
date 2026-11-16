@@ -244,6 +244,7 @@ Four optional hooks specialise validation; all default to `true`:
 | [`validate_settings`](@ref) | before execution | `:invalid_settings` |
 | [`validate_result`](@ref) | after execution, before propagation | `:invalid_result` |
 | [`setsettings_unsafe!`](@ref) | on settings assignment | - (customisation point) |
+| [`replacesettings_unsafe!`](@ref) | on settings replacement | - (customisation point) |
 
 Because [`validate_result`](@ref) runs *before* [`push_buffer!`](@ref), a node
 that fails result validation never publishes anything downstream.

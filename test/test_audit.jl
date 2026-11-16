@@ -497,7 +497,7 @@ end
     #  чистится сбросом УЗЛА, но не сбросом модели
     reset!(w)
     @test !isempty(getstate(node, :log))
-    reset!(node)
+    reset!(node; level = :all)
     @test isempty(getstate(node, :log))
 
     #  Логирование на каждом витке цикла не растёт без границы: предел

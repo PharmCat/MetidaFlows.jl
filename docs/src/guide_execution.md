@@ -17,6 +17,7 @@ follow.
 | `:dirty` | needs (re)computation |
 | `:executing` | currently running - also used to detect re-entry |
 | `:clean` | up to date, outputs cached |
+| `:released` | ran, and handed a value over - see *Working on data in place* |
 | `:failed` | [`execute_unsafe!`](@ref) raised |
 | `:invalid_node` | structure or required inputs missing |
 | `:invalid_settings` | [`validate_settings`](@ref) returned `false` |
@@ -34,7 +35,8 @@ follow.
 8. validate the result;
 9. store `ready_ports` and push outputs into the child buffers;
 10. invalidate children (`invalidate_downstream`);
-11. mark `:clean`.
+11. mark `:clean`;
+12. release the producer of every `handover` input the node actually took.
 
 The four flags in parentheses come from [`ExecuteSettings`](@ref):
 
@@ -47,6 +49,90 @@ execute!(w, id; settings = ExecuteSettings(false))                # all flags of
 `execute!` returns the vector of ports produced, or an empty vector when the
 node was rejected or failed - so an empty result is a signal to inspect
 [`getstatus`](@ref).
+
+### Working on data in place
+
+Nothing is copied on a connection. The value a producer publishes, the value in
+every consumer's buffer and the value in the producer's own cache are **one
+object**, and a `MultiPort` only builds a fresh vector around the same ones.
+
+That makes the default rule short: **a node must not modify what
+[`getinputdata`](@ref) hands it.** A node that sorts, scales or appends to it
+in place changes what the producer believes it published - and the producer
+stays `:clean`, so the next run that does not recompute it hands the corrupted
+value back:
+
+```julia
+scheduler!(w)                        # сумма 12.0, верно
+setsettings!(w, child, ...)          # потомок :dirty, родитель :clean
+scheduler!(w; reset_mode = :none)    # сумма 24.0 — потомок считает на том,
+                                     # что сам испортил на прошлом прогоне
+```
+
+`:full` and `:soft` hide this, because they mark every node `:dirty` and the
+producer recomputes. It bites exactly in the two paths whose point is not to
+recompute everything: `reset_mode = :none`, and an [`execute!`](@ref) that
+pulls a `:clean` parent.
+
+When working in place is what you want - a large table that should not be
+copied at every step - declare `handover = true` on **both** ports of the
+connection, in their [`PortSpec`](@ref), and take the input in the body with
+[`take!`](@ref take!(::AbstractDataNode, ::Symbol)):
+
+```julia
+PortSpec("table", DataFrame, :table; handover = true)   # и у выхода, и у входа
+
+function MetidaFlows.execute_unsafe!(node::DataNode{Trim})
+    table = take!(node, :table)        # теперь таблица наша
+    filter!(row -> row.value > 0, table)
+    setdata!(node, :out, table)
+    return setreadyports!(node, :out)
+end
+```
+
+One keyword, two sides, and the rule between them runs one way. An output so
+declared is allowed to give its value away and may feed **any** input. An input
+so declared takes ownership and may be fed **only** by such an output - that is
+the pairing the engine checks when the connection is created.
+
+**The declaration is permission, not transfer.** Publishing changes nothing:
+until somebody takes the value it is still shared, the producer keeps its cache
+and stays `:clean`, and modifying what [`getinputdata`](@ref) returned is the
+same mistake it is anywhere else. What moves ownership is `take!`.
+
+So the transfer is recorded by what happened, not by what was declared. `take!`
+empties the buffer slot, the engine sees that slot go empty across the node's
+execution, and only then drops the producer's cached copy of that port and
+turns the producer `:released`. The producer's status therefore changes during
+the **consumer's** execution - a node never reaches into anybody else's state,
+and a value nobody took stays cached and republishable.
+
+What this costs:
+
+- the output port takes **exactly one connection**, refused at creation
+  otherwise: a second consumer would receive a value the first is entitled to
+  overwrite;
+- once taken, the producer is `:released` rather than `:clean`, so it
+  recomputes next run instead of republishing a value it no longer holds, and
+  [`getdata`](@ref) on that port answers `nothing`;
+- an invalidation that reaches the node turns `:released` into `:dirty` like
+  any other status, so the mark says "handed over on the last run", not
+  "handed over at some point".
+
+Taking is checked against the node's own specification, which is why it needs
+no access to the graph: by the time a node takes anything, the pairing was
+settled when the connection was made. Taking and then failing still counts -
+the value has left the buffer either way, so the release is made from
+`finally`.
+
+`:released` answers two different questions differently, and that is the whole
+of it: to a consumer asking *can I rely on you for the value already in my
+buffer* it answers like `:clean`; to anyone asking *do you have a cache to
+republish* it answers like `:dirty`.
+
+A `handover` port whose value nobody takes - because it has no connection, or
+because the consumer reads it the ordinary way - hands nothing to anybody. It
+is cached as usual and the node stays `:clean`.
 
 ---
 
@@ -65,13 +151,37 @@ nodes that are already `:dirty`, since their subtree was invalidated earlier.
 It is triggered by [`setsettings!`](@ref), [`add_connection!`](@ref),
 [`delete_connection!`](@ref) and by [`execute!`](@ref) itself.
 
-Three reset levels are available:
+[`reset!`](@ref) is the other direction: what *you* throw away between runs.
+It takes a `level` from [`RESET_LEVELS`](@ref), and the levels are a ladder -
+each one does what the one before it does and more:
 
-| Function | Status | Cached outputs | Settings, buffers, logs |
-|---|---|---|---|
-| [`reset_status!`](@ref) | `:dirty` | kept | kept |
-| [`mark_dirty!`](@ref), [`reset!`](@ref) on a workflow | `:dirty` | cleared | kept |
-| [`reset!`](@ref) on a node | `:idle` | cleared | cleared |
+| `level` | clears, on top of the level before | keeps |
+|---|---|---|
+| `:none` | nothing | everything |
+| `:status` | the status, which becomes `:dirty` | everything else |
+| `:soft` | `exec_n`, the stop flag | data, `ready_ports`, every buffer, settings |
+| `:full` *(default)* | cached output data, `ready_ports`, the buffers of `:feedback` ports | settings, the other buffers, the node log |
+| `:inputs` | every remaining input buffer | settings |
+| `:all` | settings, the node log, `execution_id`; the status becomes `:idle` | nothing - the node is as new |
+
+A workflow and a single node take the same levels and the same default, and
+`reset!(model; level = L)` is exactly a loop of `reset!(node; level = L)`:
+
+```julia
+reset!(w)                      # инвалидация: настройки целы
+reset!(w; level = :inputs)     # и входные буферы тоже снять
+reset!(node; level = :all)     # узел как новый
+```
+
+[`mark_dirty!`](@ref) is **not** a level of that ladder. It is the primitive
+above, and it keeps `exec_n` and the stop flag that even `:soft` clears,
+because a subtree that was merely invalidated has not stopped counting.
+
+Two things on the ladder are worth saying out loud. `:full` clears the
+`:feedback` buffers and `:inputs` clears the rest, so `:inputs` is the level
+that leaves no buffer behind. And `:all` ends at `:idle` rather than `:dirty`,
+because a node with nothing in it has not been invalidated - it has been
+emptied.
 
 Low-level buffer access - [`setinputbuffer!`](@ref),
 [`invalidate_buffer!`](@ref), [`push_buffer!`](@ref) - is available when you

@@ -51,6 +51,7 @@ ismultiport
 find_connections
 refreshind!
 reset!
+RESET_LEVELS
 mark_dirty!
 request_stop!
 isstoprequested

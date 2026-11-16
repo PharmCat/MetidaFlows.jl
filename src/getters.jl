@@ -45,14 +45,21 @@ end
 Return execution status of node.
 
 Possible values:
-- `:idle`
-- `:dirty`
-- `:clean`
-- `:executing`
-- `:failed`
-- `:invalid_node`
-- `:invalid_settings`
-- `:invalid_result`
+- `:idle` - created, never run;
+- `:dirty` - has to be computed;
+- `:clean` - ran, and its outputs are cached and can be republished;
+- `:released` - ran, and a consumer has since **taken** the value it produced
+  through a `handover` port. The node has no cache for that port any more, so
+  it recomputes on the next run exactly as a `:dirty` node would. For
+  readiness, though, it counts as having produced: the consumer already has
+  what it needs. The status is set during the consumer's execution, not the
+  producer's. See [`PortSpec`](@ref);
+- `:executing`;
+- `:failed`;
+- `:invalid_node`, `:invalid_settings`, `:invalid_result`.
+
+A node that an invalidation reaches becomes `:dirty` whatever it was, so
+`:released` lives only until something downstream of it changes.
 """
 function getstatus(node::AbstractDataNode)
     return node.properties.status
@@ -189,6 +196,53 @@ end
 
 
 """
+    take!(node::AbstractDataNode, l::Symbol)
+
+Read input port `l` and **empty its buffer**, so the value the node gets back
+is the only reference left to it.
+
+This is how a node consumes an input declared `handover = true` in its
+[`NodeSpec`](@ref), and it is the moment ownership actually moves: the value
+leaves the buffer, the engine notices and drops the producer's cached copy, and
+the node is left holding the only reference there is. From there it may sort,
+scale or append to it in place - the thing [`getinputdata`](@ref) must never be
+used for.
+
+Declaring the ports is permission, not transfer. A consumer that keeps reading
+such an input with [`getinputdata`](@ref) changes nothing: the producer keeps
+its cache and stays `:clean`, and modifying what it read is the same mistake as
+anywhere else.
+
+```julia
+function MetidaFlows.execute_unsafe!(node::DataNode{Trim})
+    table = take!(node, :table)        # теперь таблица наша
+    filter!(row -> row.value > 0, table)
+    setdata!(node, :out, table)
+    return setreadyports!(node, :out)
+end
+```
+
+Returns what [`getinputdata`](@ref) would: the value for a
+[`SinglePort`](@ref), a `Vector` of values for a [`MultiPort`](@ref), or
+`nothing` when nothing was buffered. A second call in the same execution finds
+the buffer empty and answers `nothing`, so take once and keep what you got.
+
+The port has to be declared `handover`, and that is checked against the node's
+own specification - no graph needed. A connection into such a port is only
+allowed from a handover output, which is checked when the connection is
+created, so by the time a node takes anything the ownership is already
+established on both sides.
+"""
+function Base.take!(node::AbstractDataNode, l::Symbol)
+    isportexist(node, l, :input) || error("Wrong port label")
+    ps = getportspec(node, l, :input)
+    ps.handover || error("Input port $(l) is not declared handover; only a handover port may be taken from, see `PortSpec`")
+    v = getinputdata(node, l)
+    empty!(node.input_buffer[l])
+    return v
+end
+
+"""
     getinputdata(node::AbstractDataNode, l::Symbol)
     getinputdata(node::AbstractDataNode, l::Symbol, con::Int)
  
@@ -209,6 +263,22 @@ The three-argument form returns the value written by connection `con`, or
 
 Both forms raise an error when `l` is not an input port of the node
 specification, and neither consumes or clears the buffer.
+
+# The value belongs to the graph, not to the node
+
+Nothing is copied on a connection: what you get here is **the same object** the
+producer published and that every other consumer of that port received. A
+`MultiPort` builds a fresh vector, but the values inside it are the same
+objects.
+
+So do not modify it in place. A node that sorts, scales or appends to what it
+was handed changes the producer's cached output as well, and the next run that
+does not recompute the producer - `reset_mode = :none`, or an
+[`execute!`](@ref) that pulls a `:clean` parent - will feed it the value it
+corrupted last time. The result is wrong and nothing reports it. Copy first, or declare the
+ports `handover = true` on both sides (see [`PortSpec`](@ref)) and consume the
+input with [`take!`](@ref take!(::AbstractDataNode, ::Symbol)), which hands you
+ownership and makes working in place correct by construction.
 """
 function getinputdata(node::AbstractDataNode, l::Symbol) 
     if isportexist(node, l, :input)

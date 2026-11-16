@@ -146,33 +146,47 @@ function setinputbuffer!(node::AbstractDataNode, l::Symbol, con::Int, d)
 end
 
 """
-    setsettings!(model::Workflow, id::Int, settings::Dict{Symbol, <: Any})
+    setsettings!(model::Workflow, id::Int, settings::Dict{Symbol, <: Any}; replace = false)
  
 Apply new node settings and invalidate dependent nodes.
  
-Settings are applied using [`setsettings_unsafe!`](@ref), after which the
+Settings are applied using [`setsettings_unsafe!`](@ref), or
+[`replacesettings_unsafe!`](@ref) when `replace = true`, after which the
 target node and all downstream nodes are invalidated via
 [`invalidate_downstream!`](@ref).
  
 # Notes
 - This function is the safe high-level entry point for mutating node
   configuration inside a workflow.
-- Settings are **merged**: only the keys present in `settings` are
-  overwritten, the rest are kept.
+- Settings are **merged** by default: only the keys present in `settings` are
+  overwritten, the rest are kept. `replace = true` makes `settings` the whole
+  configuration instead, dropping every key it does not mention - the only way
+  to remove a setting, and what restoring a saved version needs.
+- `replace = true` is recorded in the change log, so a reader can tell which
+  of the two a [`SettingsChanged`](@ref) record meant.
 - The keys are **not** checked against the list in [`NodeSpec`](@ref): that
   list is a declaration, and an unknown key is simply stored. Enforce what
   matters in [`validate_settings`](@ref).
+- `model.ver` is **not** raised: it versions the graph's structure, and four
+  cached values hang on it. Settings change what a node computes, not what the
+  graph looks like, so raising it would throw away the topological sort and the
+  readiness map for nothing. Invalidation, not the version, is what makes the
+  node recompute.
+- An undeclared key is stored but **not written to a snapshot**:
+  [`settings_to_dict`](@ref) writes only the declared ones. So a setting kept
+  off the list lives for as long as the object does and no longer, which is
+  the one place where the asymmetry has a consequence.
  
 # Returns
 The node.
 """
-function setsettings!(model::Workflow, id::Int, settings::Dict{Symbol, <: Any})
+function setsettings!(model::Workflow, id::Int, settings::Dict{Symbol, <: Any}; replace::Bool = false)
     node = getnode(model, id)
-    setsettings_unsafe!(node, settings)
+    replace ? replacesettings_unsafe!(node, settings) : setsettings_unsafe!(node, settings)
     invalidate_downstream!(model, id)
     #  Ключи сортируются: порядок обхода переданного `Dict` машинно-зависим,
     #  а журнал одинаковых правок обязан быть одинаковым.
-    audit!(model, SettingsChanged(id, sort!(collect(keys(settings)))))
+    audit!(model, SettingsChanged(id, sort!(collect(keys(settings))), replace))
     node
 end
 """
@@ -203,4 +217,40 @@ function setsettings_unsafe!(node::AbstractDataNode, settings::Dict{Symbol, <: A
         end
     end
     node
+end
+
+"""
+    replacesettings_unsafe!(node::AbstractDataNode, settings::Dict{Symbol, <: Any})
+
+Make `settings` the node's whole configuration, without invalidation. What
+[`setsettings!`](@ref) calls at `replace = true`, and, like
+[`setsettings_unsafe!`](@ref), a point a node type may re-implement.
+
+The default implementation removes every key the node holds and `settings` does
+not, then writes `settings` the ordinary way. "Remove" is `delete!` on the
+settings container: on a `Dict` the key is gone, and on a struct container -
+see [`AbstractNodeFields`](@ref) - there is no such thing as a missing field,
+so the field goes back to the value it has in a freshly constructed container.
+A container of one's own therefore needs `keys` and `delete!` for this to work;
+`setsettings_unsafe!` alone needs neither.
+
+Removal comes first, on a copy of the key list, because deleting from a
+container while iterating it is not allowed.
+
+# Warning
+This function does NOT invalidate cached execution results or downstream nodes.
+
+Use [`setsettings!`](@ref)`(model, id, settings; replace = true)` for normal
+workflow operation.
+"""
+function replacesettings_unsafe!(node::AbstractDataNode, settings::Dict{Symbol, <: Any})
+    for k in collect(keys(node.settings))
+        haskey(settings, k) && continue
+        try
+            delete!(node.settings, k)
+        catch e
+            error("Node $(getid(node)) setting `:$(k)` cannot be removed: $(sprint(showerror, e))")
+        end
+    end
+    return setsettings_unsafe!(node, settings)
 end

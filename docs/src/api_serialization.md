@@ -25,6 +25,7 @@ node_to_dict
 node_properties_to_dict
 spec_to_dict
 portspec_to_dict
+portspec_to_dict_type
 connection_to_dict
 AUDIT_EVENT_NAMES
 audit_event_to_dict
@@ -39,6 +40,7 @@ dict_to_settings_usermod!
 node_state_to_dict
 dict_to_node_state!
 workflow_to_dict
+snapshot_contents
 dict_to_workflow
 dict_to_node
 dict_to_connection

@@ -134,11 +134,9 @@ function scheduler!(model::Workflow{DAW}; reset_mode::Symbol = :full, throw_erro
     #g = makegraph(model)
     if is_cyclic(model) error("workflow is cyclic") end
     if reset_mode ∉ (:full, :soft, :none) error("Wrong reset mode: $reset_mode , only :full, :soft, :none available.") end
-    soft_reset = false
     # change to thread safe
     model.run_id = rand(UInt64)
-    if reset_mode == :soft soft_reset = true end
-    if reset_mode != :none reset!(model; soft = soft_reset) end
+    reset!(model; level = reset_mode)
 
     order = topological_sort(model)
     for id in order
@@ -329,11 +327,9 @@ scheduler!(w; throw_warn = false)         # a deliberately unseeded graph
 """
 function scheduler!(model::Workflow{ABW}; reset_mode::Symbol = :full, maxiter = 1000, throw_error::Bool = false, throw_warn::Bool = true, strict::Bool = false, release_optional::Bool = false, on_start = nothing, on_finish = nothing)
     if reset_mode ∉ (:full, :soft, :none) error("Wrong reset mode: $reset_mode , only :full, :soft, :none available.") end
-    soft_reset = false
     # change to thread safe
     model.run_id = rand(UInt64)
-    if reset_mode == :soft soft_reset = true end
-    if reset_mode != :none reset!(model; soft = soft_reset) end
+    reset!(model; level = reset_mode)
 
     queued = Set{Int}()     # уже в очереди: защита от повторного добавления
     queue = Int[]
