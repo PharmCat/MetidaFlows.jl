@@ -192,8 +192,13 @@ end
  
 Convert port specification to JSON-serializable dictionary.
  
-Keys: `"name"`, `"label"`, `"datatype"`, `"required"`, `"kind"`, `"type"`.
+Keys: `"name"`, `"label"`, `"datatype"`, `"required"`, `"kind"`, `"handover"`,
+`"type"`.
  
+`"handover"` says the port gives its value away instead of caching it, which a
+graph editor needs to know: such a port takes exactly one connection, and the
+node that publishes through it ends `:released` rather than `:clean`.
+
 `"label"`, `"datatype"` and `"kind"` are stringified; `"type"` holds the port
 arity as `"SinglePort"` or `"MultiPort"`.
 """
@@ -204,9 +209,20 @@ function portspec_to_dict(ps::PortSpec)
     d["datatype"] = string(ps.datatype)
     d["required"] = ps.required
     d["kind"]     = string(ps.kind)
+    d["handover"] = ps.handover
     d["type"]     = portspec_to_dict_type(ps)
     return d
 end
+"""
+    portspec_to_dict_type(ps::PortSpec) -> String
+
+The port's arity as the string a snapshot carries: `"SinglePort"` or
+`"MultiPort"`.
+
+Written by [`portspec_to_dict`](@ref) under the `"type"` key, for a human
+reader and for a graph editor. Loading does not use it: a port's arity comes
+from the specification in [`NODE_REGISTER`](@ref), never from the file.
+"""
 function portspec_to_dict_type(ps::PortSpec{MultiPort})
     return "MultiPort"
 end
@@ -326,8 +342,23 @@ code does not know. A lower stamp, and a file with no stamp at all, are read as
 the formats they are.
 
 So a snapshot travels forward between versions, never backward.
+
+# What changed in 2
+
+- a **non-finite** `Float64`, `Float32` or `Float16` is written as a tagged
+  value carrying `"NaN"`, `"Inf"` or `"-Inf"` as text. In format 1 it went out
+  bare, and JSON has no such numbers: a strict writer refuses the whole
+  snapshot and a lax one emits text that is not JSON. See
+  [`value_to_dict`](@ref);
+- the snapshot declares what it holds, under `"contents"`, so a reader can
+  tell what the writer left out from what was simply empty. See
+  [`snapshot_contents`](@ref).
+
+A format 1 file reads unchanged: it carries no `"contents"`, which
+[`snapshot_contents`](@ref) reports as `missing` rather than guessing, and it
+cannot contain a tagged non-finite float because nothing wrote one.
 """
-const SNAPSHOT_FORMAT_VERSION = 1
+const SNAPSHOT_FORMAT_VERSION = 2
 
 const VALUE_TYPES = Dict{String, Type}(
     "Any"     => Any,     "Bool"    => Bool,
@@ -341,10 +372,15 @@ const VALUE_TYPES = Dict{String, Type}(
 
 Write a single value in a form a text format can carry.
 
-`nothing`, `Bool`, `Int64`, `Float64` and `String` are returned as they are.
-Everything else becomes a dictionary with a `"t"` type tag: `Symbol`, `Char`,
-`Tuple`, `Vector` (with an `"e"` element type tag), `Dict` (with a `"k"` key
-type tag) and the numeric types listed in `VALUE_TYPES`.
+`nothing`, `Bool`, `Int64`, a **finite** `Float64` and `String` are returned as
+they are. Everything else becomes a dictionary with a `"t"` type tag: `Symbol`,
+`Char`, `Tuple`, `Vector` (with an `"e"` element type tag), `Dict` (with a
+`"k"` key type tag) and the numeric types listed in `VALUE_TYPES`.
+
+`NaN`, `Inf` and `-Inf` are tagged as well, with the value as **text**:
+`Dict("t" => "Float64", "v" => "NaN")`. JSON has no notation for them, so a
+bare one is either refused by the writer or emitted as text that is not JSON -
+in format 1 that is what happened, and it is the reason the format moved to 2.
 
 A value of any other type raises an error naming the type. Define
 [`settings_to_dict_usermod!`](@ref) for the node type to serialize it
@@ -355,7 +391,7 @@ See also [`dict_to_value`](@ref).
 value_to_dict(x::Nothing) = nothing
 value_to_dict(x::Bool)    = x
 value_to_dict(x::Int64)   = x
-value_to_dict(x::Float64) = x
+value_to_dict(x::Float64) = isfinite(x) ? x : _nonfinite_to_dict(x)
 value_to_dict(x::String)  = x
 value_to_dict(x::Symbol)  = Dict{String, Any}("t" => "Symbol", "v" => String(x))
 value_to_dict(x::Char)    = Dict{String, Any}("t" => "Char",   "v" => string(x))
@@ -364,7 +400,16 @@ value_to_dict(x::Tuple)   = Dict{String, Any}("t" => "Tuple",
 function value_to_dict(x::Union{Integer, AbstractFloat})
     t = string(typeof(x))
     haskey(VALUE_TYPES, t) || error("No `value_to_dict` method for type $(typeof(x))")
+    x isa AbstractFloat && !isfinite(x) && return _nonfinite_to_dict(x)
     Dict{String, Any}("t" => t, "v" => x isa Integer ? Int64(x) : Float64(x))
+end
+
+#  Нефинитное значение уходит строкой под своим тегом: в JSON нет ни NaN, ни
+#  Inf, и голое число там либо отвергается писателем, либо даёт текст, который
+#  уже не JSON. Набор строк закрыт — читатель их сверяет, а не разбирает.
+function _nonfinite_to_dict(x::T) where T <: AbstractFloat
+    Dict{String, Any}("t" => string(T),
+                      "v" => isnan(x) ? "NaN" : (x > zero(T) ? "Inf" : "-Inf"))
 end
 function value_to_dict(x::AbstractVector)
     e = string(eltype(x))
@@ -392,6 +437,9 @@ Read back a value written by [`value_to_dict`](@ref).
 A tagged dictionary is rebuilt through the `VALUE_TYPES` table, so an unknown
 tag raises an error instead of being resolved: a type named in a file is never
 turned into a type object.
+
+A float tag whose value is text is one of `"NaN"`, `"Inf"` or `"-Inf"` and
+nothing else: the set is closed and checked, not parsed.
 """
 dict_to_value(x::Nothing)        = nothing
 dict_to_value(x::Bool)           = x
@@ -422,6 +470,14 @@ function dict_to_value(d::AbstractDict)
     end
     T = get(VALUE_TYPES, t, nothing)
     isnothing(T) && error("Unknown value type tag $(repr(t))")
+    #  Нефинитное значение приходит текстом, см. `value_to_dict`.
+    if T <: AbstractFloat && d["v"] isa AbstractString
+        s = String(d["v"])
+        s == "NaN"  && return T(NaN)
+        s == "Inf"  && return T(Inf)
+        s == "-Inf" && return T(-Inf)
+        error("A float written as text must be \"NaN\", \"Inf\" or \"-Inf\", got $(repr(s))")
+    end
     return convert(T, d["v"])
 end
 
@@ -596,6 +652,14 @@ see [`node_state_to_dict`](@ref) and resume with `reset_mode = :soft`.
   ([`settings_to_dict`](@ref)).
 - `run_id`, logs and cached output data are never included. Cached data is not
   needed: a loaded node is `:dirty` and recomputes.
+- `"contents"` records what this call put in - the `values` and `state` flags
+  as they were given, and whether a graph change log went along. Without it a
+  reader cannot tell a snapshot written without state from one whose state was
+  empty. Query it with [`snapshot_contents`](@ref).
+- `"incoming"` and `"outgoing"` are derived from `"connections"` and are
+  **not** read back: [`dict_to_workflow`](@ref) rebuilds both indices with
+  [`refreshind!`](@ref). They are written for a reader that wants the graph
+  without walking the edges itself.
 """
 function workflow_to_dict(w::Workflow; values::Bool = true, state::Bool = false)
     d                = Dict{String, Any}()
@@ -625,13 +689,62 @@ function workflow_to_dict(w::Workflow; values::Bool = true, state::Bool = false)
         o[k] = copy(v)
     end
     d["outgoing"]    = o
-    #  Журнал пишется только когда он не пуст, то есть когда `audit` включали.
-    #  По умолчанию снимок остаётся таким же, каким был, — ключа просто нет,
-    #  и `format_version` поднимать не за что.
+    #  Что именно положили — в самом файле. Иначе снимок без состояния не
+    #  отличить от снимка, у которого состояние было пустым.
+    d["contents"]    = Dict{String, Any}("values"    => values,
+                                         "state"     => state,
+                                         "audit_log" => !isempty(w.audit_log))
+    #  Журнал пишется только когда он не пуст, то есть когда `audit` включали:
+    #  иначе ключа просто нет. Сам по себе он версию формата не поднимал —
+    #  добавление ключа старому читателю не мешает; версию подняло то, что
+    #  нефинитные числа теперь уходят строкой, а это старый читатель уже не
+    #  разберёт. Есть ли журнал в файле — видно через `"contents"`.
     if !isempty(w.audit_log)
         d["audit_log"] = [audit_event_to_dict(e) for e in w.audit_log]
     end
     return d
+end
+
+"""
+    snapshot_contents(d::Dict{String}) -> NamedTuple
+
+What a snapshot says it holds, without loading it.
+
+Returns `(; format_version, values, state, audit_log)`:
+
+- `values` - the node settings values are in the file, so the workflow can be
+  loaded and run;
+- `state` - the contents of `:feedback` input buffers are in the file, so the
+  snapshot is a checkpoint of a run in progress and resumes with
+  `reset_mode = :soft`;
+- `audit_log` - a graph change log went along.
+
+For a **format 1** file, `values` and `state` come back `missing`: such a file
+declares nothing, and the honest answer is that it is not known rather than a
+guess. `audit_log` is answerable for any version, because the key is either
+there or not.
+
+Four things are in no snapshot of any version: `run_id`, the engine log, a
+node's own log, and cached output data. A loaded node is `:dirty` and
+recomputes, so the data is not needed; the logs and the run id belong to a run,
+not to a graph.
+
+```julia
+c = snapshot_contents(d)
+c.state === true || @info "в снимке нет состояния прогона"
+```
+
+See also [`workflow_to_dict`](@ref), [`SNAPSHOT_FORMAT_VERSION`](@ref).
+"""
+function snapshot_contents(d::Dict{String})
+    fv = get(d, "format_version", 1)
+    c  = get(d, "contents", nothing)
+    isnothing(c) && return (format_version = fv, values = missing, state = missing,
+                            audit_log = haskey(d, "audit_log"))
+    return (format_version = fv,
+            values    = Bool(c["values"]),
+            state     = Bool(c["state"]),
+            audit_log = Bool(c["audit_log"]))
 end
 
 """

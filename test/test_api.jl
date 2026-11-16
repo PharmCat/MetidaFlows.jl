@@ -486,16 +486,168 @@ end
     @test getdata(dblnode, :out) === nothing
     @test srcnode.settings[:value] == 10
 
-    # reset!(::AbstractDataNode) — полный сброс до :idle.
+    #  Узловой reset! без ключа — та же инвалидация, что и у графа:
+    #  настройки и обычные буферы на месте.
     setinputbuffer!(dblnode, :in, 1, 5)
     setstate!(dblnode, :execution_id, UInt64(123))
+    setsettings_unsafe!(dblnode, Dict(:factor => 2))
     @test reset!(dblnode) === dblnode
+    @test getstatus(dblnode) == :dirty
+    @test dblnode.settings == Dict(:factor => 2)
+    @test !isempty(dblnode.input_buffer[:in])
+    @test getstate(dblnode, :execution_id) == UInt64(123)
+
+    #  :inputs добавляет к этому обычные буферы, настройки оставляет.
+    @test reset!(dblnode; level = :inputs) === dblnode
+    @test isempty(dblnode.input_buffer[:in])
+    @test dblnode.settings == Dict(:factor => 2)
+
+    # level = :all — полный сброс до :idle.
+    setinputbuffer!(dblnode, :in, 1, 5)
+    @test reset!(dblnode; level = :all) === dblnode
     @test getstatus(dblnode) == :idle
     @test isempty(dblnode.settings)
     @test isempty(dblnode.data)
     @test getstate(dblnode, :execution_id) == 0
     @test haskey(dblnode.input_buffer, :in)     # ключи портов сохраняются,
     @test isempty(dblnode.input_buffer[:in])    # очищается только содержимое
+end
+
+# --------------------------------------------------------------------------
+@testset "лестница сброса: уровни и равенство областей    " begin
+    #  Уровни кумулятивны: каждый снимает всё, что снимал предыдущий, и своё.
+    #  Проверяем по одному узлу со всеми видами портов и всем заполненным.
+    @test RESET_LEVELS == (:none, :status, :soft, :full, :inputs, :all)
+
+    specfb() = NodeSpec("Loop",
+        [PortSpec("In",   Int, :in),
+         PortSpec("Prev", Int, :prev; kind = :feedback)],
+        [PortSpec("Out",  Int, :out)], [:k])
+
+    function populated()
+        w = Workflow(1; type = :ABW)
+        id = add_node!(w, DataNode(ConstNode, specfb()))
+        n  = getnode(w, id)
+        setsettings_unsafe!(n, Dict(:k => 42))
+        setinputbuffer!(n, :in,   101, 7)
+        setinputbuffer!(n, :prev, 102, 9)
+        setdata!(n, :out, 5)
+        setreadyports!(n, :out)
+        n.state.exec_n = 3
+        setstate!(n, :execution_id, UInt64(77))
+        request_stop!(n)
+        log!(n, :info, "строка узла")
+        setstatus!(n, :failed)
+        (w, id, n)
+    end
+
+    #  :none не трогает ничего
+    w, id, n = populated()
+    reset!(n; level = :none)
+    @test getstatus(n) == :failed && n.settings[:k] == 42 && getstate(n, :exec_n) == 3
+    @test isstoprequested(n) && !isempty(n.data)
+
+    #  :status — только статус
+    w, id, n = populated()
+    reset!(n; level = :status)
+    @test getstatus(n) == :dirty
+    @test getstate(n, :exec_n) == 3 && isstoprequested(n) && !isempty(n.data)
+
+    #  :soft — плюс счётчик и флаг останова
+    w, id, n = populated()
+    reset!(n; level = :soft)
+    @test getstatus(n) == :dirty && getstate(n, :exec_n) == 0 && !isstoprequested(n)
+    @test !isempty(n.data) && !isempty(getstate(n, :ready_ports))
+    @test !isempty(n.input_buffer[:prev])          # обратный буфер цел
+    @test reset!(n; soft = true) === n             # прежнее написание принимается
+
+    #  :full — плюс данные, ready_ports и буферы обратных портов
+    w, id, n = populated()
+    reset!(n; level = :full)
+    @test isempty(n.data) && isempty(getstate(n, :ready_ports))
+    @test isempty(n.input_buffer[:prev])
+    @test !isempty(n.input_buffer[:in])            # обычный буфер ещё цел
+    @test n.settings[:k] == 42                     # и настройки
+    @test !isempty(getstate(n, :log))              # и журнал узла
+
+    #  :inputs — плюс остальные буферы, настройки по-прежнему на месте
+    w, id, n = populated()
+    reset!(n; level = :inputs)
+    @test isempty(n.input_buffer[:in]) && isempty(n.input_buffer[:prev])
+    @test haskey(n.input_buffer, :in)              # ключи портов сохраняются
+    @test n.settings[:k] == 42
+    @test getstatus(n) == :dirty
+
+    #  :all — всё, и статус :idle
+    w, id, n = populated()
+    reset!(n; level = :all)
+    @test getstatus(n) == :idle
+    @test isempty(n.settings) && isempty(getstate(n, :log))
+    @test getstate(n, :execution_id) == 0
+
+    #  Умолчание одинаково на обеих областях и равно :full
+    w1, id1, n1 = populated()
+    w2, id2, n2 = populated()
+    reset!(n1)
+    reset!(w2)
+    for f in (getstatus, x -> copy(x.settings), x -> copy(x.data),
+              x -> getstate(x, :exec_n), x -> copy(getstate(x, :ready_ports)),
+              x -> isstoprequested(x))
+        @test f(n1) == f(n2)
+    end
+
+    #  И на каждом уровне: граф — это обход его узлов
+    for L in RESET_LEVELS
+        wa, ia, na = populated()
+        wb, ib, nb = populated()
+        reset!(na; level = L)
+        reset!(wb; level = L)
+        @test getstatus(na) == getstatus(nb)
+        @test na.settings == nb.settings
+        @test na.data == nb.data
+        @test getstate(na, :exec_n) == getstate(nb, :exec_n)
+        @test isempty(na.input_buffer[:in]) == isempty(nb.input_buffer[:in])
+        @test isempty(na.input_buffer[:prev]) == isempty(nb.input_buffer[:prev])
+    end
+
+    #  Неизвестный уровень — ошибка с перечнем, а не тихое ничего
+    w, id, n = populated()
+    @test_throws ErrorException reset!(n; level = :half)
+    @test_throws ErrorException reset!(w; level = :half)
+
+    #  reset_status! — то же, что :status
+    w, id, n = populated()
+    reset_status!(w)
+    @test getstatus(n) == :dirty && getstate(n, :exec_n) == 3
+end
+
+# --------------------------------------------------------------------------
+@testset "request_stop! умеет и снимать флаг              " begin
+    n = DataNode(ConstNode, spec_const())
+    @test !isstoprequested(n)
+    @test request_stop!(n) === n
+    @test isstoprequested(n)
+    @test request_stop!(n, false) === n
+    @test !isstoprequested(n)
+    @test request_stop!(n, true) === n && isstoprequested(n)
+
+    #  reset_mode = :none не снимает флаг — поэтому снимать его должно быть чем
+    w = Workflow(2)
+    a = add_node!(w, DataNode(ConstNode, spec_const()))
+    b = add_node!(w, DataNode(DoubleNode, spec_double()))
+    add_connection!(w, a, :out, b, :in)
+    scheduler!(w)
+    @test getexecn(w, b) == 1
+
+    request_stop!(getnode(w, a))                   # флаг поднят между прогонами
+    mark_dirty!(getnode(w, b))                     # b пересчитался бы
+    scheduler!(w; reset_mode = :none)              # сброса нет, флаг жив
+    @test getexecn(w, b) == 1                      # прогон встал на a
+
+    request_stop!(getnode(w, a), false)            # снимаем точечно
+    mark_dirty!(getnode(w, b))
+    scheduler!(w; reset_mode = :none)
+    @test getexecn(w, b) == 2                      # и теперь дошёл
 end
 
 # --------------------------------------------------------------------------

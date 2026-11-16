@@ -88,9 +88,14 @@ end
 function execute_node!(model::Workflow, node::N, id::Int,
                        settings::ExecuteSettings, throw_error::Bool) where N <: AbstractDataNode
     _fire_event(model, settings.on_start, id, node)
+    #  Что лежало в забирающих входах до тела: по разнице движок узнаёт, что
+    #  узел действительно забрал значение, и освобождает того, кто его отдал.
+    #  Из `finally`, поэтому забор засчитывается и когда тело упало после него.
+    filled = handover_filled(node)
     try
         return _execute_node_body!(model, node, id, settings, throw_error)
     finally
+        release_taken!(model, node, id, filled)
         _fire_event(model, settings.on_finish, id, node)
     end
 end
@@ -172,7 +177,8 @@ function _execute_node_body!(model::Workflow, node::N, id::Int,
             invalidate_downstream!(model, c)
         end
     end
-    #
+    #  Отданные порты: значение уже в буфере потребителя, и держать его ещё
+    #  и здесь нельзя — потребитель вправе править его на месте.
     setstatus!(node, :clean)
     return ready_ports # no probleb wit state because setstatus! copy ready_ports to state
 end

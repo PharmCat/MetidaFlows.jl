@@ -500,4 +500,90 @@ end
 end
 
 
+# --------------------------------------------------------------------------
+@testset "P10. на мультипорте молчащий держит своё место   " begin
+    #  Правило порядка (P4, и то же в M4 у мультипорта) имеет смысл только
+    #  если описания и значения одной длины. Производитель без описания не
+    #  выбрасывается из вектора, а занимает свой слот значением nothing:
+    #  иначе позиции разъехались бы ровно на тех графах, где описывают не все.
+    w = Workflow(0)
+    cat = add_node!(w, DataNode(MetaJoin, spec_metamulti()))
+    cids = Int[]
+    for T in (MetaSource, MetaMute, MetaSource)
+        p = add_node!(w, DataNode(T, spec_metasource()))
+        push!(cids, add_connection!(w, p, :out, cat, :items))
+    end
+
+    im = getinputmeta(w, cat)[:items]
+    @test im == Any[(columns = [:a, :b],), nothing, (columns = [:a, :b],)]
+
+    #  Значения кладём прямо в буфер по номеру связи: файл про описания, и
+    #  прогон здесь не нужен, чтобы сверить порядок.
+    node = getnode(w, cat)
+    for (i, cid) in enumerate(cids)
+        setinputbuffer!(node, :items, cid, 10i)
+    end
+    vals = getinputdata(node, :items)
+    @test vals == [10, 20, 30]
+    @test length(im) == length(vals)
+end
+
+# --------------------------------------------------------------------------
+@testset "P11. пересоздание связи: описания и значения вместе" begin
+    #  Номера связей не переиспользуются, поэтому пересозданная связь встаёт
+    #  последней — и в описаниях, и в значениях, одинаково.
+    w = Workflow(0)
+    cat = add_node!(w, DataNode(MetaJoin, spec_metamulti()))
+    nodes = [add_node!(w, DataNode(MetaGate, spec_metathru())) for _ in 1:3]
+    for (i, n) in enumerate(nodes)
+        setsettings!(w, n, Dict(:schema => [Symbol("c", i)]))
+    end
+    cids = [add_connection!(w, n, :out, cat, :items) for n in nodes]
+    @test [m.columns[1] for m in getinputmeta(w, cat)[:items]] == [:c1, :c2, :c3]
+
+    delete_connection!(w, cids[2])
+    n4 = add_node!(w, DataNode(MetaGate, spec_metathru()))
+    setsettings!(w, n4, Dict(:schema => [:c9]))
+    cid4 = add_connection!(w, n4, :out, cat, :items)
+    @test cid4 > maximum(cids)                       # номер не переиспользован
+
+    im = getinputmeta(w, cat)[:items]
+    @test [m.columns[1] for m in im] == [:c1, :c3, :c9]
+
+    node = getnode(w, cat)
+    for (i, cid) in enumerate((cids[1], cids[3], cid4))
+        setinputbuffer!(node, :items, cid, i)
+    end
+    @test getinputdata(node, :items) == [1, 2, 3]    # та же упаковка
+end
+
+# --------------------------------------------------------------------------
+@testset "P12. обратный мультипорт в inmeta не попадает    " begin
+    #  Обход берёт только :normal-входы: ключ кладётся на каждый из них,
+    #  даже неподключённый, а порты :feedback и :error не представлены
+    #  вовсе. Значит тело узла не вправе читать inmeta по метке обратного
+    #  порта — только обходить по имеющимся ключам.
+    spec_fb = NodeSpec("Meta fb",
+                       [PortSpec("Items", Int, :items, MultiPort()),
+                        PortSpec("Prev",  Int, :prev,  MultiPort(); kind = :feedback)],
+                       [PortSpec("Out",   Int, :out)])
+    w = Workflow(0; type = :ABW)
+    f = add_node!(w, DataNode(MetaJoin, spec_fb))
+    im = getinputmeta(w, f)
+
+    @test haskey(im, :items)
+    @test im[:items] == Any[]                        # неподключённый :normal — пустой вектор
+    @test !haskey(im, :prev)                         # обратный — ключа нет
+    @test_throws KeyError im[:prev]
+
+    #  Подключённое обратное ребро этого не меняет.
+    s = add_node!(w, DataNode(MetaSource, spec_metasource()))
+    add_connection!(w, s, :out, f, :items)
+    add_connection!(w, f, :out, f, :prev)
+    im2 = getinputmeta(w, f)
+    @test im2[:items] == Any[(columns = [:a, :b],)]
+    @test !haskey(im2, :prev)
+end
+
+
 end # @testset "МЕТАДАННЫЕ ПОРТОВ"

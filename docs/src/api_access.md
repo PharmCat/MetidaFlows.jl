@@ -18,6 +18,7 @@ getnode
 getstatus
 getdata
 getinputdata
+take!(::AbstractDataNode, ::Symbol)
 getinputconnections
 setdata!
 setsettings!

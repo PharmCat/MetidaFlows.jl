@@ -401,6 +401,19 @@ Base.get(obj::AbstractNodeFields, f::Symbol, default) =
 #  «Опустошения» у структуры с фиксированными полями нет, поэтому за эталон
 #  берётся свежесозданный экземпляр. Это и позволяет не требовать от автора
 #  ничего, кроме конструктора без аргументов.
+#  Удаления поля у структуры тоже не бывает, поэтому «удалить ключ» значит
+#  вернуть полю то значение, которое у него в свежем экземпляре, — тем же
+#  правилом, что и `empty!` выше.
+function Base.delete!(obj::T, f::Symbol) where T <: AbstractNodeFields
+    hasfield(T, f) || return obj
+    ismutabletype(T) ||
+        error("$(T) is immutable: `delete!` cannot clear a field; make it a `mutable struct`")
+    hasmethod(T, Tuple{}) ||
+        error("$(T) has no zero-argument constructor, so `delete!` has nothing to clear the field to")
+    setfield!(obj, f, getfield(T(), f))
+    return obj
+end
+
 function Base.empty!(obj::T) where T <: AbstractNodeFields
     ismutabletype(T) ||
         error("$(T) is immutable: `empty!` cannot reset it; make it a `mutable struct`")
@@ -619,7 +632,7 @@ Per-node execution state with dict-like field access:
   body runs, so a node rejected by validation leaves it unchanged while a
   failed node does not.
  
-  Zeroed by `reset!(model)` in every reset mode, by `reset!(node)` and by
+  Zeroed by [`reset!`](@ref) at `:soft` and above, at either scope, and by
   `empty!(state)` — but **not** by [`mark_dirty!`](@ref), so invalidating a
   subtree does not lose the count. In a cyclic [`ABW`](@ref) run the counter
   therefore holds the number of loop turns, and a node may read its own
@@ -629,7 +642,8 @@ Per-node execution state with dict-like field access:
 - `execution_id::UInt64` - id of the run that last touched the node;
 - `log::Vector{LogMsg}` - the node's own log, written by the node through
   [`log!`](@ref) and by nothing in the engine; cleared by `empty!(state)` and
-  `reset!(node)`, **not** by `reset!(model)`;
+  by [`reset!`](@ref) at `:all`, and emptied by [`execute!`](@ref) itself when
+  a node is first touched in a new run;
   bounded by [`SETTINGS`](@ref)`[:log_limit]`, oldest dropped first.
  
 Reset in place with `empty!(state)`.
@@ -691,6 +705,9 @@ Fields:
 - `label::Symbol` - unique label used for referencing the port in code.
 - `required::Bool` - whether the port must have buffered data for execution.
 - `kind::Symbol` - how the schedulers treat connections attached to the port.
+- `handover::Bool` - the port deals in values whose ownership moves. On an
+  output it gives the value away instead of caching it; on an input it takes
+  ownership of what arrives. See *Handing a value over* below.
  
 The optional positional argument selects the port arity:
 [`SinglePort`](@ref) (default) or [`MultiPort`](@ref).
@@ -702,6 +719,45 @@ The optional positional argument selects the port arity:
 | `:feedback` | **input ports only**: closes a cycle and carries the value of the previous iteration. Not waited for, not required |
 | `:terminal` | a slot for a result that is not meant to be connected. Connecting one is allowed but warns: the kind is a statement of intent, not a constraint |
 | `:error` | reserved for error routing; must be `required = false` and its `datatype` must be a subtype of `Exception` |
+
+# Handing a value over
+
+By default a value published to a port stays in the producer's cache as well,
+so the producer and every consumer hold **the same object** - nothing is copied
+on a connection. That is why a node must not modify what
+[`getinputdata`](@ref) hands it: the value belongs to the graph, and changing
+it in place changes what the producer thinks it published. Take a copy if you
+need to change it.
+
+`handover = true` is the sanctioned way to change it in place. One keyword,
+both sides of a connection, and the rule between them runs one way only.
+
+**On an output** the port is allowed to give its value away. It takes
+**exactly one connection**, refused at creation otherwise: a second consumer
+would receive a value the first is entitled to overwrite. Publication itself
+changes nothing - the value goes into the consumer's buffer and stays in the
+producer's cache as usual, because until somebody takes it nobody is entitled
+to change it.
+
+**On an input** the port takes ownership of what arrives, through
+[`take!`](@ref take!(::AbstractDataNode, ::Symbol)), which empties the buffer
+slot and leaves the node holding the only reference. Such an input can be fed
+**only by a handover output**, checked when the connection is created.
+
+The transfer happens **when the value is really taken**, not when it is
+published: the engine sees the buffer go empty across the node's execution,
+drops the producer's cached copy of that port and turns the producer
+`:released`. So the status says what happened rather than what was declared -
+a handover output whose consumer never takes anything stays `:clean` and keeps
+its cache, and a producer is released during the **consumer's** execution.
+
+The other direction is open: a handover output may feed an ordinary input.
+Having given up its cache the producer has nothing left to corrupt, so a
+consumer that merely reads is safe, and one that does not know it owns the
+value simply never takes it.
+
+The flag is written into the snapshot, so a graph editor sees which ports
+behave this way - on both sides.
  
 Constraints are checked at construction time. `kind = :feedback` on an
 **output** port is rejected by the [`NodeSpec`](@ref) constructor: a delay is a
@@ -731,7 +787,9 @@ struct PortSpec{T <: AbstractPortType}
     label::Symbol
     required::Bool
     kind::Symbol
-    function PortSpec(name, datatype, label, ::T = SinglePort(); required::Bool = true, kind::Symbol = :normal) where T <: AbstractPortType
+    handover::Bool
+    function PortSpec(name, datatype, label, ::T = SinglePort(); required::Bool = true,
+                      kind::Symbol = :normal, handover::Bool = false) where T <: AbstractPortType
         if kind ∉ (:normal, :terminal, :feedback, :error)
             error("Invalid port kind: $kind (use only :normal, :terminal, :feedback, :error)")
         end
@@ -741,7 +799,7 @@ struct PortSpec{T <: AbstractPortType}
         if kind == :error && !(datatype <: Exception)
             error("Error ports must have a supertype of Exception")
         end
-        new{T}(name, datatype, label, required, kind)
+        new{T}(name, datatype, label, required, kind, handover)
     end
 end
 #
@@ -1255,7 +1313,8 @@ end
     GraphCache
 
 The graph of a workflow, cached: the directed graph itself and, derived from
-it, whether the graph is acyclic and a topological order of its nodes.
+it, whether the graph is acyclic, a topological order of its nodes, and the
+readiness obligations of every node.
 
 Held by [`Workflow`](@ref) in its `graph` field and never built by hand. Read
 it through [`makegraph`](@ref), [`is_cyclic`](@ref is_cyclic(::Workflow)) and
@@ -1263,20 +1322,20 @@ it through [`makegraph`](@ref), [`is_cyclic`](@ref is_cyclic(::Workflow)) and
 recomputes its own part when that part is out of date.
 
 # Fields
-- `graph`, `is_cyclic`, `topological_sort` - the three cached values.
-- `ver`, `ic_ver`, `ts_ver` - the `Workflow.ver` each of them was computed at.
-  A value is current when its version equals the workflow's, so the three are
-  refreshed independently: asking whether the graph is cyclic does not pay for
-  a topological sort.
+- `graph`, `is_cyclic`, `topological_sort`, `ready` - the four cached values.
+- `ver`, `ic_ver`, `ts_ver`, `rd_ver` - the `Workflow.ver` each of them was
+  computed at. A value is current when its version equals the workflow's, so
+  the four are refreshed independently: asking whether the graph is cyclic
+  does not pay for a topological sort.
 
 # Staleness
 `Workflow.ver` is raised by the four functions that edit a graph, and only by
 them, so a cached value is stale exactly when the structure changed through
 them.
 
-A new workflow starts at version `0` with all three values already set - the
-empty graph, `false`, and an empty order - which is what an empty workflow's
-answers are, so nothing is computed until the first edit. The cache is
+A new workflow starts at version `0` with all four values already set - the
+empty graph, `false`, an empty order and no obligations - which is what an
+empty workflow's answers are, so nothing is computed until the first edit. The cache is
 therefore correct for as long as every edit goes through the editing
 functions, and silently wrong as soon as one does not: see *Editing the graph*
 in [`Workflow`](@ref).
@@ -1285,15 +1344,18 @@ mutable struct GraphCache
     ver::Int
     ic_ver::Int
     ts_ver::Int
+    rd_ver::Int
     is_cyclic::Bool
     topological_sort::Vector{Int}
     graph::NamedDiGraph{Int}
+    ready::Dict{Int, Vector{Tuple{Int, Symbol, Bool}}}
 end
 #=
 Cтатусы:
-:idle - just created
-:clean - executed
-:dirty - changes in settings or 
+:idle     - just created
+:clean    - executed, outputs cached
+:released - executed, handed a value over: no cache to republish
+:dirty    - changes in settings or
 :executing
 :failed
 :invalid_
@@ -1348,9 +1410,9 @@ workflow: see [`SETTINGS`](@ref).
 """
 function Workflow(id::Int; type::Symbol = :DAW)
     if type == :DAW
-        Workflow{DAW}(id, 0, "Default", 0, Dict{Int, DataNode}(), 0, Dict{Int, NodeConnection}(), Dict{Int, Vector{Int}}(), Dict{Int, Vector{Int}}(), 0, LogMsg[], AbstractAuditEvent[], GraphCache(0, 0, 0, false, Int[], NamedDiGraph{Int}()))
+        Workflow{DAW}(id, 0, "Default", 0, Dict{Int, DataNode}(), 0, Dict{Int, NodeConnection}(), Dict{Int, Vector{Int}}(), Dict{Int, Vector{Int}}(), 0, LogMsg[], AbstractAuditEvent[], GraphCache(0, 0, 0, 0, false, Int[], NamedDiGraph{Int}(), Dict{Int, Vector{Tuple{Int, Symbol, Bool}}}()))
     elseif type == :ABW
-        Workflow{ABW}(id, 0, "Default", 0, Dict{Int, DataNode}(), 0, Dict{Int, NodeConnection}(), Dict{Int, Vector{Int}}(), Dict{Int, Vector{Int}}(), 0, LogMsg[], AbstractAuditEvent[], GraphCache(0, 0, 0, false, Int[], NamedDiGraph{Int}()))
+        Workflow{ABW}(id, 0, "Default", 0, Dict{Int, DataNode}(), 0, Dict{Int, NodeConnection}(), Dict{Int, Vector{Int}}(), Dict{Int, Vector{Int}}(), 0, LogMsg[], AbstractAuditEvent[], GraphCache(0, 0, 0, 0, false, Int[], NamedDiGraph{Int}(), Dict{Int, Vector{Tuple{Int, Symbol, Bool}}}()))
     else
         error("Unknown workflow type: $(type) (expected :DAW or :ABW)")
     end
@@ -1629,7 +1691,28 @@ function check_connection_validity(model, c::NodeConnection; throw_error::Bool =
     isportexist(parent_node, output_port, :output) || (throw_error ? error("Output node port $output_port doesn't exist") : return false)
     isportexist(child_node, input_port, :input) || (throw_error ? error("Input node port $input_port doesn't exist") : return false)
 
-    getportspec(parent_node, output_port, :output).kind == :terminal && throw_warn && @warn "Output port $output_port is terminal and should not be connected" # Warn, but allow connection 
+    out_spec = getportspec(parent_node, output_port, :output)
+    out_spec.kind == :terminal && throw_warn && @warn "Output port $output_port is terminal and should not be connected" # Warn, but allow connection
+
+    #  Забирающий вход — только от отдающего выхода. Обратное направление
+    #  безопасно: выход, который отдал, кеша не держит, и портить у него
+    #  нечего, поэтому отдающий порт можно подключить к обычному входу.
+    if getportspec(child_node, input_port, :input).handover && !out_spec.handover
+        throw_error ?
+            error("Input port $(input_port) of node $(input_id) takes ownership and can only be fed by a handover output port; $(output_port) of node $(output_id) is not one") :
+            return false
+    end
+
+    #  Отдающий порт отдаёт ровно одному: второй потребитель получил бы то,
+    #  что первый уже имеет право править на месте.
+    if out_spec.handover && haskey(model.outgoing, output_id)
+        for cid in model.outgoing[output_id]
+            model.connections[cid].output_port == output_port || continue
+            throw_error ?
+                error("Output port $(output_port) of node $(output_id) hands its value over and already has a consumer; a handover port allows exactly one connection") :
+                return false
+        end
+    end
 
     if haskey(model.incoming, input_id) # check if child node has incoming connections
         if length(model.incoming[input_id]) > 0
@@ -1759,17 +1842,24 @@ storage. Identifiers come from a monotonically increasing counter and are
 never reused.
  
 # Notes
-A node whose status is neither `:idle` nor `:clean` is reset on insertion,
-which clears its settings, input buffers and execution state. A freshly
-created node and an already computed node are inserted unchanged, so a node
-may be configured before or after it joins the workflow.
+A node whose status is neither `:idle` nor `:clean` is reset on insertion, at
+`reset`, which is one of [`RESET_LEVELS`](@ref). The default `:full` drops the
+results of whatever the node did before and **keeps its settings**, so a node
+may be configured before or after it joins the workflow. A freshly created node
+and an already computed node are inserted unchanged.
+ 
+Pass `reset = :all` to empty the node on insertion, which is what versions
+before 0.5.0 did unconditionally, or `reset = :none` to insert it exactly as
+it is.
  
 # Returns
 Assigned node identifier (`Int`).
 """
-function add_node!(model::Workflow, node::AbstractDataNode)
-    # If Node node is not in :idle or :clean state, reset it to clear any previous execution state.
-    if !(getstatus(node) in [:idle, :clean]) reset!(node) end
+function add_node!(model::Workflow, node::AbstractDataNode; reset::Symbol = :full)
+    #  Узел, который уже что-то считал, нельзя вносить с результатами
+    #  прошлой жизни — но и настройки у него отбирать незачем.
+    r = resetrank(reset)
+    if r > 1 && !(getstatus(node) in (:idle, :clean)) reset_node!(node, r) end
     id = model.n_iter += 1
     # Версия графа
     model.ver += 1
@@ -1820,38 +1910,71 @@ end
 
 
 """
-    reset!(model::Workflow; soft::Bool = false)
+    RESET_LEVELS
 
-Invalidate the whole workflow.
+How much [`reset!`](@ref) throws away, from nothing to everything, in order.
+Each level does what the one before it does and more:
 
-Zeroes the execution counter `exec_n` of every node, then applies
-[`mark_dirty!`](@ref) to each of them, forwarding `soft`:
+| level | clears, on top of the level before | keeps |
+|:---|:---|:---|
+| `:none` | nothing | everything |
+| `:status` | the status, which becomes `:dirty` | everything else |
+| `:soft` | `exec_n`, the stop flag | data, `ready_ports`, every buffer, settings |
+| `:full` | cached output data, `ready_ports`, the buffers of `:feedback` ports | settings, the other buffers, the node log |
+| `:inputs` | every remaining input buffer | settings |
+| `:all` | settings, the node log, `execution_id`; the status becomes `:idle` | nothing - the node is as new |
 
-- `soft = false` (default): statuses become `:dirty`, cached output data and
-  `ready_ports` are dropped, and the buffers of `:feedback` input ports are
-  cleared;
-- `soft = true`: only statuses are reset; cached output data and the feedback
-  buffers survive.
+The same words name the `reset_mode` of [`scheduler!`](@ref), which uses the
+first four.
 
-Clearing the feedback buffers is what makes a full reset a full reset for a
+Clearing the feedback buffers at `:full` is what makes a full reset full for a
 cyclic workflow: those buffers hold the state of the last turn, and a loop head
 that still finds it there resumes the previous run instead of starting a new
-one. `soft = true` keeps them on purpose - that is how state is carried between
+one. `:soft` keeps them on purpose - that is how state is carried between
 [`scheduler!`](@ref) calls.
+
+`:full` and `:inputs` split the buffers between them, so `:inputs` is the level
+that leaves none behind.
+"""
+const RESET_LEVELS = (:none, :status, :soft, :full, :inputs, :all)
+
+#  Уровень в номер: в горячем пути сравниваются целые, а не символы.
+function resetrank(level::Symbol)
+    r = findfirst(isequal(level), RESET_LEVELS)
+    isnothing(r) && error("Unknown reset level $(repr(level)); one of $(RESET_LEVELS)")
+    return r
+end
+
+"""
+    reset!(model::Workflow; level::Symbol = :full, soft::Bool = false)
+
+Reset every node of the workflow to `level`, which is one of
+[`RESET_LEVELS`](@ref).
+
+The default `:full` is an invalidation, not a wipe: statuses become `:dirty`,
+cached output data, `ready_ports` and the buffers of `:feedback` ports are
+dropped, and **settings survive**. Reach for `:all` to empty a node completely,
+and for `:inputs` when the input buffers have to go but the configuration does
+not.
+
+`reset!(model; level = L)` is exactly a loop of `reset!(node; level = L)` over
+the nodes: the two scopes mean the same thing at the same level, including the
+default.
+
+`soft = true` is the older spelling of `level = :soft` and still works.
 
 This is the only place where `exec_n` is zeroed for the whole workflow, so the
 counter measures work done since the last `reset!` rather than since the last
-invalidation.
-
-Node settings, the buffers of `:normal` input ports and execution logs are kept
-in both cases - use `reset!(node)` for a full per-node reset.
+invalidation - [`mark_dirty!`](@ref) leaves it alone on purpose.
 
 # Returns
 The workflow.
 """
-function reset!(model::Workflow; soft::Bool = false)
+function reset!(model::Workflow; level::Symbol = :full, soft::Bool = false)
+    r = resetrank(soft ? :soft : level)
+    r == 1 && return model
     for (k, node) in model.nodes
-        reset_node!(node, soft)
+        reset_node!(node, r)
     end
     model
 end
@@ -1861,59 +1984,70 @@ end
 #  Поэтому в теле цикла каждое `node.state` было бы поиском поля в рантайме.
 #  Узел, переданный аргументом, компилируется по своему конкретному типу: на
 #  входе один динамический диспатч, внутри всё статически.
-function reset_node!(node::N, soft::Bool) where N <: AbstractDataNode
-    node.state.exec_n = 0
-    #  Признак остановки принадлежит прогону
-    node.state.stop   = false
-    mark_dirty!(node, soft)
-    soft && return node
-    # Полный сброс обязан снять состояние цикла
-    for ps in node.spec.input_ports
-        ps.kind == :feedback || continue
-        empty!(node.input_buffer[ps.label])
+function reset_node!(node::N, rank::Int) where N <: AbstractDataNode
+    rank == 1 && return node                              # :none
+    setstatus!(node, :dirty)                              # :status и выше
+    if rank >= 3                                          # :soft
+        node.state.exec_n = 0
+        #  Признак остановки принадлежит прогону, а не узлу.
+        node.state.stop   = false
+    end
+    if rank >= 4                                          # :full
+        empty!(node.state[:ready_ports])
+        empty!(node.data)
+        #  Полный сброс обязан снять состояние цикла.
+        for ps in node.spec.input_ports
+            ps.kind === :feedback || continue
+            empty!(node.input_buffer[ps.label])
+        end
+    end
+    if rank >= 5                                          # :inputs
+        for ps in node.spec.input_ports
+            ps.kind === :feedback && continue             # уже сняты выше
+            empty!(node.input_buffer[ps.label])
+        end
+    end
+    if rank >= 6                                          # :all
+        empty!(node.settings)
+        empty!(node.state[:log])
+        node.state.execution_id = 0
+        setstatus!(node, :idle)
     end
     return node
 end
 """
-    reset!(node::AbstractDataNode)
+    reset!(node::AbstractDataNode; level::Symbol = :full, soft::Bool = false)
  
-Reset node to its initial state.
+Reset one node to `level`, which is one of [`RESET_LEVELS`](@ref).
  
-Performs the following operations:
-- sets node status to `:idle`,
-- clears node settings,
-- clears the contents of every input buffer, keeping the port keys,
-- resets execution state (`exec_n`, `ready_ports`, `execution_id`, node log),
-- clears cached output data stored in `node.data`.
+The default is `:full`, the same as for a workflow: an invalidation that keeps
+the settings. **Before 0.5.0 `reset!(node)` meant `:all`** and emptied the node
+including its configuration; write `level = :all` where that is what you want.
  
-Unlike [`mark_dirty!`](@ref), this drops the node configuration as well, so it
-is meant for reusing a node object rather than for invalidation.
+`level = :all` sets the status to `:idle` rather than `:dirty`, because a node
+with nothing in it has not been invalidated, it has been emptied - that is the
+level for reusing a node object.
+ 
+`soft = true` is the older spelling of `level = :soft` and still works.
+ 
+[`mark_dirty!`](@ref) is not a level of this ladder: it is the primitive the
+engine propagates invalidation with, and it keeps `exec_n` and the stop flag
+that `:soft` already clears.
  
 # Returns
 The node.
 """
-function reset!(node::AbstractDataNode)
-    setstatus!(node, :idle)
-    empty!(node.settings)
-    #  Обходим порты спеки, а не сам контейнер: ключи буфера ей и так равны
-    #  (это проверяет `initbuffer!`), зато структуре не нужна итерация.
-    for ps in node.spec.input_ports; empty!(node.input_buffer[ps.label]); end
-    empty!(node.state)
-    empty!(node.data)
-    node
+function reset!(node::AbstractDataNode; level::Symbol = :full, soft::Bool = false)
+    reset_node!(node, resetrank(soft ? :soft : level))
 end
 """
     reset_status!(model::Workflow)
 
-Reset only node statuses.
+Reset only node statuses: `reset!(model; level = :status)` under its own name.
 
-Sets status of every node in the workflow to `:dirty`.
+Sets status of every node in the workflow to `:dirty` and touches nothing else.
 """
-function reset_status!(model::Workflow)
-    for (k, v) in model.nodes
-        setstatus!(v, :dirty)
-    end 
-end
+reset_status!(model::Workflow) = reset!(model; level = :status)
 
 
 """
@@ -1937,6 +2071,13 @@ This function intentionally does **not** clear:
 - execution logs.
 - execution counters/state metadata.
  
+That last line is why `mark_dirty!` is **not** a level of
+[`RESET_LEVELS`](@ref): `:soft`, which throws away less in every other
+respect, already zeroes `exec_n` and the stop flag. This function is the
+primitive invalidation propagates with - see
+[`invalidate_downstream!`](@ref) - and losing the count of a subtree that was
+merely invalidated would be wrong.
+ 
 # Returns
 The node.
 """
@@ -1952,7 +2093,7 @@ function mark_dirty!(node::AbstractDataNode, soft::Bool)
     return node
 end
 """
-    request_stop!(node::AbstractDataNode)
+    request_stop!(node::AbstractDataNode, flag::Bool = true)
 
 Ask the scheduler to end the run as soon as this node finishes.
 
@@ -1990,17 +2131,100 @@ Which node stopped a run is an ordinary query afterwards:
 
 See also [`isstoprequested`](@ref).
 """
-request_stop!(node::AbstractDataNode) = (request_stop!(node.state); node)
-request_stop!(st::NodeState) = (st.stop = true; st)
-request_stop!(st::AbstractNodeState) = error("Node state of type $(typeof(st)) has no `stop` field; `request_stop!` needs a `NodeState`")
+request_stop!(node::AbstractDataNode, flag::Bool = true) = (request_stop!(node.state, flag); node)
+request_stop!(st::NodeState, flag::Bool = true) = (st.stop = flag; st)
+request_stop!(st::AbstractNodeState, flag::Bool = true) = error("Node state of type $(typeof(st)) has no `stop` field; `request_stop!` needs a `NodeState`")
+
+"""
+    hasproduced(node::AbstractDataNode) -> Bool
+
+Whether the node ran successfully, whatever became of its cached outputs:
+`:clean` or `:released`.
+
+This is the question [`isready`](@ref) asks about a producer. A node whose
+value has been taken is not `:clean` - it has no cache to republish - but the
+consumer already holds what it needs, so for readiness the two statuses mean
+the same thing. The question "can you be republished" is a
+different one, and only `:clean` answers it.
+
+Not part of the public API.
+"""
+hasproduced(node::AbstractDataNode) = (s = getstatus(node); s === :clean || s === :released)
+
+"""
+    handover_filled(node::AbstractDataNode)
+
+Labels of the node's `handover` input ports that hold something right now, or
+`nothing` when the node has no such port - which is almost every node, and the
+reason this allocates nothing for them.
+
+[`execute_node!`](@ref execute!) takes this before running the node's body and
+hands it to [`release_taken!`](@ref) afterwards: the difference is how the
+engine learns that the node really took a value, without the node being able
+to say so and without trusting it if it did.
+
+Not part of the public API.
+"""
+function handover_filled(node::N) where N <: AbstractDataNode
+    filled = nothing
+    for ps in node.spec.input_ports
+        ps.handover || continue
+        isempty(node.input_buffer[ps.label]) && continue
+        isnothing(filled) && (filled = Symbol[])
+        push!(filled, ps.label)
+    end
+    return filled
+end
+
+"""
+    release_taken!(model::Workflow, node, id::Int, filled)
+
+Release the producer behind every `handover` input the node has just emptied.
+
+`filled` is what [`handover_filled`](@ref) saw before the node ran. A port that
+held something then and holds nothing now was taken - with
+[`take!`](@ref take!(::AbstractDataNode, ::Symbol)), the only thing that
+empties a buffer from inside a node - so the value is now the consumer's alone.
+The producer loses its cached copy of that port and, if it was `:clean`, turns
+`:released`.
+
+The status therefore says what actually happened, not what was declared:
+a `handover` output whose consumer never took anything stays `:clean` and keeps
+its cache, and a producer is released during the **consumer's** execution, not
+its own.
+
+Called from the engine, which is what makes it legal: a node cannot reach
+another node, and nothing here runs inside user code.
+
+Not part of the public API.
+"""
+function release_taken!(model::Workflow, node::N, id::Int, filled) where N <: AbstractDataNode
+    isnothing(filled) && return nothing
+    for label in filled
+        isempty(node.input_buffer[label]) || continue        # не забрали
+        for cid in get(model.incoming, id, Int[])
+            c = model.connections[cid]
+            c.input_port === label || continue
+            parent = getnode(model, c.output_id)
+            delete!(parent.data, c.output_port)
+            getstatus(parent) === :clean && setstatus!(parent, :released)
+        end
+    end
+    return nothing
+end
 
 """
     isstoprequested(node::AbstractDataNode) -> Bool
 
-Whether [`request_stop!`](@ref) was called on this node and not yet cleared by
-[`reset!`](@ref). A node whose state type has no `stop` field - a custom
+Whether [`request_stop!`](@ref) was called on this node and not yet cleared,
+either by `request_stop!(node, false)` or by [`reset!`](@ref) at `:soft` or
+above. A node whose state type has no `stop` field - a custom
 `AbstractNodeState` - always reports `false`, so a stop can never be requested
 by accident.
+
+`scheduler!(model; reset_mode = :none)` resets nothing, so a stop raised in an
+earlier run is still raised: that run ends at the same node again. Lower the
+flag with `request_stop!(node, false)` when that is not what you meant.
 """
 isstoprequested(node::AbstractDataNode) = isstoprequested(node.state)
 isstoprequested(st::NodeState) = st.stop
@@ -2064,7 +2288,7 @@ function invalidate_stale_optional!(model::Workflow, id::Int)
         ps  = getportspec(node, con.input_port, :input)
         ps.kind == :normal || continue
         ps.required        && continue
-        getstatus(model, con.output_id) == :clean && continue
+        hasproduced(getnode(model, con.output_id)) && continue
         invalidate_buffer!(node, con.input_port, con_id)
     end
     return model
@@ -2212,38 +2436,95 @@ optional port's buffer, which [`invalidate_stale_optional!`](@ref) clears.
   immediately; it just never gets enqueued unless something feeds it.
 """
 function isready(model::Workflow, id::Int; wait_optional::Bool = true)
-    return isready_node(model, getnode(model, id), id, wait_optional)
+    return isready_node(model, id, wait_optional)
 end
 
-function isready_node(model::Workflow, node::N, id::Int,
-                      wait_optional::Bool) where N <: AbstractDataNode
-    connections = get(model.incoming, id, Int[])
-    for con_id in connections
-        con = getconnection(model, con_id)
-        ps = getportspec(node, con.input_port, :input)
-        ps.kind == :normal || continue
-        isparentready(getnode(model, con.output_id), con, ps, wait_optional) || return false
+function isready_node(model::Workflow, id::Int, wait_optional::Bool)
+    deps = get(readydeps(model), id, nothing)
+    #  Узлу без обязательств ждать нечего, и пустого вектора для этого не надо.
+    isnothing(deps) && return true
+    for (parent_id, port, required) in deps
+        isparentready(getnode(model, parent_id), port, required, wait_optional) || return false
     end
     return true
 end
 
-#  Родитель у каждой связи свой, поэтому ему нужен отдельный барьер.
-function isparentready(parent_node::N, con::NodeConnection, ps::PortSpec,
+#  БАРЬЕР ФУНКЦИИ, и он здесь несущий. Производитель достаётся из
+#  `Dict{Int, DataNode}`, то есть приходит абстрактно типизированным, а
+#  обращений к нему в теле два. Без барьера каждое из них — свой динамический диспатч, и на
+#  узле с широким MultiPort это дороже, чем всё, что даёт кеш обязательств:
+#  замерено, веер на 64 связи 1481 нс против 2603 нс.
+function isparentready(parent::N, port::Symbol, required::Bool,
                        wait_optional::Bool) where N <: AbstractDataNode
-        if ps.required
-            getstatus(parent_node) != :clean && return false # crytical for cycling
-            #  Родитель :clean, но в ЭТОТ порт на своём исполнении не публиковал: значения нет и не будет.
-            # Для обязательного порта это значит "не готов2, и узел не исполняется — иначе он посчитал бы на nothing.
-            (con.output_port in getstate(parent_node, :ready_ports)) || return false
-        elseif wait_optional
-            #  Отсутствие значения на необязательном порту законно, на
-            #  нем и стоит условное вычисление. Но ждать производителя
-            #  все равно надо, пока он может отработать: иначе `nothing`
-            #  значит не "нечего ждать", а "еще не посчитано".
-            getstatus(parent_node) != :clean && return false
-        end
+    if required
+        #  Производитель не отработал — ждём. Критично для цикла. `:released`
+        #  годится наравне с `:clean`: он отработал и отдал, значение уже в
+        #  нашем буфере, а кеша у него нет — это другой вопрос.
+        hasproduced(parent) || return false
+        #  Отработал, но в ЭТОТ порт на своём исполнении не публиковал:
+        #  значения нет и не будет, а считать на nothing обязательный вход не
+        #  должен.
+        port in getstate(parent, :ready_ports) || return false
+    elseif wait_optional
+        #  Отсутствие значения на необязательном порту законно, на нём и стоит
+        #  условное вычисление. Но ждать производителя всё равно надо, пока он
+        #  может отработать: иначе `nothing` значит не «нечего ждать», а «ещё
+        #  не посчитано».
+        hasproduced(parent) || return false
+    end
     return true
 end
+
+"""
+    readydeps(model::Workflow) -> Dict{Int, Vector{Tuple{Int, Symbol, Bool}}}
+
+Readiness obligations of every node, cached on `model.ver` in
+[`GraphCache`](@ref).
+
+One pass over the connections resolves, for each node, what [`isready`](@ref)
+has to check: for every `:normal` incoming connection a triple of the producer
+id, the output port the value comes from, and whether that port is `required`.
+
+The triple is plain numbers and a symbol, so it is a concrete type and the
+vector holds it inline. Keeping the producer node itself instead of its id
+would save a lookup per check and cost a boxed element per obligation: a tuple
+holding an abstractly typed node is not a concrete type. Ports of kind `:feedback`
+and `:error` are left out here, which is what makes a cycle runnable - see
+[`isready`](@ref).
+
+Without it the predicate re-derives all of that on every call: a connection
+lookup and a linear search through the port specification per edge, on a path
+the scheduler walks once per node in [`DAW`](@ref) and once per queue pop in
+[`ABW`](@ref).
+
+Measured, median of three runs: [`isready`](@ref) on one node of a chain 46 ns
+against 16, on a node with sixteen connections on one `MultiPort` 374 ns
+against 174, with sixty-four 1510 ns against 730. A whole `DAW` run on a chain
+of a thousand nodes goes from 0.57 ms to 0.52 ms. The obligations are built in
+one pass and reused until the next edit.
+
+The order of the obligations does not matter - the check is a conjunction - but
+they are built in ascending connection id anyway, so a failure reported from
+the predicate does not depend on `Dict` iteration order.
+
+Not part of the public API.
+"""
+function readydeps(model::Workflow)
+    model.ver == model.graph.rd_ver && return model.graph.ready
+    d = Dict{Int, Vector{Tuple{Int, Symbol, Bool}}}()
+    for cid in sort!(collect(keys(model.connections)))
+        c    = model.connections[cid]
+        node = model.nodes[c.input_id]
+        ps   = getportspec(node, c.input_port, :input)
+        ps.kind == :normal || continue
+        push!(get!(d, c.input_id, Tuple{Int, Symbol, Bool}[]),
+              (c.output_id, c.output_port, ps.required))
+    end
+    model.graph.rd_ver = model.ver
+    model.graph.ready  = d
+    return d
+end
+
 """
     validate_node(node::AbstractDataNode)
     validate_node(model::Workflow, node_id::Int)

@@ -197,6 +197,119 @@ end
     unregister_all!()
 end
 
+# --------------------------------------------------------------------------
+@testset "R8. кодек значений: нефинитные числа             " begin
+    #  Первое прямое покрытие кодека. В JSON нет ни NaN, ни Inf: голое такое
+    #  число строгий писатель отвергает целиком, нестрогий отдаёт текст,
+    #  который уже не JSON. Поэтому нефинитное уходит строкой под своим тегом.
+    for (x, s) in ((NaN, "NaN"), (Inf, "Inf"), (-Inf, "-Inf"))
+        d = value_to_dict(x)
+        @test d isa Dict
+        @test d["t"] == "Float64"
+        @test d["v"] == s                       # именно строка, не число
+        back = dict_to_value(d)
+        @test typeof(back) === Float64
+        @test isnan(x) ? isnan(back) : back == x
+    end
+    #  Финитное остаётся голым, как было в формате 1.
+    @test value_to_dict(1.5) === 1.5
+    @test value_to_dict(0.0) === 0.0
+
+    #  Узкие типы идут тем же путём.
+    for T in (Float32, Float16)
+        d = value_to_dict(T(Inf))
+        @test d["t"] == string(T) && d["v"] == "Inf"
+        @test dict_to_value(d) === T(Inf)
+    end
+
+    #  Набор строк закрыт: разбора произвольного текста нет.
+    @test_throws ErrorException dict_to_value(Dict("t" => "Float64", "v" => "1e300"))
+end
+
+# --------------------------------------------------------------------------
+@testset "R9. в снимке не остаётся незаписываемых чисел    " begin
+    #  Инвариант без зависимости от JSON-пакета: пройти снимок насквозь и
+    #  убедиться, что ни одного голого нефинитного числа в нём нет. Именно
+    #  это и означает «готов к сериализации в текст».
+    function badfloats(x, path = "", acc = String[])
+        if x isa AbstractFloat
+            isfinite(x) || push!(acc, path)
+        elseif x isa AbstractDict
+            for (k, v) in x; badfloats(v, path * "/" * string(k), acc); end
+        elseif x isa Union{AbstractVector, Tuple}
+            for (i, v) in enumerate(x); badfloats(v, path * "[$i]", acc); end
+        end
+        acc
+    end
+
+    #  Спека объявляет все ключи: settings_to_dict пишет только объявленные,
+    #  и на узкой спеке проверка оказалась бы пустой.
+    wide = NodeSpec("Const", PortSpec[], [PortSpec("value", Int, :out)],
+                    [:value, :thr, :lo, :vec, :pair, :inner])
+    unregister_all!()
+    w = Workflow(7)
+    n = add_node!(w, DataNode(ConstNode, wide))
+    setsettings!(w, n, Dict(:value => 1,
+                            :thr   => NaN,
+                            :lo    => -Inf,
+                            :vec   => [1.0, Inf],
+                            :pair  => (NaN, 2.0),
+                            :inner => Dict(:deep => Inf),
+                            :undeclared => Inf))
+    register_node!(DataNode(ConstNode, wide))
+    d = workflow_to_dict(w)
+    @test isempty(badfloats(d))
+    #  Непустая проверка: нефинитные значения в снимке есть, просто тегами.
+    sv = d["nodes"][string(n)]["settings_values"]
+    @test sv["thr"] == Dict("t" => "Float64", "v" => "NaN")
+    #  Необъявленный ключ в снимок не попадает вовсе.
+    @test !haskey(sv, "undeclared")
+
+    #  И всё это возвращается тем же.
+    s = getnode(dict_to_workflow(d), n).settings
+    @test isnan(s[:thr])
+    @test s[:lo] == -Inf
+    @test s[:vec][2] == Inf
+    @test isnan(s[:pair][1]) && s[:pair][2] == 2.0
+    @test s[:inner][:deep] == Inf
+    unregister_all!()
+end
+
+# --------------------------------------------------------------------------
+@testset "R10. снимок объявляет, что в нём есть            " begin
+    unregister_all!()
+    w = Workflow(8)
+    add_node!(w, DataNode(ConstNode, spec_const()))
+
+    d = workflow_to_dict(w)
+    @test d["format_version"] == SNAPSHOT_FORMAT_VERSION == 2
+    c = snapshot_contents(d)
+    @test c.format_version == 2
+    @test c.values === true          # значения пишутся по умолчанию
+    @test c.state  === false         # состояние — нет
+    @test c.audit_log === false
+
+    c2 = snapshot_contents(workflow_to_dict(w; values = false, state = true))
+    @test c2.values === false && c2.state === true
+
+    #  Файл формата 1 ничего не объявляет, и честный ответ — «не известно»,
+    #  а не догадка. Про журнал ответить можно: ключ либо есть, либо нет.
+    d1 = workflow_to_dict(w)
+    delete!(d1, "contents")
+    d1["format_version"] = 1
+    c3 = snapshot_contents(d1)
+    @test c3.format_version == 1
+    @test c3.values === missing && c3.state === missing
+    @test c3.audit_log === false
+    #  и он по-прежнему читается
+    register_node!(DataNode(ConstNode, spec_const()))
+    @test dict_to_workflow(d1) isa Workflow
+    #  а из будущего — нет
+    d1["format_version"] = SNAPSHOT_FORMAT_VERSION + 1
+    @test_throws ErrorException dict_to_workflow(d1)
+    unregister_all!()
+end
+
 end # @testset "СЕРИАЛИЗАЦИЯ"
 
 include(joinpath(TEST_DIR, "serialization_state.jl"))

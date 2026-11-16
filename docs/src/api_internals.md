@@ -17,6 +17,10 @@ means the public API is missing something.
 ## Graph, invalidation, readiness
 
 ```@docs
+readydeps
+hasproduced
+handover_filled
+release_taken!
 workflowtypestr
 check_connection_validity
 reset_status!

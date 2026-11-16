@@ -139,13 +139,32 @@ end
     @test getstatus(computed) == :clean
     @test getdata(computed, :out) == 4
 
-    # Любой другой статус — полный сброс.
+    #  Любой другой статус — сброс на :full: результаты прошлой жизни
+    #  снимаются, НАСТРОЙКИ ОСТАЮТСЯ. До 0.5.0 здесь стиралось всё.
     stale = DataNode(ConstNode, spec_const())
     setsettings_unsafe!(stale, Dict(:value => 99))
+    setdata!(stale, :out, 777)
     setstatus!(stale, :dirty)
     add_node!(w, stale)
-    @test getstatus(stale) == :idle
-    @test isempty(stale.settings)
+    @test getstatus(stale) == :dirty
+    @test stale.settings == Dict(:value => 99)
+    @test isempty(stale.data)
+
+    #  Прежнее поведение доступно по ключу.
+    wiped = DataNode(ConstNode, spec_const())
+    setsettings_unsafe!(wiped, Dict(:value => 99))
+    setstatus!(wiped, :dirty)
+    add_node!(w, wiped; reset = :all)
+    @test getstatus(wiped) == :idle
+    @test isempty(wiped.settings)
+
+    #  И отказ от сброса вовсе.
+    kept = DataNode(ConstNode, spec_const())
+    setsettings_unsafe!(kept, Dict(:value => 99))
+    setstatus!(kept, :failed)
+    add_node!(w, kept; reset = :none)
+    @test getstatus(kept) == :failed
+    @test kept.settings == Dict(:value => 99)
 end
 
 # --------------------------------------------------------------------------

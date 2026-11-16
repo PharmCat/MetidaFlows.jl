@@ -162,6 +162,10 @@ target node and all downstream nodes are invalidated via
 - The keys are **not** checked against the list in [`NodeSpec`](@ref): that
   list is a declaration, and an unknown key is simply stored. Enforce what
   matters in [`validate_settings`](@ref).
+- An undeclared key is stored but **not written to a snapshot**:
+  [`settings_to_dict`](@ref) writes only the declared ones. So a setting kept
+  off the list lives for as long as the object does and no longer, which is
+  the one place where the asymmetry has a consequence.
  
 # Returns
 The node.
