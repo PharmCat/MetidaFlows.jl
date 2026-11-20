@@ -63,6 +63,7 @@ TEST_GROUPS = (
     (id = "events",        file = "test_events.jl", descr = "события исполнения: начало и завершение узла"),
     (id = "handover",     file = "test_handover.jl", descr = "передача владения значением и статус :released"),
     (id = "restore",       file = "test_restore.jl", descr = "вставка с заданным id и замена настроек целиком"),
+    (id = "replace",       file = "test_replace.jl", descr = "замена узла на месте: Base.replace!"),
     (id = "typed",         file = "test_typed.jl", descr = "типизированные контейнеры узла вместо Dict"),
     (id = "display",       file = "test_display.jl", descr = "методы show"),
     (id = "getmeta",       file = "test_getmeta.jl", descr = "метаданные портов: getmeta / getinputmeta"),

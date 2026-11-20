@@ -261,7 +261,8 @@ The names [`audit_event_to_dict`](@ref) writes and
 error, and nothing read from a file is resolved to a type.
 """
 const AUDIT_EVENT_NAMES = ("NodeAdded", "NodeDeleted", "ConnectionAdded",
-                           "ConnectionDeleted", "SettingsChanged")
+                           "ConnectionDeleted", "SettingsChanged",
+                           "NodeReplaced")
 
 """
     audit_event_to_dict(e::AbstractAuditEvent) -> Dict{String, Any}
@@ -279,6 +280,9 @@ audit_event_to_dict(e::NodeAdded) =
     Dict{String, Any}("event" => "NodeAdded", "id" => e.id, "type" => e.type)
 audit_event_to_dict(e::NodeDeleted) =
     Dict{String, Any}("event" => "NodeDeleted", "id" => e.id)
+audit_event_to_dict(e::NodeReplaced) =
+    Dict{String, Any}("event" => "NodeReplaced", "id" => e.id,
+                      "type" => e.type, "previous" => e.previous)
 audit_event_to_dict(e::ConnectionAdded) =
     Dict{String, Any}("event" => "ConnectionAdded", "id" => e.id,
                       "output_id" => e.output_id, "output_port" => String(e.output_port),
@@ -298,8 +302,9 @@ Rebuild one change-log record from the dictionary
 
 `d["event"]` must be one of [`AUDIT_EVENT_NAMES`](@ref); each is constructed
 explicitly from its own fields, so a file cannot name a type to build or a
-field to fill. Port labels and setting keys are accepted as `String` or
-`Symbol`, like the rest of the loader.
+field to fill. A `NodeReplaced` record only appears in format 3 and later.
+Port labels and setting keys are accepted as `String` or `Symbol`, like the
+rest of the loader.
 
 A `SettingsChanged` record with no `"replace"` key reads as a merge, which is
 what a record written before the key existed always was.
@@ -310,6 +315,8 @@ function dict_to_audit_event(d::Dict{String})
     sym(x) = x isa Symbol ? x : Symbol(x)
     if     name == "NodeAdded"         return NodeAdded(Int(d["id"]), String(d["type"]))
     elseif name == "NodeDeleted"       return NodeDeleted(Int(d["id"]))
+    elseif name == "NodeReplaced"      return NodeReplaced(Int(d["id"]),
+                                              String(d["type"]), String(d["previous"]))
     elseif name == "ConnectionAdded"   return ConnectionAdded(Int(d["id"]),
                                               Int(d["output_id"]), sym(d["output_port"]),
                                               Int(d["input_id"]),  sym(d["input_port"]))
@@ -348,6 +355,16 @@ the formats they are.
 
 So a snapshot travels forward between versions, never backward.
 
+# What changed in 3
+
+- the change log can carry [`NodeReplaced`](@ref), the record
+  [`replace!`](@ref replace!(::Workflow, ::AbstractDataNode, ::Int)) writes.
+  The event names are a closed set ([`AUDIT_EVENT_NAMES`](@ref)), so a reader
+  that does not know this one has to refuse the file rather than meet an
+  unknown name halfway through it - which is what the stamp is for. Nothing
+  else changed, and a snapshot without a replacement in its log is identical
+  to a format 2 one.
+
 # What changed in 2
 
 - a **non-finite** `Float64`, `Float32` or `Float16` is written as a tagged
@@ -361,9 +378,11 @@ So a snapshot travels forward between versions, never backward.
 
 A format 1 file reads unchanged: it carries no `"contents"`, which
 [`snapshot_contents`](@ref) reports as `missing` rather than guessing, and it
-cannot contain a tagged non-finite float because nothing wrote one.
+cannot contain a tagged non-finite float because nothing wrote one. A format 2
+file reads unchanged too: its log cannot hold a `NodeReplaced` record, because
+no version that wrote format 2 could produce one.
 """
-const SNAPSHOT_FORMAT_VERSION = 2
+const SNAPSHOT_FORMAT_VERSION = 3
 
 const VALUE_TYPES = Dict{String, Type}(
     "Any"     => Any,     "Bool"    => Bool,

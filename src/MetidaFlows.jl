@@ -181,6 +181,29 @@ struct ConnectionDeleted <: AbstractAuditEvent
 end
 
 """
+    NodeReplaced(id, type, previous) <: AbstractAuditEvent
+
+The node with id `id` was exchanged for another by
+[`replace!`](@ref replace!(::Workflow, ::AbstractDataNode, ::Int)), keeping
+every connection. `type` is the node type now at that id, `previous` the one
+it displaced, both as strings - see [`AbstractAuditEvent`](@ref) on why a type
+is never stored as a `Type`.
+
+`previous` is there so one record answers what happened. It could be found by
+scanning back to whatever last claimed this id, and a log that has to be read
+backwards to be understood is a log that gets misread.
+
+This is not [`NodeAdded`](@ref) twice: the identifier is not new, the
+connections are not new, and the wiring the replacement inherited is exactly
+what was there before.
+"""
+struct NodeReplaced <: AbstractAuditEvent
+    id::Int
+    type::String
+    previous::String
+end
+
+"""
     SettingsChanged(id, keys, replace = false) <: AbstractAuditEvent
 
 Settings of node `id` were written by [`setsettings!`](@ref). `keys` are the
@@ -1558,6 +1581,9 @@ include("getters.jl")
 
 # Include set*
 include("setters.jl")
+
+#  Замена узла на месте: Base.replace!
+include("replace.jl")
 
 # Include execute function
 include("execute.jl")
