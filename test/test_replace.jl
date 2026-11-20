@@ -1,0 +1,541 @@
+############################################################################
+#
+#  КАТЕГОРИЯ: ЗАМЕНА УЗЛА НА МЕСТЕ
+#
+#  `replace!(w, node, id)` — поставить другой узел под тем же
+#  идентификатором, сохранив связи. Через `delete_node!` + `add_node!` так
+#  нельзя: удаление узла уносит его связи, а вместе с ними порядок на
+#  мультипорте (он задаётся идентификаторами связей).
+#
+#  Назначение этого набора — закрепить два обещания:
+#
+#    1. всё, что может отказать, проверяется ДО первой записи, поэтому отказ
+#       оставляет граф в точности прежним. Поэтому тесты отказов идут первыми
+#       и каждый из них проверяет неизменность: узел на месте, `ver` прежний,
+#       число связей прежнее;
+#    2. при успехе узлы, которых замена не касается, сохраняют посчитанное:
+#       `exec_n` родителя не растёт, а потомки инвалидируются.
+#
+############################################################################
+
+import MetidaFlows: NodeAdded, NodeReplaced, SETTINGS, AbstractNodeSettings,
+                    setreadyports!, getstate, getexecn, getnode, getid,
+                    getporttype, reset!, mark_dirty!
+
+function rp_withaudit(f)
+    saved = SETTINGS[:audit]
+    try
+        SETTINGS[:audit] = true
+        f()
+    finally
+        SETTINGS[:audit] = saved
+    end
+end
+
+struct RpConst  <: AbstractNodeType end   # -> :out::Int, settings [:value]
+struct RpDouble <: AbstractNodeType end   # :in::Int -> :out::Int, ×2
+struct RpTriple <: AbstractNodeType end   # :in::Int -> :out::Int, ×3
+struct RpFloat  <: AbstractNodeType end   # :in::Float64 — чужой тип входа
+struct RpStrOut <: AbstractNodeType end   # :out::String — чужой тип выхода
+struct RpNoIn   <: AbstractNodeType end   # вообще без входов
+struct RpMulti  <: AbstractNodeType end   # MultiPort :in
+struct RpGiver  <: AbstractNodeType end   # отдающий выход
+struct RpTaker  <: AbstractNodeType end   # забирающий вход
+struct RpTyped  <: AbstractNodeType end   # настройки структурой
+struct RpLoop   <: AbstractNodeType end   # петля через :feedback
+
+mutable struct RpSettings <: AbstractNodeSettings
+    value::Int
+    RpSettings() = new(0)
+end
+MetidaFlows.nodesettings(::Type{RpTyped}) = RpSettings()
+
+MetidaFlows.execute_unsafe!(n::DataNode{RpConst}) =
+    (setdata!(n, :out, Int(get(n.settings, :value, 0))); setreadyports!(n, :out))
+MetidaFlows.execute_unsafe!(n::DataNode{RpDouble}) =
+    (setdata!(n, :out, 2 * getinputdata(n, :in)); setreadyports!(n, :out))
+MetidaFlows.execute_unsafe!(n::DataNode{RpTriple}) =
+    (setdata!(n, :out, 3 * getinputdata(n, :in)); setreadyports!(n, :out))
+MetidaFlows.execute_unsafe!(n::DataNode{RpFloat}) =
+    (setdata!(n, :out, 1); setreadyports!(n, :out))
+MetidaFlows.execute_unsafe!(n::DataNode{RpStrOut}) =
+    (setdata!(n, :out, "x"); setreadyports!(n, :out))
+MetidaFlows.execute_unsafe!(n::DataNode{RpNoIn}) =
+    (setdata!(n, :out, 0); setreadyports!(n, :out))
+MetidaFlows.execute_unsafe!(n::DataNode{RpMulti}) =
+    (setdata!(n, :out, sum(getinputdata(n, :in)); ); setreadyports!(n, :out))
+MetidaFlows.execute_unsafe!(n::DataNode{RpGiver}) =
+    (setdata!(n, :out, [1, 2, 3]); setreadyports!(n, :out))
+function MetidaFlows.execute_unsafe!(n::DataNode{RpTaker})
+    v = take!(n, :in)
+    setdata!(n, :out, v === nothing ? 0 : sum(v))
+    return setreadyports!(n, :out)
+end
+MetidaFlows.execute_unsafe!(n::DataNode{RpTyped}) =
+    (setdata!(n, :out, n.settings[:value]); setreadyports!(n, :out))
+function MetidaFlows.execute_unsafe!(n::DataNode{RpLoop})
+    prev = getinputdata(n, :prev)
+    k = prev === nothing ? 1 : prev + 1
+    k >= 3 && return setreadyports!(n)
+    setdata!(n, :out, k)
+    return setreadyports!(n, :out)
+end
+
+rp_const()  = NodeSpec("Const",  PortSpec[], [PortSpec("Out", Int, :out)], [:value])
+rp_double() = NodeSpec("Double", [PortSpec("In", Int, :in)], [PortSpec("Out", Int, :out)])
+rp_triple() = NodeSpec("Triple", [PortSpec("In", Int, :in)], [PortSpec("Out", Int, :out)])
+rp_float()  = NodeSpec("Float",  [PortSpec("In", Float64, :in)], [PortSpec("Out", Int, :out)])
+rp_strout() = NodeSpec("StrOut", [PortSpec("In", Int, :in)], [PortSpec("Out", String, :out)])
+rp_noin()   = NodeSpec("NoIn",   PortSpec[], [PortSpec("Out", Int, :out)])
+rp_multi()  = NodeSpec("Multi",  [PortSpec("In", Int, :in, MultiPort())],
+                                 [PortSpec("Out", Int, :out)])
+rp_giver()  = NodeSpec("Giver",  PortSpec[],
+                       [PortSpec("Out", Vector{Int}, :out; handover = true)])
+rp_plain()  = NodeSpec("Plain",  PortSpec[], [PortSpec("Out", Vector{Int}, :out)])
+rp_taker()  = NodeSpec("Taker",  [PortSpec("In", Vector{Int}, :in; handover = true)],
+                                 [PortSpec("Out", Int, :out)])
+rp_reader() = NodeSpec("Reader", [PortSpec("In", Vector{Int}, :in)],
+                                 [PortSpec("Out", Int, :out)])
+rp_typed()  = NodeSpec("Typed",  PortSpec[], [PortSpec("Out", Int, :out)], [:value])
+rp_loop()   = NodeSpec("Loop",   [PortSpec("Prev", Int, :prev; kind = :feedback)],
+                                 [PortSpec("Out", Int, :out)])
+rp_loopany()= NodeSpec("LoopAny",[PortSpec("Prev", Any, :prev; kind = :feedback)],
+                                 [PortSpec("Out", Any, :out)])
+
+"Граф: Const -> Double. Возвращает (w, источник, потребитель)."
+function rp_chain(; value = 21)
+    w = Workflow(1)
+    c = add_node!(w, DataNode(RpConst,  rp_const()))
+    d = add_node!(w, DataNode(RpDouble, rp_double()))
+    add_connection!(w, c, :out, d, :in)
+    setsettings!(w, c, Dict(:value => value))
+    (w = w, c = c, d = d)
+end
+
+#  Снимок того, что обязано не измениться после отказа.
+rp_snapshot(w) = (ver = w.ver, nodes = length(w.nodes), cons = length(w.connections),
+                  ids = sort!(collect(keys(w.nodes))),
+                  cids = sort!(collect(keys(w.connections))))
+
+@testset "ЗАМЕНА УЗЛА НА МЕСТЕ                             " begin
+
+# ======================================================================
+#  ОТКАЗЫ. Каждый проверяет и сообщение, и неизменность графа.
+# ======================================================================
+
+# --------------------------------------------------------------------------
+@testset "W1. узла с таким id нет                          " begin
+    g = rp_chain()
+    s = rp_snapshot(g.w)
+    @test_throws ErrorException replace!(g.w, DataNode(RpDouble, rp_double()), 99)
+    @test rp_snapshot(g.w) == s
+end
+
+# --------------------------------------------------------------------------
+@testset "W2. у замены нет нужного порта                   " begin
+    g = rp_chain()
+    old = getnode(g.w, g.d)
+    s   = rp_snapshot(g.w)
+
+    #  Входной порт :in, на котором висит связь, у замены отсутствует.
+    @test_throws ErrorException replace!(g.w, DataNode(RpNoIn, rp_noin()), g.d)
+    msg = try; replace!(g.w, DataNode(RpNoIn, rp_noin()), g.d); catch e; sprint(showerror, e); end
+    @test occursin("no input port", msg)
+    @test occursin("in", msg)
+    @test getnode(g.w, g.d) === old
+    @test rp_snapshot(g.w) == s
+
+    #  И то же с выходной стороны: у замены источника нет порта :out.
+    only_in = NodeSpec("OnlyIn", [PortSpec("In", Int, :in)], PortSpec[])
+    @test_throws ErrorException replace!(g.w, DataNode(RpDouble, only_in), g.c)
+    msg2 = try; replace!(g.w, DataNode(RpDouble, only_in), g.c); catch e; sprint(showerror, e); end
+    @test occursin("no output port", msg2)
+    @test rp_snapshot(g.w) == s
+end
+
+# --------------------------------------------------------------------------
+@testset "W3. типы не сходятся                             " begin
+    #  На входе: родитель отдаёт Int, у замены вход Float64.
+    g = rp_chain()
+    old = getnode(g.w, g.d)
+    s   = rp_snapshot(g.w)
+    @test_throws ErrorException replace!(g.w, DataNode(RpFloat, rp_float()), g.d)
+    msg = try; replace!(g.w, DataNode(RpFloat, rp_float()), g.d); catch e; sprint(showerror, e); end
+    @test occursin("Type mismatch", msg)
+    @test getnode(g.w, g.d) === old
+    @test rp_snapshot(g.w) == s
+
+    #  На выходе: замена источника отдаёт String, потомок ждёт Int.
+    g2 = rp_chain()
+    old2 = getnode(g2.w, g2.c)
+    s2   = rp_snapshot(g2.w)
+    strsrc = NodeSpec("StrSrc", PortSpec[], [PortSpec("Out", String, :out)])
+    @test_throws ErrorException replace!(g2.w, DataNode(RpStrOut, strsrc), g2.c)
+    @test getnode(g2.w, g2.c) === old2
+    @test rp_snapshot(g2.w) == s2
+end
+
+# --------------------------------------------------------------------------
+@testset "W4. SinglePort против двух входящих связей        " begin
+    #  У мультипорта две связи; замена на SinglePort должна отказать.
+    w = Workflow(1)
+    a = add_node!(w, DataNode(RpConst, rp_const())); setsettings!(w, a, Dict(:value => 1))
+    b = add_node!(w, DataNode(RpConst, rp_const())); setsettings!(w, b, Dict(:value => 2))
+    m = add_node!(w, DataNode(RpMulti, rp_multi()))
+    add_connection!(w, a, :out, m, :in)
+    add_connection!(w, b, :out, m, :in)
+    old = getnode(w, m)
+    s   = rp_snapshot(w)
+
+    @test_throws ErrorException replace!(w, DataNode(RpDouble, rp_double()), m)
+    msg = try; replace!(w, DataNode(RpDouble, rp_double()), m); catch e; sprint(showerror, e); end
+    @test occursin("SinglePort", msg)
+    @test occursin("2 connections", msg)
+    @test getnode(w, m) === old
+    @test rp_snapshot(w) == s
+
+    #  Замена на другой мультипорт — законна.
+    @test replace!(w, DataNode(RpMulti, rp_multi()), m) === old
+    scheduler!(w)
+    @test getdata(w, m, :out) == 3
+end
+
+# --------------------------------------------------------------------------
+@testset "W5. отдающий выход с двумя потребителями         " begin
+    #  Обычный выход на двух потребителей — замена на отдающий отказывает.
+    w = Workflow(1)
+    p = add_node!(w, DataNode(RpGiver, rp_plain()))
+    r1 = add_node!(w, DataNode(RpTaker, rp_reader()))
+    r2 = add_node!(w, DataNode(RpTaker, rp_reader()))
+    add_connection!(w, p, :out, r1, :in)
+    add_connection!(w, p, :out, r2, :in)
+    old = getnode(w, p)
+    s   = rp_snapshot(w)
+
+    @test_throws ErrorException replace!(w, DataNode(RpGiver, rp_giver()), p)
+    msg = try; replace!(w, DataNode(RpGiver, rp_giver()), p); catch e; sprint(showerror, e); end
+    @test occursin("hands its value over", msg)
+    @test occursin("2 connections", msg)
+    @test getnode(w, p) === old
+    @test rp_snapshot(w) == s
+end
+
+# --------------------------------------------------------------------------
+@testset "W6. правило handover с обеих сторон              " begin
+    #  Забирающий вход у замены, а кормит его обычный выход.
+    w = Workflow(1)
+    p = add_node!(w, DataNode(RpGiver, rp_plain()))
+    r = add_node!(w, DataNode(RpTaker, rp_reader()))
+    add_connection!(w, p, :out, r, :in)
+    old = getnode(w, r)
+    s   = rp_snapshot(w)
+    @test_throws ErrorException replace!(w, DataNode(RpTaker, rp_taker()), r)
+    msg = try; replace!(w, DataNode(RpTaker, rp_taker()), r); catch e; sprint(showerror, e); end
+    @test occursin("takes ownership", msg)
+    @test getnode(w, r) === old
+    @test rp_snapshot(w) == s
+
+    #  И обратное: потребитель забирает, а замену производителя ставим
+    #  обычную — тоже отказ, иначе инвариант остался бы нарушенным.
+    w2 = Workflow(1)
+    p2 = add_node!(w2, DataNode(RpGiver, rp_giver()))
+    t2 = add_node!(w2, DataNode(RpTaker, rp_taker()))
+    add_connection!(w2, p2, :out, t2, :in)
+    old2 = getnode(w2, p2)
+    s2   = rp_snapshot(w2)
+    @test_throws ErrorException replace!(w2, DataNode(RpGiver, rp_plain()), p2)
+    msg2 = try; replace!(w2, DataNode(RpGiver, rp_plain()), p2); catch e; sprint(showerror, e); end
+    @test occursin("takes ownership", msg2)
+    @test getnode(w2, p2) === old2
+    @test rp_snapshot(w2) == s2
+
+    #  Отдающий на отдающий — законно, и забор продолжает работать.
+    @test replace!(w2, DataNode(RpGiver, rp_giver()), p2) === old2
+    scheduler!(w2)
+    @test getdata(w2, t2, :out) == 6
+    @test getstatus(w2, p2) == :released
+end
+
+# --------------------------------------------------------------------------
+@testset "W7. настройки не подходят замене                 " begin
+    #  Главный тест на «до первой записи»: отказывает ПЕРЕНОС НАСТРОЕК, то
+    #  есть шаг после всех проверок портов. Граф обязан остаться прежним.
+    w = Workflow(1)
+    c = add_node!(w, DataNode(RpConst, rp_const()))
+    d = add_node!(w, DataNode(RpDouble, rp_double()))
+    add_connection!(w, c, :out, d, :in)
+    setsettings!(w, c, Dict(:value => 5, :weird => "строка"))
+    scheduler!(w)
+    @test getdata(w, d, :out) == 10
+
+    old = getnode(w, c)
+    s   = rp_snapshot(w)
+    #  У типизированного контейнера есть только поле value — ключ :weird
+    #  в него не ложится.
+    cand = DataNode(RpTyped, rp_typed())
+    @test getid(cand) == 0
+    @test_throws ErrorException replace!(w, cand, c)
+    msg = try; replace!(w, DataNode(RpTyped, rp_typed()), c); catch e; sprint(showerror, e); end
+    @test occursin("do not fit the replacement", msg)
+    @test occursin("weird", msg)
+
+    #  Отказ не коснулся ни графа, ни кандидата: id ему не выдан, то есть
+    #  до первой записи дело не дошло. Откат после подмены вернул бы граф,
+    #  но id у кандидата остался бы — это и различает «проверено заранее»
+    #  и «откачено потом».
+    @test getid(cand) == 0
+    @test getnode(w, c) === old
+    @test rp_snapshot(w) == s
+    #  И посчитанное не пострадало.
+    @test getstatus(w, c) == :clean
+    @test getdata(w, c, :out) == 5
+    @test getdata(w, d, :out) == 10
+
+    #  Без лишнего ключа та же замена проходит, и значение переносится.
+    setsettings!(w, c, Dict(:value => 7); replace = true)
+    @test replace!(w, DataNode(RpTyped, rp_typed()), c) === old
+    @test getnode(w, c).settings[:value] == 7
+    scheduler!(w)
+    @test getdata(w, d, :out) == 14
+end
+
+# --------------------------------------------------------------------------
+@testset "W8. тот же объект уже в графе                    " begin
+    g = rp_chain()
+    s = rp_snapshot(g.w)
+    other = getnode(g.w, g.c)
+    @test_throws ErrorException replace!(g.w, other, g.d)
+    msg = try; replace!(g.w, other, g.d); catch e; sprint(showerror, e); end
+    @test occursin("already in the workflow", msg)
+    @test rp_snapshot(g.w) == s
+
+    #  Замена узла на себя же законна: это «перечитать буферы».
+    self = getnode(g.w, g.d)
+    @test replace!(g.w, self, g.d) === self
+end
+
+# ======================================================================
+#  УСПЕХ
+# ======================================================================
+
+# --------------------------------------------------------------------------
+@testset "R1. связи, id и настройки сохраняются            " begin
+    g = rp_chain(value = 21)
+    scheduler!(g.w)
+    @test getdata(g.w, g.d, :out) == 42
+
+    cids = sort!(collect(keys(g.w.connections)))
+    old  = replace!(g.w, DataNode(RpTriple, rp_triple()), g.d)
+
+    @test old isa DataNode{RpDouble}            # вернулся вытесненный узел
+    @test getid(old) == g.d
+    @test getnode(g.w, g.d) isa DataNode{RpTriple}
+    @test getid(getnode(g.w, g.d)) == g.d
+    @test sort!(collect(keys(g.w.connections))) == cids   # связи те же
+    @test length(g.w.nodes) == 2
+
+    scheduler!(g.w; reset_mode = :none)
+    @test getdata(g.w, g.d, :out) == 63         # уже ×3
+    @test getexecn(g.w, g.c) == 1               # источник не пересчитывался
+
+    #  Настройки переносятся: у замены источника их не было.
+    old_c = replace!(g.w, DataNode(RpConst, rp_const()), g.c)
+    @test getnode(g.w, g.c).settings[:value] == 21
+    @test old_c isa DataNode{RpConst}
+end
+
+# --------------------------------------------------------------------------
+@testset "R2. буферы подтягиваются, родитель не считается  " begin
+    g = rp_chain(value = 4)
+    scheduler!(g.w)
+    @test getexecn(g.w, g.c) == 1
+
+    replace!(g.w, DataNode(RpTriple, rp_triple()), g.d)
+    #  Буфер нового узла уже наполнен тем, что родитель опубликовал.
+    @test getinputdata(getnode(g.w, g.d), :in) == 4
+
+    scheduler!(g.w; reset_mode = :none)
+    @test getdata(g.w, g.d, :out) == 12
+    @test getexecn(g.w, g.c) == 1               # и после прогона — один раз
+end
+
+# --------------------------------------------------------------------------
+@testset "R3. потомки инвалидируются                       " begin
+    #  Const -> Double -> Double: меняем середину, нижний обязан пересчитаться.
+    w = Workflow(1)
+    c = add_node!(w, DataNode(RpConst,  rp_const())); setsettings!(w, c, Dict(:value => 1))
+    m = add_node!(w, DataNode(RpDouble, rp_double()))
+    b = add_node!(w, DataNode(RpDouble, rp_double()))
+    add_connection!(w, c, :out, m, :in)
+    add_connection!(w, m, :out, b, :in)
+    scheduler!(w)
+    @test getdata(w, b, :out) == 4
+    @test getstatus(w, b) == :clean
+
+    replace!(w, DataNode(RpTriple, rp_triple()), m)
+    @test getstatus(w, b) == :dirty             # потомок инвалидирован
+    @test getdata(w, b, :out) === nothing
+
+    scheduler!(w; reset_mode = :none)
+    @test getdata(w, b, :out) == 6              # 1 ×3 ×2
+    @test getexecn(w, c) == 1
+end
+
+# --------------------------------------------------------------------------
+@testset "R4. версия графа и журнал правок                 " begin
+    g = rp_chain()
+    v = g.w.ver
+    replace!(g.w, DataNode(RpTriple, rp_triple()), g.d)
+    @test g.w.ver == v + 1                      # ровно на единицу
+
+    rp_withaudit() do
+        g2 = rp_chain()
+        n0 = length(g2.w.audit_log)
+        replace!(g2.w, DataNode(RpTriple, rp_triple()), g2.d)
+        @test length(g2.w.audit_log) == n0 + 1
+        #  Своё событие, и в одной записи видно, что чем стало.
+        @test g2.w.audit_log[end] == NodeReplaced(g2.d, "Main.RpTriple", "Main.RpDouble")
+        #  Круг через словарь сохраняет обе метки типов.
+        d = MetidaFlows.audit_event_to_dict(g2.w.audit_log[end])
+        @test d["event"] == "NodeReplaced"
+        @test d["type"] == "Main.RpTriple" && d["previous"] == "Main.RpDouble"
+        @test MetidaFlows.dict_to_audit_event(d) == g2.w.audit_log[end]
+    end
+    @test SETTINGS[:audit] === false
+end
+
+# --------------------------------------------------------------------------
+@testset "R5. петля: проверяются обе стороны связи         " begin
+    #  Узел связан сам с собой через :feedback. Обе стороны такой связи
+    #  после замены — новый узел, и проверять надо его.
+    w = Workflow(1; type = :ABW)
+    s = add_node!(w, DataNode(RpNoIn, rp_noin()))
+    l = add_node!(w, DataNode(RpLoop, rp_loop()))
+    add_connection!(w, l, :out, l, :prev)
+    old = getnode(w, l)
+    snap = rp_snapshot(w)
+
+    #  Замена без порта :prev отказывает, граф цел.
+    @test_throws ErrorException replace!(w, DataNode(RpNoIn, rp_noin()), l)
+    @test getnode(w, l) === old
+    @test rp_snapshot(w) == snap
+
+    #  Замена с теми же портами проходит, и петля остаётся петлёй.
+    @test replace!(w, DataNode(RpLoop, rp_loop()), l) === old
+    @test length(w.connections) == 1
+    con = first(values(w.connections))
+    @test con.output_id == l && con.input_id == l
+
+    #  Сужение типа петли. Обе стороны связи после замены — новый узел, и
+    #  проверять надо его: если бы одна сторона бралась у СТАРОГО узла,
+    #  вышло бы `Any <: Int`, и законная замена была бы отвергнута.
+    w2 = Workflow(1; type = :ABW)
+    la = add_node!(w2, DataNode(RpLoop, rp_loopany()))
+    add_connection!(w2, la, :out, la, :prev)
+    oldany = getnode(w2, la)
+    @test replace!(w2, DataNode(RpLoop, rp_loop()), la) === oldany
+    @test getporttype(getnode(w2, la), :out, :output) === Int
+    @test getporttype(getnode(w2, la), :prev, :input) === Int
+end
+
+# --------------------------------------------------------------------------
+@testset "R6. порядок мультипорта сохраняется              " begin
+    #  Порядок на мультипорте задают идентификаторы связей — именно то, что
+    #  потерялось бы при delete_node! + add_node!.
+    w = Workflow(1)
+    a = add_node!(w, DataNode(RpConst, rp_const())); setsettings!(w, a, Dict(:value => 1))
+    b = add_node!(w, DataNode(RpConst, rp_const())); setsettings!(w, b, Dict(:value => 2))
+    m = add_node!(w, DataNode(RpMulti, rp_multi()))
+    c1 = add_connection!(w, a, :out, m, :in)
+    c2 = add_connection!(w, b, :out, m, :in)
+    scheduler!(w)
+    @test getinputdata(getnode(w, m), :in) == [1, 2]
+
+    replace!(w, DataNode(RpMulti, rp_multi()), m)
+    @test sort!(collect(keys(w.connections))) == sort!([c1, c2])
+    scheduler!(w; reset_mode = :none)
+    @test getinputdata(getnode(w, m), :in) == [1, 2]
+    @test getdata(w, m, :out) == 3
+end
+
+# --------------------------------------------------------------------------
+@testset "R7. замена всегда :dirty                         " begin
+    #  Решение владельца 20.11.2026: «замена в любом случае инвалидируется
+    #  (на всякий случай)». Свежий узел приходит :idle — становится :dirty.
+    g = rp_chain()
+    scheduler!(g.w)
+    fresh = DataNode(RpTriple, rp_triple())
+    @test getstatus(fresh) == :idle
+    replace!(g.w, fresh, g.d)
+    @test getstatus(g.w, g.d) == :dirty
+
+    #  Узел, который уже считал, приходит :clean — и всё равно :dirty, а
+    #  принесённый кеш снят: опубликовать его как своё этот граф не может.
+    w = Workflow(1)
+    c = add_node!(w, DataNode(RpNoIn,   rp_noin()))      # без настроек
+    d = add_node!(w, DataNode(RpDouble, rp_double()))
+    add_connection!(w, c, :out, d, :in)
+    scheduler!(w)
+    @test getdata(w, d, :out) == 0
+
+    #  Донор считает в своём графе и вынимается из него, иначе один объект
+    #  оказался бы под двумя идентификаторами.
+    w2 = Workflow(1)
+    did = add_node!(w2, DataNode(RpConst, rp_const()))
+    setsettings!(w2, did, Dict(:value => 100))
+    scheduler!(w2)
+    donor = getnode(w2, did)
+    @test getstatus(donor) == :clean && getdata(donor, :out) == 100
+    delete_node!(w2, did)
+
+    replace!(w, donor, c)
+    @test getstatus(w, c) == :dirty
+    @test getdata(w, c, :out) === nothing                # кеш снят
+    @test getstate(getnode(w, c), :ready_ports) == Symbol[]
+
+    #  Потомок пересчитается, исполнив замену здесь заново.
+    scheduler!(w; reset_mode = :none)
+    @test getdata(w, c, :out) == 100
+    @test getdata(w, d, :out) == 200
+    @test getexecn(w, c) == 2                            # один раз там, один здесь
+
+    #  Настройки переносятся со старого узла, и пересчёт идёт на них.
+    w3 = Workflow(1)
+    c3 = add_node!(w3, DataNode(RpConst, rp_const())); setsettings!(w3, c3, Dict(:value => 3))
+    d3 = add_node!(w3, DataNode(RpDouble, rp_double()))
+    add_connection!(w3, c3, :out, d3, :in)
+    scheduler!(w3)
+
+    w4 = Workflow(1)
+    did4 = add_node!(w4, DataNode(RpConst, rp_const()))
+    setsettings!(w4, did4, Dict(:value => 100))
+    scheduler!(w4)
+    donor4 = getnode(w4, did4)
+    delete_node!(w4, did4)
+
+    replace!(w3, donor4, c3)
+    @test getstatus(w3, c3) == :dirty
+    @test getnode(w3, c3).settings[:value] == 3          # 3, а не 100
+    scheduler!(w3; reset_mode = :none)
+    @test getdata(w3, d3, :out) == 6            # пересчитался на 3, не на 100
+end
+
+# --------------------------------------------------------------------------
+@testset "R8. вытесненный узел можно вернуть               " begin
+    g = rp_chain(value = 10)
+    scheduler!(g.w)
+    @test getdata(g.w, g.d, :out) == 20
+
+    old = replace!(g.w, DataNode(RpTriple, rp_triple()), g.d)
+    scheduler!(g.w; reset_mode = :none)
+    @test getdata(g.w, g.d, :out) == 30
+
+    back = replace!(g.w, old, g.d)              # ставим прежний узел назад
+    @test back isa DataNode{RpTriple}
+    @test getnode(g.w, g.d) === old
+    scheduler!(g.w; reset_mode = :none)
+    @test getdata(g.w, g.d, :out) == 20
+    @test getexecn(g.w, g.c) == 1
+end
+
+end # @testset "ЗАМЕНА УЗЛА НА МЕСТЕ"

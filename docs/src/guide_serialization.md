@@ -149,19 +149,20 @@ graph open: rebuilding renumbers every node, throws away what the untouched
 ones computed, and starts the change log over.
 
 Applying the difference between two saved versions to the graph you already
-have needs three things, and all three take the identifier or the state from
-the snapshot rather than inventing it:
+have needs four things, and each takes the identifier or the state from the
+snapshot rather than inventing it:
 
 ```julia
 add_node!(w, node; id = 13)                      # under the saved identifier
 add_connection!(w, 13, :out, 12, :ins; id = 22)  # likewise, and this fixes MultiPort order
 setsettings!(w, 13, saved_settings; replace = true)   # the whole configuration
+replace!(w, node, 7)                             # another node under the same identifier
 ```
 
-Each refuses an identifier already in use, raises the counter so later
-automatic insertions keep clear of it, writes its own change-log record, and
-invalidates downstream. A node the difference does not mention is not touched
-at all: it keeps its identifier, its cached result and its `:clean` status, and
+The first three refuse an identifier already in use, raise the counter so later
+automatic insertions keep clear of it, write their own change-log record, and
+invalidate downstream. A node the difference does not mention is not touched at
+all: it keeps its identifier, its cached result and its `:clean` status, and
 the next run does not recompute it.
 
 ```julia
@@ -175,6 +176,49 @@ for (id, c) in added_connections
     add_connection!(w, c.output_id, c.output_port, c.input_id, c.input_port; id = id)
 end
 ```
+
+#### Changing a node without rebuilding around it
+
+[`replace!`](@ref replace!(::Workflow, ::AbstractDataNode, ::Int)) is for the
+case the three above cannot cover: the node at some identifier is to become a
+different node, and everything wired to it has to stay wired. Deleting it would
+take its connections with it, and with them the connection identifiers that
+order a [`MultiPort`](@ref) - so the wiring would have to be rebuilt from the
+snapshot even where it did not change.
+
+```julia
+old = replace!(w, DataNode(FasterFilter, filter_spec()), 7)
+scheduler!(w; reset_mode = :none)      # node 7 and below recompute, nothing above
+```
+
+Every connection that touches the identifier is re-checked against the new node
+first, by the rules [`add_connection!`](@ref) applies when a connection is
+created: the port exists on the right side, the datatypes line up in both
+directions, a connected `handover` output has exactly one connection and a
+`handover` input is fed only by a `handover` output, and an input that is not a
+`MultiPort` has exactly one incoming connection. A node wired to itself through
+a `:feedback` port is checked with the replacement on **both** sides of that
+connection, which is what it will be.
+
+All of that happens before anything is written, and so does the next step: the
+old node's settings are copied onto the replacement, so a settings container
+that refuses a key fails with the graph still untouched. Then the replacement
+takes the place, is marked `:dirty`, has its input buffers filled from parents
+that already published, and the consumers below are invalidated. The displaced
+node is returned, so putting it back is the same call again.
+
+Two consequences worth stating:
+
+* **the replacement always recomputes.** It is marked `:dirty` whatever it
+  arrived as, and anything it was carrying - cached outputs, `ready_ports` - is
+  dropped: results computed somewhere else belong to other settings and another
+  graph. What is kept is the cheap part, the input buffers, so the nodes
+  *above* are not recomputed;
+* **the change log gets its own record**, [`NodeReplaced`](@ref)`(id, type,
+  previous)`, so one line says what became what. The event names are a closed
+  set, so a snapshot whose log holds one is stamped format 3: an older reader
+  refuses it outright instead of meeting a name it does not know halfway
+  through the file.
 
 **Working out the difference is yours, not the package's.** What counts as the
 same node when its type changed under the same identifier, whether a settings

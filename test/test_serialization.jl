@@ -282,9 +282,9 @@ end
     add_node!(w, DataNode(ConstNode, spec_const()))
 
     d = workflow_to_dict(w)
-    @test d["format_version"] == SNAPSHOT_FORMAT_VERSION == 2
+    @test d["format_version"] == SNAPSHOT_FORMAT_VERSION == 3
     c = snapshot_contents(d)
-    @test c.format_version == 2
+    @test c.format_version == 3
     @test c.values === true          # значения пишутся по умолчанию
     @test c.state  === false         # состояние — нет
     @test c.audit_log === false

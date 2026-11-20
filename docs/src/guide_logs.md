@@ -39,7 +39,8 @@ foreach(println, w.audit_log)
 
 Five events, one per mutator that takes a `Workflow`:
 [`NodeAdded`](@ref), [`NodeDeleted`](@ref), [`ConnectionAdded`](@ref),
-[`ConnectionDeleted`](@ref), [`SettingsChanged`](@ref). Cascades fall out of
+[`ConnectionDeleted`](@ref), [`SettingsChanged`](@ref),
+[`NodeReplaced`](@ref). Cascades fall out of
 the mutators rather than needing an event of their own: `delete_node!` removes
 the node's connections through `delete_connection!`, so the log above shows the
 `ConnectionDeleted` records and then the `NodeDeleted`.

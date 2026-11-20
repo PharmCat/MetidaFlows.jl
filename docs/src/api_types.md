@@ -37,6 +37,7 @@ over.
 AbstractDataNode
 AbstractAuditEvent
 NodeAdded
+NodeReplaced
 NodeDeleted
 ConnectionAdded
 ConnectionDeleted
