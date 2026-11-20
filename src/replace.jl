@@ -19,8 +19,7 @@ function check_replacement(model::Workflow, new::AbstractDataNode, id::Int,
     out = get(model.outgoing, id, Int[])
 
     #  Проход первый: все метки, которые упоминают связи, должны быть на
-    #  новом узле. Отдельным проходом, чтобы на петле сообщение называло
-    #  отсутствующий порт, а не падало внутри `getportspec`.
+    #  новом узле.
     for cid in inc
         l = model.connections[cid].input_port
         isportexist(new, l, :input) ||
@@ -33,8 +32,7 @@ function check_replacement(model::Workflow, new::AbstractDataNode, id::Int,
     end
 
     #  Сколько связей придёт на каждую входную метку и уйдёт с каждой
-    #  выходной. Именно это отличает замену от создания связи: правила те
-    #  же, а считать надо остающиеся связи, а не искать первую.
+    #  выходной. 
     incount  = Dict{Symbol, Int}()
     outcount = Dict{Symbol, Int}()
     for cid in inc
@@ -91,12 +89,11 @@ function check_replacement(model::Workflow, new::AbstractDataNode, id::Int,
 end
 
 #  Перенос настроек старого узла на новый. Зовётся ДО подмены, поэтому его
-#  отказ не требует откатывать граф — граф ещё не тронут.
+#  отказ не требует откатывать граф.
 #
 #  Ключи, которых у старого узла нет, у нового остаются: это перенос, а не
 #  замена целиком. Контейнер настроек может быть и `Dict`, и структурой
-#  (`AbstractNodeFields`) — оба отвечают на `keys` и `setindex!`, поэтому
-#  форма одна.
+#  (`AbstractNodeFields`).
 #
 function transfer_settings!(new::AbstractDataNode, old::AbstractDataNode)
     new === old && return new
@@ -114,7 +111,7 @@ end
 #  опубликовали. Правило взято у движка (`push_buffer_from!`): значение
 #  берётся, только если родитель `:clean` И порт есть в его `ready_ports`.
 #  Поэтому непубликованный порт не кладёт в буфер `nothing`, а `:released`
-#  родитель пропускается — кеша у него больше нет.
+#  родитель пропускается.
 function pull_buffers!(model::Workflow, new::N, id::Int) where N <: AbstractDataNode
     for cid in get(model.incoming, id, Int[])
         con    = model.connections[cid]
@@ -213,9 +210,7 @@ function Base.replace!(model::Workflow, node::AbstractDataNode, id::Int;
     isnodeexist(model, id) || error("Node $(id) doesn't exist")
     old = getnode(model, id)
 
-    #  Один объект под двумя идентификаторами — совмещение имён, которое
-    #  потом не отладить: правка узла по одному id меняла бы и другой.
-    #  Замена узла на себя же законна и означает «перечитать буферы».
+    #  Один объект под двумя идентификаторами не допустимо
     if node !== old
         for (k, n) in model.nodes
             n === node && error("This node object is already in the workflow under id $(k); replace! needs a node that is not in the graph")
@@ -229,16 +224,10 @@ function Base.replace!(model::Workflow, node::AbstractDataNode, id::Int;
     try
         setid!(node, id)
         model.nodes[id] = node
-        #  Решение владельца 20.11.2026: «замена в любом случае
-        #  инвалидируется (на всякий случай)». Поэтому безусловно, до
-        #  наполнения буферов: `mark_dirty!` снимает данные и `ready_ports`,
-        #  но входных буферов не касается, и такой порядок не зависит от
-        #  этой подробности.
+        #  замена в любом случае инвалидируется 
         mark_dirty!(node)
         pull_buffers!(model, node, id)
-        #  Инвалидация потомков, а не `invalidate_downstream!(model, id)`:
-        #  та возвращается сразу, если узел уже `:dirty` — а он теперь
-        #  всегда `:dirty`, — и потомки остались бы со старыми буферами.
+        #  Инвалидация потомков, а не `invalidate_downstream!(model, id)`
         for cid in get(model.outgoing, id, Int[])
             con   = model.connections[cid]
             child = getnode(model, con.input_id)
