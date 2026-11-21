@@ -22,7 +22,8 @@ import MetidaFlows: nodetype, replacespec!, replaceport!,
                     register_node!, unregister_all!, unregister_node!,
                     noderegkey, workflow_to_dict, dict_to_workflow, getregnodeinfo,
                     isportexist, getportspec, getposition, setposition!,
-                    NodeAdded, NodeReplaced, SpecChanged, SETTINGS,
+                    NodeAdded, NodeReplaced, NodeDeleted, SpecChanged, SETTINGS,
+                    nodekey, setspec_unsafe!, delete_node!,
                     AbstractNodeSettings,
                     setreadyports!, getstate, getexecn, getnode, getid,
                     getporttype, reset!, mark_dirty!
@@ -756,9 +757,10 @@ end
         ev = g.w.audit_log[end]
         @test ev == SpecChanged(g.d, "Main.RpDouble@any", "Main.RpDouble")
 
-        #  Смена узла по-прежнему пишет NodeReplaced.
+        #  Смена узла по-прежнему пишет NodeReplaced, и вытесненный интерфейс
+        #  назван своим ключом: узел был вариантом, а не базовой формой.
         replace!(g.w, DataNode(RpTriple, rp_triple()), g.d)
-        @test g.w.audit_log[end] == NodeReplaced(g.d, "Main.RpTriple", "Main.RpDouble")
+        @test g.w.audit_log[end] == NodeReplaced(g.d, "Main.RpTriple", "Main.RpDouble@any")
 
         #  Кодек в обе стороны, и имя - из закрытого набора.
         d = MetidaFlows.audit_event_to_dict(ev)
@@ -883,10 +885,17 @@ end
 
     @test noderegkey(DataNode(RpDouble, own)) == "Main.RpDouble"
     @test noderegkey(DataNode(RpDouble, var)) == "Main.RpDouble@any"
-    #  Та же форма портов, но другой объект - ключа нет: тождество, не равенство.
-    @test isnothing(noderegkey(DataNode(RpDouble, rp_double())))
-    #  Чужой тип с той же спекой - тоже нет.
+    #  Ключ ищется по ИНТЕРФЕЙСУ: копия спеки отвечает тем же ключом, иначе
+    #  его терял бы каждый узел, переживший фабрику, deepcopy или JLD2.
+    @test noderegkey(DataNode(RpDouble, rp_double())) == "Main.RpDouble"
+    @test noderegkey(DataNode(RpDouble, deepcopy(var))) == "Main.RpDouble@any"
+    #  А другая форма портов - не вариант: ключа нет.
+    @test isnothing(noderegkey(DataNode(RpDouble,
+        NodeSpec("Double", [PortSpec("In", Int, :in)],
+                           [PortSpec("Out", Int, :out), PortSpec("Dbg", Int, :dbg)]))))
+    #  Чужой тип с той же спекой - тоже нет: тип входит в сравнение.
     @test isnothing(noderegkey(DataNode(RpTriple, own)))
+    @test isnothing(noderegkey(DataNode(RpTriple, rp_double())))
 
     #  Занятый ключ и пустой ключ - отказ.
     @test_throws ErrorException register_node!(DataNode(RpDouble, var); key = "Main.RpDouble")
@@ -896,8 +905,155 @@ end
     #  Один объект под двумя ключами: ответ не зависит от обхода словаря.
     register_node!(DataNode(RpDouble, own); key = "Aaa.First")
     @test noderegkey(DataNode(RpDouble, own)) == "Main.RpDouble"   # свой ключ первым
+    @test noderegkey(DataNode(RpDouble, rp_double())) == "Main.RpDouble"  # и по содержимому
     unregister_node!("Main.RpDouble")
     @test noderegkey(DataNode(RpDouble, own)) == "Aaa.First"
+    @test noderegkey(DataNode(RpDouble, rp_double())) == "Aaa.First"
+    unregister_all!()
+end
+
+# --------------------------------------------------------------------------
+@testset "V10. что считается другим интерфейсом            " begin
+    #  Ключ ищется по содержимому, поэтому каждое поле спеки и порта обязано
+    #  участвовать в сравнении: иначе узел получит ключ чужого варианта и
+    #  вернётся из файла с другими портами.
+    base() = NodeSpec("Double", [PortSpec("In", Int, :in)],
+                                [PortSpec("Out", Int, :out)], [:k])
+    variants = Dict(
+        :name      => NodeSpec("Double wide", [PortSpec("In", Int, :in)],
+                                              [PortSpec("Out", Int, :out)], [:k]),
+        :portname  => NodeSpec("Double", [PortSpec("Input", Int, :in)],
+                                         [PortSpec("Out", Int, :out)], [:k]),
+        :label     => NodeSpec("Double", [PortSpec("In", Int, :input)],
+                                         [PortSpec("Out", Int, :out)], [:k]),
+        :datatype  => NodeSpec("Double", [PortSpec("In", Any, :in)],
+                                         [PortSpec("Out", Int, :out)], [:k]),
+        :kind      => NodeSpec("Double", [PortSpec("In", Int, :in)],
+                                         [PortSpec("Out", Int, :out; kind = :terminal)], [:k]),
+        :arity     => NodeSpec("Double", [PortSpec("In", Int, :in, MultiPort())],
+                                         [PortSpec("Out", Int, :out)], [:k]),
+        :required  => NodeSpec("Double", [PortSpec("In", Int, :in; required = false)],
+                                         [PortSpec("Out", Int, :out)], [:k]),
+        :handover  => NodeSpec("Double", [PortSpec("In", Int, :in)],
+                                         [PortSpec("Out", Int, :out; handover = true)], [:k]),
+        :settings  => NodeSpec("Double", [PortSpec("In", Int, :in)],
+                                         [PortSpec("Out", Int, :out)], [:k, :extra]),
+        :ports     => NodeSpec("Double", [PortSpec("In", Int, :in)],
+                                         [PortSpec("Out", Int, :out),
+                                          PortSpec("Dbg", Int, :dbg)], [:k]))
+
+    for (what, var) in variants
+        unregister_all!()
+        register_node!(DataNode(RpDouble, base()))
+        register_node!(DataNode(RpDouble, var); key = "Main.RpDouble@var")
+        #  Каждый узел называется своим ключом, и ни один - чужим.
+        @test noderegkey(DataNode(RpDouble, base())) == "Main.RpDouble"
+        @test noderegkey(DataNode(RpDouble, deepcopy(var))) == "Main.RpDouble@var"
+    end
+
+    #  Ничья между двумя чужими ключами решается наименьшим ключом, а не
+    #  порядком обхода словаря.
+    unregister_all!()
+    register_node!(DataNode(RpDouble, variants[:ports]))        # свой ключ - другая форма
+    register_node!(DataNode(RpDouble, base()); key = "Zzz.Double")
+    register_node!(DataNode(RpDouble, base()); key = "Aaa.Double")
+    @test noderegkey(DataNode(RpDouble, base())) == "Aaa.Double"
+    unregister_all!()
+end
+
+# --------------------------------------------------------------------------
+@testset "V7. журнал несёт ключ варианта                   " begin
+    unregister_all!()
+    rp_withaudit() do
+        base = rp_double()
+        var  = NodeSpec("Double", [PortSpec("In", Any, :in)], [PortSpec("Out", Int, :out)])
+        register_node!(DataNode(RpDouble, base))
+        register_node!(DataNode(RpDouble, var); key = "Main.RpDouble@any")
+
+        w = Workflow(1)
+        c = add_node!(w, DataNode(RpConst, rp_const()))
+        #  Узел внесён СРАЗУ вариантом - и журнал обязан назвать вариант:
+        #  восстановить его потом по графу нельзя, если узел удалят.
+        d = add_node!(w, DataNode(RpDouble, var))
+        @test w.audit_log[end] == NodeAdded(d, "Main.RpDouble@any")
+
+        #  Замена узлом базовой формы: обе стороны названы своими ключами.
+        add_connection!(w, c, :out, d, :in)
+        replace!(w, DataNode(RpDouble, base), d)
+        @test w.audit_log[end] == NodeReplaced(d, "Main.RpDouble", "Main.RpDouble@any")
+
+        #  Узел удалён - по графу вариант уже не восстановить, а в журнале он есть.
+        delete_node!(w, d)
+        @test NodeAdded(d, "Main.RpDouble@any") in w.audit_log
+        @test !isempty(filter(e -> e isa NodeDeleted, w.audit_log))
+
+        #  Ключ в журнале и ключ в снимке - одно и то же имя.
+        w2 = Workflow(2)
+        e  = add_node!(w2, DataNode(RpDouble, deepcopy(var)))
+        @test w2.audit_log[end] == NodeAdded(e, "Main.RpDouble@any")
+        @test workflow_to_dict(w2)["nodes"][string(e)]["type"] == "Main.RpDouble@any"
+    end
+    unregister_all!()
+end
+
+# --------------------------------------------------------------------------
+@testset "V8. ключ объявляется один раз на процесс         " begin
+    unregister_all!()
+    own = rp_double()
+    var = NodeSpec("Double", [PortSpec("In", Any, :in)], [PortSpec("Out", Int, :out)])
+    register_node!(DataNode(RpDouble, own))
+    register_node!(DataNode(RpDouble, var); key = "Main.RpDouble@any")
+
+    #  Та же форма под тем же ключом - безобидно, предупреждения нет.
+    @test @test_logs(register_node!(DataNode(RpDouble, deepcopy(var));
+                                    key = "Main.RpDouble@any", overwrite = true)) ==
+          "Main.RpDouble@any"
+    @test noderegkey(DataNode(RpDouble, var)) == "Main.RpDouble@any"
+
+    #  Другая форма под занятым ключом отбирает его у прежнего интерфейса,
+    #  и об этом сказано.
+    other = NodeSpec("Double", [PortSpec("In", Int, :in)],
+                               [PortSpec("Out", Int, :out), PortSpec("Dbg", Int, :dbg)])
+    @test_logs (:warn, r"taken over by another interface") register_node!(
+        DataNode(RpDouble, other); key = "Main.RpDouble@any", overwrite = true)
+    @test isnothing(noderegkey(DataNode(RpDouble, var)))
+    @test noderegkey(DataNode(RpDouble, other)) == "Main.RpDouble@any"
+
+    #  И это глушится.
+    @test @test_logs(register_node!(DataNode(RpDouble, var); key = "Main.RpDouble@any",
+                                    overwrite = true, throw_warn = false)) ==
+          "Main.RpDouble@any"
+    unregister_all!()
+end
+
+# --------------------------------------------------------------------------
+@testset "V9. setspec_unsafe!: сборка, а не правка          " begin
+    unregister_all!()
+    rp_withaudit() do
+        g = rp_chain()
+        scheduler!(g.w)
+        @test getdata(g.w, g.d, :out) == 42
+
+        v0, n0 = g.w.ver, length(g.w.audit_log)
+        st, data, settings = getnode(g.w, g.d).state, getnode(g.w, g.d).data,
+                             getnode(g.w, g.d).settings
+        wide = NodeSpec("Double", [PortSpec("In", Int, :in)],
+                                  [PortSpec("Out", Int, :out), PortSpec("Dbg", Int, :dbg)])
+        node = setspec_unsafe!(g.w, g.d, wide)
+
+        #  Описание новое, жизнь узла - та же: контейнеры те же объекты,
+        #  статус и посчитанное на месте, в журнал ничего не ушло.
+        @test node.spec === wide
+        @test node.state === st && node.data === data && node.settings === settings
+        @test getstatus(g.w, g.d) === :clean
+        @test getdata(g.w, g.d, :out) == 42
+        @test length(g.w.audit_log) == n0
+        #  А версия графа поднята: на спеках висит карта готовности.
+        @test g.w.ver == v0 + 1
+        #  Буфер доведён до новых портов конструктором.
+        @test haskey(getnode(g.w, g.d).input_buffer, :in)
+        @test isportexist(getnode(g.w, g.d), :dbg, :output)
+    end
     unregister_all!()
 end
 

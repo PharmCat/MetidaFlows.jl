@@ -262,7 +262,7 @@ function replace_node!(model::Workflow, node::AbstractDataNode, id::Int,
         audit!(model, kind === :spec ?
             SpecChanged(id, something(noderegkey(node), ""),
                             something(noderegkey(old),  "")) :
-            NodeReplaced(id, nodetypestr(node), nodetypestr(old)))
+            NodeReplaced(id, nodekey(node), nodekey(old)))
     catch
         model.nodes[id] = old
         setid!(old, id)
@@ -319,28 +319,33 @@ change here.
 A side effect worth having on its own: the node comes out holding the spec you
 passed, so a node loaded from a snapshot stops sharing the register's.
 
-# To survive a snapshot, the spec needs a key of its own
-A snapshot names a node's specification by the key it is registered under, so
-a spec that is registered under none cannot be named and the node comes back
-with the ports of its type - see [`workflow_to_dict`](@ref), which warns about
-exactly that, and [`noderegkey`](@ref). Register the variant first and the
-round trip is faithful:
+# To survive a snapshot, the interface needs a declared key
+A snapshot names a node by a key from [`NODE_REGISTER`](@ref), not by its
+ports, so an interface that is declared nowhere cannot be named: the node comes
+back with the ports of its type, and [`workflow_to_dict`](@ref) warns about it.
+Declare the variant once, where the node types themselves are declared:
 
 ```julia
-spec = wide_spec()
-register_node!(DataNode(Scale, spec); key = "Main.Scale@wide")
-replacespec!(w, 7, spec)        # тот же объект, поэтому ключ находится
+function __init__()
+    register_node!(DataNode(Scale, scale_spec()))
+    register_node!(DataNode(Scale, wide_spec()); key = "Main.Scale@wide")
+end
 ```
 
-The **same** object is what ties the two together: the key is found by
-identity, not by comparing ports, so a second `wide_spec()` call would leave
-the node with a spec registered under no key. Registering afterwards works
-just as well, and is the way round when the spec was built for you:
+After that any node of that type whose spec describes the same interface is
+named by that key - [`noderegkey`](@ref) matches by interface, so it makes no
+difference whether the spec object is the registered one, a copy of it, or one
+[`replaceport!`](@ref) built on the spot:
 
 ```julia
-replaceport!(w, 7, PortSpec("In", Float64, :in), :input)
-register_node!(getnode(w, 7); key = "Main.Scale@narrow")
+replacespec!(w, 7, wide_spec())      # своя копия той же формы
+noderegkey(getnode(w, 7))            # "Main.Scale@wide"
 ```
+
+What **not** to do is register a session's own copy under a key that is already
+taken: `overwrite` would hand the entry to that copy, and every node of the
+interface registered before it would stop being named at all, in this workflow
+and in every other one in the process.
 
 See also [`replaceport!`](@ref).
 """
@@ -372,14 +377,17 @@ a narrowed datatype that an existing connection no longer satisfies, a
 replaceport!(w, 7, PortSpec("In", Float64, :in), :input)
 ```
 
-The spec is built here, so it is registered under no key and a snapshot cannot
-name it - [`workflow_to_dict`](@ref) says so when it writes one. Register the
-node afterwards when the change has to survive a file:
+The spec is built here, so the node ends up with a spec object of its own. For
+a snapshot that is not what matters: [`noderegkey`](@ref) matches a node
+against [`NODE_REGISTER`](@ref) by **interface**, so the port change survives a
+file as long as the shape it produces is declared under some key. If it is not,
+[`workflow_to_dict`](@ref) says so and the node comes back with the ports of
+its type.
 
-```julia
-replaceport!(w, 7, PortSpec("In", Float64, :in), :input)
-register_node!(getnode(w, 7); key = "Main.Scale@narrow")
-```
+So declare the shapes a graph editor can produce once, for the process, as
+[`replacespec!`](@ref) shows. Registering the node here instead would put a
+per-session copy under a process-wide key, and that takes the key away from
+every other graph that uses it.
 
 See also [`replacespec!`](@ref) and [`noderegkey`](@ref).
 """
@@ -395,4 +403,47 @@ function replaceport!(model::Workflow, id::Int, ps::PortSpec, direction::Symbol;
     isnothing(i) ? push!(v, ps) : (v[i] = ps)
     return replacespec!(model, id, NodeSpec(old.name, ins, outs, old.settings);
                         throw_warn = throw_warn)
+end
+
+# =========================================================================
+#  ВОССТАНОВЛЕНИЕ СПЕКИ: не правка графа, а сборка состояния
+# =========================================================================
+
+"""
+    setspec_unsafe!(model::Workflow, id::Int, spec::NodeSpec) -> AbstractDataNode
+
+Internal function. Put `spec` on node `id`, keeping everything else the node
+has, and return the node that now sits there.
+
+This is for **rebuilding** a graph, not for editing one. Settings, cached
+output data, status, execution state and input buffers are the same objects
+afterwards; nothing is invalidated, nothing is recorded in the change log, and
+no connection is re-checked against the new ports. `model.ver` is raised,
+because the readiness map cached against it reads `required` and `kind` from
+the specs.
+
+The case it exists for is a graph that comes back from somewhere other than a
+snapshot - a `JLD2` file, a `deepcopy`, an application's own store - where the
+specs have to be put back on nodes that already hold their results. Writing
+into `model.nodes` by hand does that too and leaves `model.ver` behind, which
+is the one thing the caches cannot survive.
+
+A node whose specification merely *describes* a registered interface needs
+nothing of this: [`noderegkey`](@ref) matches by interface, so a revived copy
+is named by the same key as the original. Use this when the specs themselves
+have to be the registered objects again, or when they were not carried at all.
+
+To **change** a node's ports, with the checks and the invalidation, use
+[`replacespec!`](@ref) or [`replaceport!`](@ref).
+"""
+function setspec_unsafe!(model::Workflow, id::Int, spec::NodeSpec)
+    old  = getnode(model, id)
+    #  Контейнеры и свойства - те же объекты: это та же жизнь узла, ему
+    #  только возвращают описание. `initbuffer!` в конструкторе доводит
+    #  буфер до новых портов.
+    node = DataNode(nodetype(old), old.properties, spec,
+                    old.settings, old.data, old.state, old.input_buffer)
+    model.nodes[id] = node
+    model.ver += 1
+    return node
 end

@@ -249,51 +249,70 @@ Three consequences worth stating:
 
 ### A spec that the file can name
 
-A snapshot does not carry ports. It carries the **key** a node's spec is
-registered under, and [`dict_to_node`](@ref) takes the spec from
-[`NODE_REGISTER`](@ref) by that key - which is what keeps a file from
-describing a node's interface, and a port datatype from being resolved out of
-text.
+A snapshot does not carry ports. It carries a **key** from
+[`NODE_REGISTER`](@ref), and [`dict_to_node`](@ref) takes the spec from the
+register by that key - which is what keeps a file from describing a node's
+interface, and a port datatype from being resolved out of text.
 
-So a node whose spec was changed in the live graph and never registered cannot
-be named in a file. The snapshot falls back to the key of its type, and the
-node comes back with the ports of its type: a silent reversal when nothing else
-depended on the change, and a load that refuses a connection halfway when
-something did - a plain output turned back into a `handover` one with two
-consumers, say. [`workflow_to_dict`](@ref) says so when it writes such a
-snapshot, naming the nodes.
-
-The way through is to register the variant under a key of its own. The same
-type, another spec:
+A node type's own key, [`nodetypestr`](@ref) of it, names the spec it was
+registered with. A **second spec of the same type** gets a key of its own:
 
 ```julia
-spec = wide_spec()
-register_node!(DataNode(Scale, spec); key = "Main.Scale@wide")
-replacespec!(w, 7, spec)                 # тот же объект спеки
+function __init__()
+    register_node!(DataNode(Scale, scale_spec()))
+    register_node!(DataNode(Scale, wide_spec()); key = "Main.Scale@wide")
+end
+```
+
+After that a node holding that interface is named by that key, wherever the
+spec object came from - [`noderegkey`](@ref) matches by **interface**, not by
+object:
+
+```julia
+replacespec!(w, 7, wide_spec())          # своя копия той же формы
 workflow_to_dict(w)                      # узел 7 назван ключом варианта
 ```
 
-The key is found by the **identity** of the spec object
-([`noderegkey`](@ref)), so what ties the two together is passing the same
-object, not building an equal one. When the spec was built for you - by
-[`replaceport!`](@ref) - register the node afterwards instead:
+Matching by interface is what makes this work in a server. A spec object
+survives nothing: `deepcopy`, a `JLD2` revival and [`replaceport!`](@ref)
+building one on the spot all produce a new object, and a session that
+registered *its* object under the shared key would take the entry over and
+leave every other graph's nodes of that interface unnamed. So keys are declared
+once, where the node types are, and a session registers nothing.
 
-```julia
-replaceport!(w, 7, PortSpec("In", Float64, :in), :input)
-register_node!(getnode(w, 7); key = "Main.Scale@narrow")
-```
+An interface that is declared **nowhere** cannot be named: the snapshot falls
+back to the key of the node's type, and the node comes back with the ports of
+its type. That is a silent reversal when nothing depended on the change, and a
+load that refuses a connection halfway when something did - a plain output
+turned back into a `handover` one with two consumers, say.
+[`workflow_to_dict`](@ref) warns when it writes such a snapshot, naming the
+nodes; `noderegkey(node) === nothing` is the same question asked directly, and
+is what a server checks before it invents a new key.
 
-A variant is a deliberate act because [`NODE_REGISTER`](@ref) belongs to the
-process: overwriting the type's own entry would change the ports of every node
-of that type, in this graph and in every workflow loaded afterwards. For the
-same reason `register_node!(w)` registers each type from its **lowest-numbered**
-node and tells you when other nodes of that type hold a different interface -
-only one of them can be the type's entry.
+For the same reason `register_node!(w)` registers each type from its
+**lowest-numbered** node and tells you when other nodes of that type hold a
+different interface - only one of them can be the type's own entry.
 
 The other way out is to carry specs in the file yourself:
 `dict_to_workflow(d; usermode = true)` rebuilds each spec with your own
 [`dict_to_spec`](@ref) method. Then the file does describe interfaces, and what
 it is allowed to name is your method's business.
+
+### Putting specs back on a graph that came from elsewhere
+
+A graph revived from an application's own store - `JLD2`, a database, anything
+that is not a snapshot - usually needs nothing: a revived spec describes the
+same interface, so it is named by the same key as before. When the spec objects
+themselves have to be the registered ones again, or were not carried at all,
+`MetidaFlows.setspec_unsafe!(w, id, spec)` is the door for it: it puts a spec
+on a node keeping its settings, data, status and buffers, raises `model.ver`
+for the caches that read `required` and `kind`, records nothing in the change
+log and checks no connection. Writing into `w.nodes` by hand does the same
+thing and leaves `ver` behind, which is the one thing the caches cannot
+survive.
+
+That is for rebuilding. To *change* a node's ports, with the checks and the
+invalidation, use [`replacespec!`](@ref) or [`replaceport!`](@ref).
 
 **Working out the difference is yours, not the package's.** What counts as the
 same node when its type changed under the same identifier, whether a settings
