@@ -135,8 +135,9 @@ end
 
 Convert node to JSON-serializable dictionary.
 
-Always written: `"id"`, `"type"` - the type tag as a string, see
-[`nodetypestr`](@ref) - `"properties"`
+Always written: `"id"`, `"type"` - the key the node's specification is
+registered under ([`noderegkey`](@ref)), which is [`nodetypestr`](@ref) of the
+node unless its specification is a registered variant - `"properties"`
 ([`node_properties_to_dict`](@ref)) and `"status"`. Each keyword adds one
 entry: `"spec"` ([`spec_to_dict`](@ref)), `"settings"`,
 `"settings_values"` ([`settings_to_dict`](@ref)) and `"state"`
@@ -150,7 +151,9 @@ function node_to_dict(node::AbstractDataNode; specs::Bool = true, settings::Bool
                       values::Bool = true, state::Bool = false)
     d                 = Dict{String, Any}()
     d["id"]           = getid(node)
-    d["type"]         = nodetypestr(node)
+    #  Ключ варианта, если спека узла зарегистрирована под своим ключом:
+    #  иначе снимок назвал бы спеку типа и вернул узел с другими портами.
+    d["type"]         = something(noderegkey(node), nodetypestr(node))
     d["properties"]   = node_properties_to_dict(node.properties)
     if specs
         d["spec"]     = spec_to_dict(node.spec)
@@ -201,6 +204,13 @@ function spec_to_dict(spec::NodeSpec)
     d["settings"]     = copy(spec.settings)
     return d
 end
+#  Круг через снимок переживает СОДЕРЖИМОЕ спеки, а не объект: две спеки,
+#  дающие один и тот же снимок, вернут один и тот же узел. Поэтому фабрика
+#  на каждый узел (`spec()` в каждом вызове) - не расхождение, и
+#  предупреждать о ней нечего. Сравнение идёт по тому же представлению, что
+#  уходит в файл, то есть ровно по тому, что круг и переносит.
+same_interface(a::NodeSpec, b::NodeSpec) = a === b || spec_to_dict(a) == spec_to_dict(b)
+
 """
     portspec_to_dict(ps::PortSpec)
  
@@ -281,7 +291,7 @@ error, and nothing read from a file is resolved to a type.
 """
 const AUDIT_EVENT_NAMES = ("NodeAdded", "NodeDeleted", "ConnectionAdded",
                            "ConnectionDeleted", "SettingsChanged",
-                           "NodeReplaced")
+                           "NodeReplaced", "SpecChanged")
 
 """
     audit_event_to_dict(e::AbstractAuditEvent) -> Dict{String, Any}
@@ -302,6 +312,9 @@ audit_event_to_dict(e::NodeDeleted) =
 audit_event_to_dict(e::NodeReplaced) =
     Dict{String, Any}("event" => "NodeReplaced", "id" => e.id,
                       "type" => e.type, "previous" => e.previous)
+audit_event_to_dict(e::SpecChanged) =
+    Dict{String, Any}("event" => "SpecChanged", "id" => e.id,
+                      "key" => e.key, "previous" => e.previous)
 audit_event_to_dict(e::ConnectionAdded) =
     Dict{String, Any}("event" => "ConnectionAdded", "id" => e.id,
                       "output_id" => e.output_id, "output_port" => String(e.output_port),
@@ -321,7 +334,8 @@ Rebuild one change-log record from the dictionary
 
 `d["event"]` must be one of [`AUDIT_EVENT_NAMES`](@ref); each is constructed
 explicitly from its own fields, so a file cannot name a type to build or a
-field to fill. A `NodeReplaced` record only appears in format 3 and later.
+field to fill. A `NodeReplaced` record only appears in format 3 and later, a
+`SpecChanged` one in format 4 and later.
 Port labels and setting keys are accepted as `String` or `Symbol`, like the
 rest of the loader.
 
@@ -336,6 +350,8 @@ function dict_to_audit_event(d::Dict{String})
     elseif name == "NodeDeleted"       return NodeDeleted(Int(d["id"]))
     elseif name == "NodeReplaced"      return NodeReplaced(Int(d["id"]),
                                               String(d["type"]), String(d["previous"]))
+    elseif name == "SpecChanged"       return SpecChanged(Int(d["id"]),
+                                              String(d["key"]), String(d["previous"]))
     elseif name == "ConnectionAdded"   return ConnectionAdded(Int(d["id"]),
                                               Int(d["output_id"]), sym(d["output_port"]),
                                               Int(d["input_id"]),  sym(d["input_port"]))
@@ -374,6 +390,21 @@ the formats they are.
 
 So a snapshot travels forward between versions, never backward.
 
+# What changed in 4
+
+- the change log can carry [`SpecChanged`](@ref), the record
+  [`replacespec!`](@ref) and [`replaceport!`](@ref) write. A closed set of
+  event names again, so an older reader has to refuse the file by its stamp
+  rather than meet an unknown name inside it;
+- a node's `"type"` may name a **specification variant** of its type rather
+  than the type itself - any key [`register_node!`](@ref) accepts. An older
+  reader would look that key up in its own register and refuse it by name if
+  it is not there, which is sound but not the diagnosis the stamp gives.
+
+A format 3 file reads unchanged: its log cannot hold a `SpecChanged` record
+and its node keys are type names, because no version that wrote format 3 could
+produce either.
+
 # What changed in 3
 
 - the change log can carry [`NodeReplaced`](@ref), the record
@@ -401,7 +432,7 @@ cannot contain a tagged non-finite float because nothing wrote one. A format 2
 file reads unchanged too: its log cannot hold a `NodeReplaced` record, because
 no version that wrote format 2 could produce one.
 """
-const SNAPSHOT_FORMAT_VERSION = 3
+const SNAPSHOT_FORMAT_VERSION = 4
 
 const VALUE_TYPES = Dict{String, Type}(
     "Any"     => Any,     "Bool"    => Bool,
@@ -682,7 +713,8 @@ function dict_to_node_state!(node::AbstractDataNode, d)
 end
 
 """
-    workflow_to_dict(w::Workflow; values::Bool = true, state::Bool = false) -> Dict
+    workflow_to_dict(w::Workflow; values::Bool = true, state::Bool = false,
+                     throw_warn::Bool = true) -> Dict
  
 Convert workflow to dictionary representation, ready to be serialized to JSON.
  
@@ -712,8 +744,22 @@ see [`node_state_to_dict`](@ref) and resume with `reset_mode = :soft`.
   **not** read back: [`dict_to_workflow`](@ref) rebuilds both indices with
   [`refreshind!`](@ref). They are written for a reader that wants the graph
   without walking the edges itself.
+
+# A specification that is registered under no key
+A node names its specification by the key it is registered under, so a node
+holding a specification of its own - one given to it by
+[`replacespec!`](@ref) or [`replaceport!`](@ref) and never registered - cannot
+be named: the snapshot falls back to the key of its type, and the node comes
+back with the ports of its type. Depending on what changed that is either a
+silent reversal or a load that refuses a connection halfway through.
+
+This call warns about such nodes, once, naming them; `throw_warn = false`
+silences it. The two ways out are to register the variant under a key of its
+own before writing ([`register_node!`](@ref)) or to carry specifications in the
+file yourself, with `usermode = true` and a [`dict_to_spec`](@ref) method.
 """
-function workflow_to_dict(w::Workflow; values::Bool = true, state::Bool = false)
+function workflow_to_dict(w::Workflow; values::Bool = true, state::Bool = false,
+                          throw_warn::Bool = true)
     d                = Dict{String, Any}()
     d["format_version"] = SNAPSHOT_FORMAT_VERSION
     d["id"]          = w.id
@@ -721,8 +767,26 @@ function workflow_to_dict(w::Workflow; values::Bool = true, state::Bool = false)
     d["name"]        = w.name
     d["n_iter"]      = w.n_iter
     n                = Dict{String, Dict}()
+    #  Узел с личной, незарегистрированной спекой назовёт в снимке спеку
+    #  своего типа и вернётся с её портами. Сказать об этом надо здесь, при
+    #  записи: при чтении это либо тихая подмена портов, либо отказ связи
+    #  посреди загрузки.
+    private = Int[]
     for (k,v) in w.nodes
         n[string(k)] = node_to_dict(v; values = values, state = state)
+        #  Узел вернётся с портами того ключа, который ушёл в файл. Если это
+        #  те же порты, круг честный; незарегистрированный тип - забота
+        #  загрузки, она откажет по имени.
+        reg = get(NODE_REGISTER, something(noderegkey(v), nodetypestr(v)), nothing)
+        isnothing(reg) || same_interface(reg[2], v.spec) || push!(private, k)
+    end
+    if throw_warn && !isempty(private)
+        sort!(private)
+        @warn "Node(s) $(private) hold a specification that is registered under no key, " *
+              "so the snapshot names the specification of their type and they will come " *
+              "back with its ports. Register the variant with " *
+              "`register_node!(node; key = \"...\")` before writing, or load with " *
+              "`usermode = true` and a `dict_to_spec` method of your own."
     end
     d["nodes"]       = n
     d["c_iter"]      = w.c_iter
@@ -806,8 +870,9 @@ end
 
 Rebuild a workflow from the dictionary [`workflow_to_dict`](@ref) produced.
 
-Every node type named in `d` must be registered first ([`register_node!`](@ref)):
-the file names a type, the register decides whether it may be built. **Loading
+Every key named in `d` must be registered first ([`register_node!`](@ref)) -
+a node type's own key, or the key a specification variant of it was registered
+under: the file names a key, the register decides what may be built. **Loading
 executes nothing** - no user code runs, and no type is resolved from a string.
 
 Settings values and feedback buffer contents are restored when the file carries
@@ -894,7 +959,9 @@ end
 Rebuild one node from the dictionary [`node_to_dict`](@ref) produced.
 
 The node *type* and its *spec* come from [`NODE_REGISTER`](@ref), looked up by
-the `"type"` string; the `"spec"` section of the file is not used. Settings
+the key in `"type"` - which may be a specification variant of a type, see
+[`register_node!`](@ref) - and the `"spec"` section of the file is not used.
+Settings
 values (`"settings_values"`) and feedback buffers (`"state"`) are restored when
 present - see [`dict_to_settings!`](@ref) and [`dict_to_node_state!`](@ref).
 The node comes back `:dirty` whatever status the file carries, and without

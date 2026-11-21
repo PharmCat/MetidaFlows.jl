@@ -91,12 +91,12 @@ abstract type AbstractNodeType end
 Supertype of the records in `Workflow.audit_log`: a **change log of the graph**
 in the order the edits happened.
 
-Six concrete events, one per model-level mutator:
+Seven concrete events, one per model-level mutator:
 [`NodeAdded`](@ref), [`NodeDeleted`](@ref), [`ConnectionAdded`](@ref),
-[`ConnectionDeleted`](@ref), [`SettingsChanged`](@ref) and
-[`NodeReplaced`](@ref).
+[`ConnectionDeleted`](@ref), [`SettingsChanged`](@ref),
+[`NodeReplaced`](@ref) and [`SpecChanged`](@ref).
 
-Every mutator that takes a [`Workflow`](@ref) writes one of the six, and that
+Every mutator that takes a [`Workflow`](@ref) writes one of the seven, and that
 is the boundary of what the log can see. [`setid!`](@ref) and
 [`setposition!`](@ref) are given a node and no model, so moving a node in an
 editor is an edit the log does not record.
@@ -205,6 +205,32 @@ inherited the wiring that was already there.
 struct NodeReplaced <: AbstractAuditEvent
     id::Int
     type::String
+    previous::String
+end
+
+"""
+    SpecChanged(id, key, previous) <: AbstractAuditEvent
+
+The **specification** of node `id` was exchanged by [`replacespec!`](@ref) or
+[`replaceport!`](@ref), keeping the node type and every connection.
+
+`key` and `previous` are the [`NODE_REGISTER`](@ref) keys of the new and the
+old specification, and `""` stands for a specification that was registered
+under no key at the time - which is also the specification a snapshot cannot
+name, see [`workflow_to_dict`](@ref). So the pair says which variant the node
+now carries whenever the variants are registered, and the event's own name
+says what changed when they are not.
+
+This is where [`NodeReplaced`](@ref) would be unreadable: the node type does
+not change here, so that record would name the same type twice.
+
+!!! compat "Added in 0.8.0"
+    Snapshots carrying this event are stamped format 4; see
+    [`SNAPSHOT_FORMAT_VERSION`](@ref).
+"""
+struct SpecChanged <: AbstractAuditEvent
+    id::Int
+    key::String
     previous::String
 end
 
@@ -1287,38 +1313,73 @@ nodebuffer(::Type)   = Dict{Symbol, PortBuffer{Any}}()
 """
     NODE_REGISTER::Dict{String, Tuple{Type, NodeSpec}}
  
-Node types that can be restored from a snapshot: `nodetypestr` => (node type,
-node specification).
- 
-A snapshot names a node type with [`nodetypestr`](@ref), and this table is what
-turns that name back into a type. A type that is not registered cannot be
-loaded, and nothing from a snapshot is ever resolved as a Julia name - which is
-why loading an untrusted file cannot execute anything.
- 
+What a snapshot may be restored into: key => (node type, node specification).
+
+A snapshot names its key, and this table is what turns that name back into a
+type and a specification. A key that is not registered cannot be loaded, and
+nothing from a snapshot is ever resolved as a Julia name - which is why
+loading an untrusted file cannot execute anything.
+
+The key of a node type is [`nodetypestr`](@ref) of it, and that is what
+[`register_node!`](@ref) uses by default. A **second specification of the same
+type** can be registered under a key of its own, which is how a node whose
+ports were changed with [`replaceport!`](@ref) survives a snapshot:
+
+```julia
+register_node!(DataNode(Scale, wide_spec()); key = "Main.Scale@wide")
+replacespec!(w, 7, wide_spec())      # the node now holds the registered variant
+```
+
+[`noderegkey`](@ref) is how the engine finds a node's key: by the identity of
+its specification, so nothing on the node has to be kept in step with the
+table.
+
 See [`register_node!`](@ref), [`isregistered`](@ref),
 [`getregnodeinfo`](@ref), [`unregister_all!`](@ref).
 """
 const NODE_REGISTER = Dict{String, Tuple{Type, NodeSpec}}()
 
 """
-    register_node!(node::DataNode; overwrite = false, skipmode = false) -> String | Nothing
-    register_node!(model::Workflow; skipmode = false) -> Vector{String}
- 
+    register_node!(node::DataNode; key = nodetypestr(node), overwrite = false, skipmode = false) -> String | Nothing
+    register_node!(model::Workflow; overwrite = false, skipmode = false, throw_warn = true) -> Vector{String}
+
 Register the type and the specification of a node in [`NODE_REGISTER`](@ref),
 so that a snapshot naming it can be restored. Returns the key, which is
-[`nodetypestr`](@ref) of the node.
- 
-Registering a different type under a key already taken raises; `overwrite`
-replaces the entry, `skipmode` returns `nothing` instead of raising.
+[`nodetypestr`](@ref) of the node unless `key` says otherwise.
+
+Registering anything under a key already taken raises; `overwrite` replaces the
+entry, `skipmode` returns `nothing` instead of raising.
+
+`key` is what makes a **second specification of one type** registrable: the
+same `T`, another `NodeSpec`, its own key. That is the registration a node
+needs to survive a snapshot after [`replacespec!`](@ref) or
+[`replaceport!`](@ref), because a snapshot carries the key its specification is
+registered under and not the ports themselves - see [`noderegkey`](@ref) and
+[`workflow_to_dict`](@ref). A key of one's own is a deliberate act: it is a
+process-wide table, and overwriting the type's own entry would change the ports
+of every node of that type and of every workflow loaded afterwards.
+
+```julia
+register_node!(DataNode(Scale, scale_spec()))                        # "Main.Scale"
+register_node!(DataNode(Scale, wide_spec()); key = "Main.Scale@wide")
+```
 
 The `Workflow` form registers every node type of a graph and returns the keys it
 added, sorted. A graph normally holds several nodes of one type, and that is not
-a repeated registration: each type is registered once per call, from its first
-node, and the remaining nodes of that type are passed over. So
-`register_node!(w)` is the ordinary call, and the flags mean for a graph exactly
-what they mean for a node - what to do about a key that was **already taken
-before this call**. A type whose spec has changed is the case for
+a repeated registration: each type is registered once per call, from its
+**lowest-numbered** node, and the remaining nodes of that type are passed over.
+So `register_node!(w)` is the ordinary call, and the flags mean for a graph
+exactly what they mean for a node - what to do about a key that was **already
+taken before this call**. A type whose spec has changed is the case for
 `overwrite = true`; `skipmode = true` keeps whatever is registered.
+
+Which node of a type is registered used to be a matter of `model.nodes`
+iteration order, and that order is machine-dependent. It mattered from the
+moment [`replacespec!`](@ref) made it possible for two nodes of one type to
+hold **different** specs - so the walk goes by ascending id, and a graph where
+nodes of one type disagree about their spec is reported: the types are named,
+with the node the spec was taken from and the nodes left out.
+`throw_warn = false` silences that.
  
 !!! warning "Register from `__init__`, not at top level"
     A package that registers its nodes in top-level code loses the
@@ -1339,9 +1400,11 @@ before this call**. A type whose spec has changed is the case for
     end
     ```
 """
-function register_node!(node::DataNode{T}; overwrite = false, skipmode = false) where T
-    typestr = nodetypestr(node)
-    if isregistered(node) && !overwrite 
+function register_node!(node::DataNode{T}; key::AbstractString = nodetypestr(node),
+                        overwrite = false, skipmode = false) where T
+    typestr = String(key)
+    isempty(typestr) && error("A register key cannot be empty")
+    if isregistered(typestr) && !overwrite
         if skipmode
             return nothing
         else
@@ -1382,14 +1445,52 @@ end
 """
     isregistered(node::DataNode) -> Bool
     isregistered(typestr::String) -> Bool
- 
-Whether a node type is in [`NODE_REGISTER`](@ref).
+
+Whether a key is in [`NODE_REGISTER`](@ref). The node form asks about the node
+type's own key, [`nodetypestr`](@ref) of it, and says nothing about a
+specification variant - [`noderegkey`](@ref) is the question about the node's
+specification.
 """
 function isregistered(node::T) where T <: DataNode
     return haskey(NODE_REGISTER, nodetypestr(node))
 end
 function isregistered(typestr::String)
     return haskey(NODE_REGISTER, typestr)
+end
+"""
+    noderegkey(node::DataNode) -> String | Nothing
+
+Internal function. The key in [`NODE_REGISTER`](@ref) a node's **specification**
+is registered under, or `nothing` when it is registered under none.
+
+The key is found by identity: an entry matches when it holds this node's type
+and the very same `NodeSpec` object. So nothing on the node has to be kept in
+step with the table - a node given another specification by
+[`replacespec!`](@ref) answers with the new key, or with `nothing` while that
+specification is unregistered.
+
+The node type's own key, [`nodetypestr`](@ref) of it, is tried first, so a node
+of a registered type with the registered specification costs one lookup. A
+variant costs a walk of the table, in sorted key order, so the answer does not
+depend on the machine when one specification is registered twice.
+
+This is what [`node_to_dict`](@ref) writes as the node's `"type"`, and
+`nothing` is what makes [`workflow_to_dict`](@ref) warn: a specification under
+no key cannot be named in a snapshot, so the node would come back with the
+ports of its type.
+"""
+function noderegkey(node::DataNode{T}) where T
+    own = nodetypestr(node)
+    e   = get(NODE_REGISTER, own, nothing)
+    if !isnothing(e) && e[1] === T && e[2] === node.spec
+        return own
+    end
+    #  Порядок обхода словаря машинно-зависим, порядок поиска ключа — нет.
+    for k in sort!(collect(keys(NODE_REGISTER)))
+        t, s = NODE_REGISTER[k]
+        t === T && s === node.spec && return k
+    end
+    return nothing
 end
 """
     unregister_all!() -> Bool
@@ -1636,19 +1737,42 @@ end
 workflowtypestr(::Workflow{DAW}) = "DAW"
 workflowtypestr(::Workflow{ABW}) = "ABW"
 
-function register_node!(model::Workflow; overwrite = false, skipmode = false)
+function register_node!(model::Workflow; overwrite = false, skipmode = false,
+                        throw_warn::Bool = true)
     names = String[]
-    seen  = Set{String}()
-    for (_, node) in model.nodes
+    seen  = Dict{String, Tuple{Int, NodeSpec}}()
+    other = Dict{String, Vector{Int}}()
+    #  Порядок обхода `model.nodes` машинно-зависим, а регистрируется спека
+    #  ПЕРВОГО узла каждого типа — то есть по словарю результат зависел бы от
+    #  машины. С `replacespec!` узлы одного типа могут нести разные спеки,
+    #  поэтому обход идёт по возрастанию id, как засев очереди в ABW.
+    for id in sort!(collect(keys(model.nodes)))
+        node    = model.nodes[id]
         typestr = nodetypestr(node)
         #  Несколько узлов одного типа в одном графе — это не повторная
         #  регистрация: тип внесён этим же вызовом и из этого же графа.
         #  Без этого естественный `register_node!(w)` падал на втором
         #  таком узле, то есть почти на любом настоящем графе.
-        typestr in seen && continue
-        push!(seen, typestr)
+        if haskey(seen, typestr)
+            #  ...но если спека у них разная по содержимому, зарегистрирована
+            #  будет только одна, и об этом надо сказать: остальные узлы
+            #  снимок опишет не их портами.
+            same_interface(seen[typestr][2], node.spec) ||
+                push!(get!(other, typestr, Int[]), id)
+            continue
+        end
+        seen[typestr] = (id, node.spec)
         rn = register_node!(node; overwrite = overwrite, skipmode = skipmode)
         isnothing(rn) || push!(names, rn)
+    end
+    if throw_warn && !isempty(other)
+        for typestr in sort!(collect(keys(other)))
+            @warn "Node type $(typestr) is registered from node $(seen[typestr][1]), " *
+                  "and node(s) $(other[typestr]) of that type hold another specification. " *
+                  "Register each variant under a key of its own with " *
+                  "`register_node!(node; key = \"...\")`, or those nodes will be restored " *
+                  "with the ports of the registered one."
+        end
     end
     #  Порядок обхода `model.nodes` машинно-зависим, порядок возврата — нет.
     sort!(names)
@@ -1664,9 +1788,13 @@ end
 The node type's **registry name**: the defining module and the type name,
 joined by a dot, as in `"Main.ReadCSV"`.
 
-That string is the key in [`NODE_REGISTER`](@ref), the `"type"` of a node in a
-snapshot and the `type` of [`NodeAdded`](@ref) and [`NodeReplaced`](@ref). It
-is produced from the type and never parsed back into one.
+That string is the node type's own key in [`NODE_REGISTER`](@ref) and the
+`type` of [`NodeAdded`](@ref) and [`NodeReplaced`](@ref). It is produced from
+the type and never parsed back into one.
+
+A snapshot writes it as the node's `"type"` as well, unless the node's
+specification is registered under a key of its own - see
+[`noderegkey`](@ref), which is what decides.
 """
 function nodetypestr(::DataNode{T}) where T
     string(parentmodule(T), ".", nameof(T))

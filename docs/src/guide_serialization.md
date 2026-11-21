@@ -229,18 +229,71 @@ replaceport!(w, 7, PortSpec("In", Float64, :in), :input)   # сузить тип
 replacespec!(w, 7, newspec)                                 # или спек целиком
 ```
 
-Two consequences worth stating:
+Three consequences worth stating:
 
 * **the replacement always recomputes.** It is marked `:dirty` whatever it
   arrived as, and anything it was carrying - cached outputs, `ready_ports` - is
   dropped: results computed somewhere else belong to other settings and another
   graph. What is kept is the cheap part, the input buffers, so the nodes
-  *above* are not recomputed;
-* **the change log gets its own record**, [`NodeReplaced`](@ref)`(id, type,
-  previous)`, so one line says what became what. The event names are a closed
-  set, so a snapshot whose log holds one is stamped format 3: an older reader
-  refuses it outright instead of meeting a name it does not know halfway
-  through the file.
+  *above* are not recomputed. The identifier and the editor position come from
+  the node being displaced: the connections stayed, so this is the same node in
+  the same place;
+* **the change log gets its own record.** Swapping the node writes
+  [`NodeReplaced`](@ref)`(id, type, previous)` and changing the spec writes
+  [`SpecChanged`](@ref)`(id, key, previous)`, because the type does not change
+  there and one record naming it twice would say nothing. The event names are a
+  closed set, so a snapshot whose log holds a replacement is stamped format 3,
+  and one holding a spec change format 4: an older reader refuses it outright
+  instead of meeting a name it does not know halfway through the file;
+* **a changed spec needs a key of its own to survive a snapshot** - below.
+
+### A spec that the file can name
+
+A snapshot does not carry ports. It carries the **key** a node's spec is
+registered under, and [`dict_to_node`](@ref) takes the spec from
+[`NODE_REGISTER`](@ref) by that key - which is what keeps a file from
+describing a node's interface, and a port datatype from being resolved out of
+text.
+
+So a node whose spec was changed in the live graph and never registered cannot
+be named in a file. The snapshot falls back to the key of its type, and the
+node comes back with the ports of its type: a silent reversal when nothing else
+depended on the change, and a load that refuses a connection halfway when
+something did - a plain output turned back into a `handover` one with two
+consumers, say. [`workflow_to_dict`](@ref) says so when it writes such a
+snapshot, naming the nodes.
+
+The way through is to register the variant under a key of its own. The same
+type, another spec:
+
+```julia
+spec = wide_spec()
+register_node!(DataNode(Scale, spec); key = "Main.Scale@wide")
+replacespec!(w, 7, spec)                 # тот же объект спеки
+workflow_to_dict(w)                      # узел 7 назван ключом варианта
+```
+
+The key is found by the **identity** of the spec object
+([`noderegkey`](@ref)), so what ties the two together is passing the same
+object, not building an equal one. When the spec was built for you - by
+[`replaceport!`](@ref) - register the node afterwards instead:
+
+```julia
+replaceport!(w, 7, PortSpec("In", Float64, :in), :input)
+register_node!(getnode(w, 7); key = "Main.Scale@narrow")
+```
+
+A variant is a deliberate act because [`NODE_REGISTER`](@ref) belongs to the
+process: overwriting the type's own entry would change the ports of every node
+of that type, in this graph and in every workflow loaded afterwards. For the
+same reason `register_node!(w)` registers each type from its **lowest-numbered**
+node and tells you when other nodes of that type hold a different interface -
+only one of them can be the type's entry.
+
+The other way out is to carry specs in the file yourself:
+`dict_to_workflow(d; usermode = true)` rebuilds each spec with your own
+[`dict_to_spec`](@ref) method. Then the file does describe interfaces, and what
+it is allowed to name is your method's business.
 
 **Working out the difference is yours, not the package's.** What counts as the
 same node when its type changed under the same identifier, whether a settings

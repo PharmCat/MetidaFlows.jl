@@ -30,7 +30,7 @@
 
 import MetidaFlows: NodeAdded, NodeDeleted, ConnectionAdded, ConnectionDeleted,
                     SettingsChanged, AbstractAuditEvent, audit!,
-                    NodeReplaced,
+                    NodeReplaced, SpecChanged,
                     audit_event_to_dict, dict_to_audit_event, AUDIT_EVENT_NAMES,
                     unregister_all!, SETTINGS, log!, LogMsg
 
@@ -238,14 +238,16 @@ end
         NodeAdded(1, "Main.AuSrc"), NodeDeleted(2),
         ConnectionAdded(3, 1, :out, 2, :a), ConnectionDeleted(4),
         SettingsChanged(5, [:a, :b]), SettingsChanged(5, [:a], true),
-        NodeReplaced(6, "Main.New", "Main.Old")]
+        NodeReplaced(6, "Main.New", "Main.Old"),
+        SpecChanged(7, "Main.Node@wide", "Main.Node"),
+        SpecChanged(7, "", "")]
 
     for e in events
         d = audit_event_to_dict(e)
         @test d["event"] in AUDIT_EVENT_NAMES
         @test dict_to_audit_event(d) == e
     end
-    @test length(AUDIT_EVENT_NAMES) == 6
+    @test length(AUDIT_EVENT_NAMES) == 7
 
     #  Ярлыки портов и ключи — простыми строками: журнал читают люди
     dc = audit_event_to_dict(ConnectionAdded(3, 1, :out, 2, :a))

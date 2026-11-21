@@ -170,8 +170,9 @@ replacement on **both** sides of that connection, which is what it will be.
    This happens **before** the swap, so a settings container that refuses a
    key (a typed container missing a field, a field of another type) fails with
    the graph still untouched;
-3. the replacement takes the identifier and the place in the workflow, and is
-   marked `:dirty` - always, whatever it arrived as;
+3. the replacement takes the identifier, the editor position of the node it
+   displaces and the place in the workflow, and is marked `:dirty` - always,
+   whatever it arrived as;
 4. its input buffers are filled from parents that have already published -
    `:clean` and the port among their `ready_ports`, the rule the engine itself
    uses - so the replacement can run without recomputing anything above it. A
@@ -197,6 +198,13 @@ What survives is the part that makes the replacement cheap: the **input**
 buffers are filled from parents that already published, so the nodes *above*
 are not recomputed. That is the whole point of replacing in place.
 
+# The identifier and the position belong to the slot
+Both are taken from the node being displaced, and whatever the replacement
+arrived with is discarded: the connections stayed, so to anyone looking at the
+graph this is the same node in the same place, with different behaviour. A
+replacement that is meant to sit somewhere else is moved with
+[`setposition!`](@ref) after the call.
+
 The change log gets a [`NodeReplaced`](@ref)`(id, type, previous)` record, so
 one line says what became what. That record exists only in snapshot format 3
 and later.
@@ -211,8 +219,15 @@ scheduler!(w; reset_mode = :none)    # only node 7 and below recompute
 
 See also [`add_node!`](@ref), [`delete_node!`](@ref), [`add_connection!`](@ref).
 """
-function Base.replace!(model::Workflow, node::AbstractDataNode, id::Int;
-                       throw_warn::Bool = true)
+Base.replace!(model::Workflow, node::AbstractDataNode, id::Int;
+              throw_warn::Bool = true) =
+    replace_node!(model, node, id, throw_warn, :node)
+
+#  Общая часть замены. `kind` решает только, какая запись уходит в журнал:
+#  смена узла и смена спеки - одно и то же действие над графом, но разные
+#  правки, и `NodeReplaced` на смене спеки назвал бы один тип дважды.
+function replace_node!(model::Workflow, node::AbstractDataNode, id::Int,
+                       throw_warn::Bool, kind::Symbol)
     isnodeexist(model, id) || error("Node $(id) doesn't exist")
     old = getnode(model, id)
 
@@ -229,8 +244,11 @@ function Base.replace!(model::Workflow, node::AbstractDataNode, id::Int;
     ver = model.ver
     try
         setid!(node, id)
+        #  Позиция принадлежит месту в графе, как и идентификатор: связи
+        #  остались, значит в редакторе это тот же узел на том же месте.
+        setposition!(node, getposition(old))
         model.nodes[id] = node
-        #  замена в любом случае инвалидируется 
+        #  замена в любом случае инвалидируется
         mark_dirty!(node)
         pull_buffers!(model, node, id)
         #  Инвалидация потомков, а не `invalidate_downstream!(model, id)`
@@ -241,7 +259,10 @@ function Base.replace!(model::Workflow, node::AbstractDataNode, id::Int;
             invalidate_downstream!(model, con.input_id)
         end
         model.ver += 1
-        audit!(model, NodeReplaced(id, nodetypestr(node), nodetypestr(old)))
+        audit!(model, kind === :spec ?
+            SpecChanged(id, something(noderegkey(node), ""),
+                            something(noderegkey(old),  "")) :
+            NodeReplaced(id, nodetypestr(node), nodetypestr(old)))
     catch
         model.nodes[id] = old
         setid!(old, id)
@@ -289,17 +310,43 @@ This function is how a node's ports change instead.
 It is [`replace!`](@ref replace!(::Workflow, ::AbstractDataNode, ::Int)) with a
 node built for you, so everything that holds there holds here: the connections
 are re-checked against the new spec before anything is written, the old node's
-settings move onto the new one, the input buffers are filled from parents that
-already published, the consumers below are invalidated, `model.ver` is raised
-and the change is recorded.
+settings and its position move onto the new one, the input buffers are filled
+from parents that already published, the consumers below are invalidated and
+`model.ver` is raised. The change log gets a [`SpecChanged`](@ref) record
+rather than a [`NodeReplaced`](@ref) one, because the node type does not
+change here.
 
 A side effect worth having on its own: the node comes out holding the spec you
 passed, so a node loaded from a snapshot stops sharing the register's.
 
+# To survive a snapshot, the spec needs a key of its own
+A snapshot names a node's specification by the key it is registered under, so
+a spec that is registered under none cannot be named and the node comes back
+with the ports of its type - see [`workflow_to_dict`](@ref), which warns about
+exactly that, and [`noderegkey`](@ref). Register the variant first and the
+round trip is faithful:
+
+```julia
+spec = wide_spec()
+register_node!(DataNode(Scale, spec); key = "Main.Scale@wide")
+replacespec!(w, 7, spec)        # тот же объект, поэтому ключ находится
+```
+
+The **same** object is what ties the two together: the key is found by
+identity, not by comparing ports, so a second `wide_spec()` call would leave
+the node with a spec registered under no key. Registering afterwards works
+just as well, and is the way round when the spec was built for you:
+
+```julia
+replaceport!(w, 7, PortSpec("In", Float64, :in), :input)
+register_node!(getnode(w, 7); key = "Main.Scale@narrow")
+```
+
 See also [`replaceport!`](@ref).
 """
-replacespec!(model::Workflow, id::Int, spec::NodeSpec; kwargs...) =
-    replace!(model, DataNode(nodetype(getnode(model, id)), spec), id; kwargs...)
+replacespec!(model::Workflow, id::Int, spec::NodeSpec; throw_warn::Bool = true) =
+    replace_node!(model, DataNode(nodetype(getnode(model, id)), spec), id,
+                  throw_warn, :spec)
 
 """
     replaceport!(model::Workflow, id::Int, ps::PortSpec, direction::Symbol; throw_warn = true) -> AbstractDataNode
@@ -324,9 +371,20 @@ a narrowed datatype that an existing connection no longer satisfies, a
 #  Тот же порт, но тип уже: пройдёт, только если связи сходятся
 replaceport!(w, 7, PortSpec("In", Float64, :in), :input)
 ```
+
+The spec is built here, so it is registered under no key and a snapshot cannot
+name it - [`workflow_to_dict`](@ref) says so when it writes one. Register the
+node afterwards when the change has to survive a file:
+
+```julia
+replaceport!(w, 7, PortSpec("In", Float64, :in), :input)
+register_node!(getnode(w, 7); key = "Main.Scale@narrow")
+```
+
+See also [`replacespec!`](@ref) and [`noderegkey`](@ref).
 """
 function replaceport!(model::Workflow, id::Int, ps::PortSpec, direction::Symbol;
-                      kwargs...)
+                      throw_warn::Bool = true)
     direction in (:input, :output) ||
         error("Direction must be :input or :output, got $(direction)")
     old  = getnode(model, id).spec
@@ -336,5 +394,5 @@ function replaceport!(model::Workflow, id::Int, ps::PortSpec, direction::Symbol;
     i    = findfirst(p -> p.label === ps.label, v)
     isnothing(i) ? push!(v, ps) : (v[i] = ps)
     return replacespec!(model, id, NodeSpec(old.name, ins, outs, old.settings);
-                        kwargs...)
+                        throw_warn = throw_warn)
 end

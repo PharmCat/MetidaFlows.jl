@@ -18,6 +18,7 @@ means the public API is missing something.
 
 ```@docs
 nodetype
+noderegkey
 pickid
 readydeps
 hasproduced
