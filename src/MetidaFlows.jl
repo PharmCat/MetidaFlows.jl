@@ -133,9 +133,15 @@ abstract type AbstractAuditEvent end
 
 A node with id `id` was added by [`add_node!`](@ref).
 
-`type` is the node type's **registry name** as [`nodetypestr`](@ref) renders
-it: a `String`, never a `Type`. An audit record travels into snapshot files,
-and nothing read out of a file is ever resolved to a type.
+`type` is the key that named the node when the record was written -
+[`nodekey`](@ref), so a node whose interface is a registered variant is
+recorded under that variant and not under its type. A `String`, never a
+`Type`: an audit record travels into snapshot files, and nothing read out of a
+file is ever resolved to a type.
+
+The key is written at the time of the edit for the same reason: a node that was
+later deleted, or replaced by one of another type, cannot be looked up in the
+graph afterwards.
 """
 struct NodeAdded <: AbstractAuditEvent
     id::Int
@@ -187,9 +193,10 @@ end
 
 The node with id `id` was exchanged for another by
 [`replace!`](@ref replace!(::Workflow, ::AbstractDataNode, ::Int)), keeping
-every connection. `type` is the node type now at that id, `previous` the one
-it displaced, both as strings - see [`AbstractAuditEvent`](@ref) on why a type
-is never stored as a `Type`.
+every connection. `type` names the interface now at that id and `previous` the
+one it displaced, both through [`nodekey`](@ref) - a registered variant by its
+own key, anything else by its node type. Strings, never a `Type`: see
+[`AbstractAuditEvent`](@ref) for why.
 
 `previous` is recorded so that one record answers what happened. Reading it
 off the log otherwise means scanning back to whatever last claimed this id.
@@ -1351,18 +1358,29 @@ Registering anything under a key already taken raises; `overwrite` replaces the
 entry, `skipmode` returns `nothing` instead of raising.
 
 `key` is what makes a **second specification of one type** registrable: the
-same `T`, another `NodeSpec`, its own key. That is the registration a node
-needs to survive a snapshot after [`replacespec!`](@ref) or
-[`replaceport!`](@ref), because a snapshot carries the key its specification is
-registered under and not the ports themselves - see [`noderegkey`](@ref) and
-[`workflow_to_dict`](@ref). A key of one's own is a deliberate act: it is a
-process-wide table, and overwriting the type's own entry would change the ports
-of every node of that type and of every workflow loaded afterwards.
+same `T`, another `NodeSpec`, its own key. That is what a node needs to survive
+a snapshot after [`replacespec!`](@ref) or [`replaceport!`](@ref), because a
+snapshot carries a key and not the ports themselves - see
+[`noderegkey`](@ref) and [`workflow_to_dict`](@ref).
 
 ```julia
 register_node!(DataNode(Scale, scale_spec()))                        # "Main.Scale"
 register_node!(DataNode(Scale, wide_spec()); key = "Main.Scale@wide")
 ```
+
+**A key names an interface, not an object, and it is declared once for the
+process.** [`NODE_REGISTER`](@ref) is one table for every workflow, and
+[`noderegkey`](@ref) matches a node against it by interface, so a graph that
+later builds the same shape - a copy of the spec, a `deepcopy`, a
+[`replaceport!`](@ref) that happens to produce it - is named by the key that is
+already there and needs no registration of its own. Declare the variants
+alongside the node types, from `__init__` or at startup.
+
+What not to do is register a session's own copy under a key that is taken.
+Without `overwrite` that raises; with it, the entry becomes this copy, and if
+its interface differs then every node that held the previous one stops being
+named by any key - in this graph and in every other one in the process. A
+differing overwrite therefore warns, and `throw_warn = false` silences that.
 
 The `Workflow` form registers every node type of a graph and returns the keys it
 added, sorted. A graph normally holds several nodes of one type, and that is not
@@ -1401,7 +1419,8 @@ with the node the spec was taken from and the nodes left out.
     ```
 """
 function register_node!(node::DataNode{T}; key::AbstractString = nodetypestr(node),
-                        overwrite = false, skipmode = false) where T
+                        overwrite = false, skipmode = false,
+                        throw_warn::Bool = true) where T
     typestr = String(key)
     isempty(typestr) && error("A register key cannot be empty")
     if isregistered(typestr) && !overwrite
@@ -1409,6 +1428,18 @@ function register_node!(node::DataNode{T}; key::AbstractString = nodetypestr(nod
             return nothing
         else
             error("Node $(typestr) already registered, use `overwrite = true` to replace it, or `skipmode = true` to keep it")
+        end
+    end
+    #  Перезапись записи ДРУГИМ интерфейсом отбирает ключ у всех, кого этот
+    #  интерфейс описывал: таблица одна на процесс, а ключ ищется по
+    #  содержимому. Та же форма под тем же ключом безобидна.
+    if throw_warn
+        prev = get(NODE_REGISTER, typestr, nothing)
+        if !isnothing(prev) && !(prev[1] === T && same_interface(prev[2], node.spec))
+            @warn "Key $(typestr) is taken over by another interface. Nodes holding the " *
+                  "one registered under it until now stop being named by any key, in this " *
+                  "workflow and in every other one in this process: a register key is " *
+                  "declared once, for the whole process."
         end
     end
     NODE_REGISTER[typestr] = (T, node.spec)
@@ -1457,41 +1488,122 @@ end
 function isregistered(typestr::String)
     return haskey(NODE_REGISTER, typestr)
 end
+#  Круг через снимок переживает СОДЕРЖИМОЕ спеки, а не объект: две спеки с
+#  одним интерфейсом вернут один и тот же узел. Поэтому фабрика на каждый
+#  узел (`spec()` в каждом вызове), `deepcopy` и JLD2 - не расхождение.
+#
+#  Сравнение прямое, по полям, а не через `spec_to_dict`: на оживлённом
+#  графе ключ ищется по содержимому для КАЖДОГО узла, и сборка словарей
+#  стоила 9,0 мс и 4,5 МБ на снимок графа из 300 узлов при 20 ключах в
+#  реестре против 0,78 мс и 1,2 МБ на быстром пути. Прямое сравнение
+#  ничего не аллоцирует.
+function same_port(a::PortSpec, b::PortSpec)
+    #  Тип несёт арность (SinglePort/MultiPort), поэтому сравнивается он.
+    typeof(a) === typeof(b) || return false
+    a.label    === b.label    || return false
+    a.datatype === b.datatype || return false
+    a.kind     === b.kind     || return false
+    a.required  == b.required || return false
+    a.handover  == b.handover || return false
+    return a.name == b.name
+end
+function same_interface(a::NodeSpec, b::NodeSpec)
+    a === b && return true
+    a.name == b.name || return false
+    length(a.input_ports)  == length(b.input_ports)  || return false
+    length(a.output_ports) == length(b.output_ports) || return false
+    #  Без `@inbounds`: он был бы безопасен только потому, что длины
+    #  сверены выше, и правка, переставившая проверки, получила бы порчу
+    #  памяти вместо ошибки. Сравнение полей и так ничего не стоит.
+    for i in eachindex(a.input_ports)
+        same_port(a.input_ports[i], b.input_ports[i]) || return false
+    end
+    for i in eachindex(a.output_ports)
+        same_port(a.output_ports[i], b.output_ports[i]) || return false
+    end
+    return a.settings == b.settings
+end
+
 """
     noderegkey(node::DataNode) -> String | Nothing
 
-Internal function. The key in [`NODE_REGISTER`](@ref) a node's **specification**
-is registered under, or `nothing` when it is registered under none.
+Internal function. The key in [`NODE_REGISTER`](@ref) that names a node's
+**interface**, or `nothing` when no registered key does.
 
-The key is found by identity: an entry matches when it holds this node's type
-and the very same `NodeSpec` object. So nothing on the node has to be kept in
-step with the table - a node given another specification by
-[`replacespec!`](@ref) answers with the new key, or with `nothing` while that
-specification is unregistered.
+An entry matches when it holds this node's type and a specification that is the
+same object **or describes the same interface** - the same ports, in the same
+order, with the same arity, kind, `required`, `handover` and datatype, and the
+same declared settings. Identity is only the fast path:
 
-The node type's own key, [`nodetypestr`](@ref) of it, is tried first, so a node
-of a registered type with the registered specification costs one lookup. A
-variant costs a walk of the table, in sorted key order, so the answer does not
-depend on the machine when one specification is registered twice.
+- a node of a registered type holding the registered specification answers in
+  one lookup;
+- a node whose specification is an equal **copy** - from `deepcopy`, from a
+  JLD2 revival, from a second call of a factory function, from
+  [`replaceport!`](@ref) building one - answers with the same key as the
+  original. Nothing has to be registered again for that;
+- two keys whose specifications describe one interface are resolved
+  deterministically: the node type's own key, [`nodetypestr`](@ref) of it, is
+  preferred, then the same object over an equal one, then the smallest key. The
+  answer therefore does not depend on the order a `Dict` is walked in.
 
-This is what [`node_to_dict`](@ref) writes as the node's `"type"`, and
-`nothing` is what makes [`workflow_to_dict`](@ref) warn: a specification under
-no key cannot be named in a snapshot, so the node would come back with the
-ports of its type.
+Matching by interface rather than by object is what makes a variant usable in a
+process that serves several graphs. A key is declared once, for everybody; a
+session that registered its own copy of an already declared interface would
+either collide with the key or, with `overwrite`, take the entry over and leave
+every other node of that interface unnamed.
+
+This is what [`nodekey`](@ref) answers with and [`node_to_dict`](@ref) writes
+as the node's `"type"`. `nothing` means the interface is declared nowhere, so a
+snapshot cannot name it and the node would come back with the ports of its
+type - which is what [`workflow_to_dict`](@ref) warns about.
 """
 function noderegkey(node::DataNode{T}) where T
+    #  Свой ключ проверяется первым: у узла без варианта ответ сразу, без
+    #  обхода таблицы.
     own = nodetypestr(node)
     e   = get(NODE_REGISTER, own, nothing)
-    if !isnothing(e) && e[1] === T && e[2] === node.spec
-        return own
+    if !isnothing(e) && e[1] === T
+        e[2] === node.spec && return own
+        same_interface(e[2], node.spec) && return own
     end
-    #  Порядок обхода словаря машинно-зависим, порядок поиска ключа — нет.
-    for k in sort!(collect(keys(NODE_REGISTER)))
-        t, s = NODE_REGISTER[k]
-        t === T && s === node.spec && return k
+    #  Иначе обход. Порядок обхода словаря машинно-зависим, ответ — нет:
+    #  берётся наименьший подходящий ключ, а тождество предпочитается
+    #  совпадению по содержимому. Бегущий минимум вместо сортировки ключей:
+    #  на оживлённом графе этот путь проходит каждый узел, а `collect` с
+    #  `sort!` на каждом узле стоил 0,3 МБ на графе из 300 узлов.
+    ident = nothing
+    cont  = nothing
+    for (k, (t, s)) in NODE_REGISTER
+        t === T || continue
+        if s === node.spec
+            (isnothing(ident) || k < ident) && (ident = k)
+        elseif same_interface(s, node.spec)
+            (isnothing(cont) || k < cont) && (cont = k)
+        end
     end
-    return nothing
+    return isnothing(ident) ? cont : ident
 end
+
+"""
+    nodekey(node::DataNode) -> String
+
+Internal function. The key that names a node in a snapshot and in the change
+log: [`noderegkey`](@ref) when a registered key describes the node's
+interface, and [`nodetypestr`](@ref) of the node otherwise.
+
+One accessor for every place a node is named, so the name is the same in all of
+them - [`node_to_dict`](@ref) writing `"type"`, and [`add_node!`](@ref) and
+[`replace!`](@ref replace!(::Workflow, ::AbstractDataNode, ::Int)) writing
+[`NodeAdded`](@ref) and [`NodeReplaced`](@ref). A record naming the type while
+the snapshot it travels in names a variant cannot be replayed against that
+file, and a record of a node that has since been deleted or replaced by
+another type cannot be put right from the graph afterwards.
+
+The fallback is a name, not a claim: a node whose interface is declared nowhere
+is named by its type, and [`workflow_to_dict`](@ref) says what that costs.
+"""
+nodekey(node::DataNode) = something(noderegkey(node), nodetypestr(node))
+
 """
     unregister_all!() -> Bool
  
@@ -2186,7 +2298,7 @@ function add_node!(model::Workflow, node::AbstractDataNode; reset::Symbol = :ful
     model.ver += 1
     setid!(node, nid)
     model.nodes[nid] = node
-    audit!(model, NodeAdded(nid, nodetypestr(node)))
+    audit!(model, NodeAdded(nid, nodekey(node)))
     return nid
 end
 """

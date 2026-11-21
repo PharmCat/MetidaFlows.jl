@@ -135,9 +135,9 @@ end
 
 Convert node to JSON-serializable dictionary.
 
-Always written: `"id"`, `"type"` - the key the node's specification is
-registered under ([`noderegkey`](@ref)), which is [`nodetypestr`](@ref) of the
-node unless its specification is a registered variant - `"properties"`
+Always written: `"id"`, `"type"` - the key that names the node's interface
+([`nodekey`](@ref)), which is [`nodetypestr`](@ref) of the node unless its
+specification matches a registered variant - `"properties"`
 ([`node_properties_to_dict`](@ref)) and `"status"`. Each keyword adds one
 entry: `"spec"` ([`spec_to_dict`](@ref)), `"settings"`,
 `"settings_values"` ([`settings_to_dict`](@ref)) and `"state"`
@@ -153,7 +153,7 @@ function node_to_dict(node::AbstractDataNode; specs::Bool = true, settings::Bool
     d["id"]           = getid(node)
     #  Ключ варианта, если спека узла зарегистрирована под своим ключом:
     #  иначе снимок назвал бы спеку типа и вернул узел с другими портами.
-    d["type"]         = something(noderegkey(node), nodetypestr(node))
+    d["type"]         = nodekey(node)
     d["properties"]   = node_properties_to_dict(node.properties)
     if specs
         d["spec"]     = spec_to_dict(node.spec)
@@ -204,13 +204,6 @@ function spec_to_dict(spec::NodeSpec)
     d["settings"]     = copy(spec.settings)
     return d
 end
-#  Круг через снимок переживает СОДЕРЖИМОЕ спеки, а не объект: две спеки,
-#  дающие один и тот же снимок, вернут один и тот же узел. Поэтому фабрика
-#  на каждый узел (`spec()` в каждом вызове) - не расхождение, и
-#  предупреждать о ней нечего. Сравнение идёт по тому же представлению, что
-#  уходит в файл, то есть ровно по тому, что круг и переносит.
-same_interface(a::NodeSpec, b::NodeSpec) = a === b || spec_to_dict(a) == spec_to_dict(b)
-
 """
     portspec_to_dict(ps::PortSpec)
  
@@ -404,6 +397,13 @@ So a snapshot travels forward between versions, never backward.
 A format 3 file reads unchanged: its log cannot hold a `SpecChanged` record
 and its node keys are type names, because no version that wrote format 3 could
 produce either.
+
+Since 0.9.0 [`NodeAdded`](@ref) and [`NodeReplaced`](@ref) name a variant by
+its key as well, through [`nodekey`](@ref). That did **not** move the stamp:
+those fields have always been free-form strings, so a format 4 reader parses
+such a log without knowing anything new. What the keys mean to a replay is the
+caller's business, and a key the register does not have is reported by name
+when a node is built from it.
 
 # What changed in 3
 
@@ -774,11 +774,11 @@ function workflow_to_dict(w::Workflow; values::Bool = true, state::Bool = false,
     private = Int[]
     for (k,v) in w.nodes
         n[string(k)] = node_to_dict(v; values = values, state = state)
-        #  Узел вернётся с портами того ключа, который ушёл в файл. Если это
-        #  те же порты, круг честный; незарегистрированный тип - забота
-        #  загрузки, она откажет по имени.
-        reg = get(NODE_REGISTER, something(noderegkey(v), nodetypestr(v)), nothing)
-        isnothing(reg) || same_interface(reg[2], v.spec) || push!(private, k)
+        #  Ключ нашёлся - значит в реестре есть запись с тем же интерфейсом, и
+        #  круг честный. Не нашёлся - в файл ушло имя типа, и узел вернётся с
+        #  его портами. Незарегистрированный тип - забота загрузки, она
+        #  откажет по имени.
+        isnothing(noderegkey(v)) && isregistered(nodetypestr(v)) && push!(private, k)
     end
     if throw_warn && !isempty(private)
         sort!(private)

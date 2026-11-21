@@ -19,6 +19,8 @@ means the public API is missing something.
 ```@docs
 nodetype
 noderegkey
+nodekey
+setspec_unsafe!
 pickid
 readydeps
 hasproduced
