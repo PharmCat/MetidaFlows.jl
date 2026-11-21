@@ -19,6 +19,7 @@ isportexist
 add_connection!
 delete_connection!
 add_node!
+replace!(::Workflow, ::AbstractDataNode, ::Int)
 delete_node!
 isnodeexist
 replace!(::Workflow, ::AbstractDataNode, ::Int)

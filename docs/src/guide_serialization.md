@@ -171,6 +171,7 @@ counter, so a later automatic insertion keeps clear of it. All four write their
 own change-log record, and all but `add_node!` invalidate downstream - a node
 that has only just arrived has nothing below it yet. A node the difference does
 not mention is not touched at
+
 all: it keeps its identifier, its cached result and its `:clean` status, and
 the next run does not recompute it.
 
