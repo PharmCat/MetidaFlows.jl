@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="UTF-8"/><meta name="viewport" content="width=device-width, initial-scale=1.0"/><meta name="referrer" content="no-referrer"/><title>Working a table in place · MetidaFlows.jl</title><meta name="title" content="Working a table in place · MetidaFlows.jl"/><meta property="og:title" content="Working a table in place · MetidaFlows.jl"/><meta property="twitter:title" content="Working a table in place · MetidaFlows.jl"/><meta name="description" content="Documentation for MetidaFlows.jl."/><meta property="og:description" content="Documentation for MetidaFlows.jl."/><meta property="twitter:description" content="Documentation for MetidaFlows.jl."/><meta property="og:url" content="https://PharmCat.github.io/MetidaFlows.jl/examples_handover/"/><meta property="twitter:url" content="https://PharmCat.github.io/MetidaFlows.jl/examples_handover/"/><link rel="canonical" href="https://PharmCat.github.io/MetidaFlows.jl/examples_handover/"/><script data-outdated-warner src="../assets/warner.js"></script><link href="https://cdnjs.cloudflare.com/ajax/libs/lato-font/3.0.0/css/lato-font.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/juliamono/0.63.2/juliamono.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/fontawesome.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/solid.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/brands.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.8/katex.min.css" rel="stylesheet" type="text/css"/><script>documenterBaseURL=".."</script><script src="https://cdnjs.cloudflare.com/ajax/libs/require.js/2.3.6/require.min.js" data-main="../assets/documenter.js"></script><script src="../search_index.js"></script><script src="../siteinfo.js"></script><script src="../../versions.js"></script><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../assets/themes/catppuccin-mocha.css" data-theme-name="catppuccin-mocha"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../assets/themes/catppuccin-macchiato.css" data-theme-name="catppuccin-macchiato"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../assets/themes/catppuccin-frappe.css" data-theme-name="catppuccin-frappe"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../assets/themes/catppuccin-latte.css" data-theme-name="catppuccin-latte"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../assets/themes/documenter-dark.css" data-theme-name="documenter-dark" data-theme-primary-dark/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../assets/themes/documenter-light.css" data-theme-name="documenter-light" data-theme-primary/><script src="../assets/themeswap.js"></script></head><body><div id="documenter"><nav class="docs-sidebar"><div class="docs-package-name"><span class="docs-autofit"><a href="../">MetidaFlows.jl</a></span></div><button class="docs-search-query input is-rounded is-small is-clickable my-2 mx-auto py-1 px-2" id="documenter-search-query">Search docs (Ctrl + /)</button><ul class="docs-menu"><li><a class="tocitem" href="../">Home</a></li><li><span class="tocitem">Guide</span><ul><li><a class="tocitem" href="../guide/">User guide</a></li><li><a class="tocitem" href="../guide_execution/">Execution model</a></li><li><a class="tocitem" href="../guide_ports/">Ports and cycles</a></li><li><a class="tocitem" href="../guide_serialization/">Serialization and schemas</a></li><li><a class="tocitem" href="../guide_logs/">Logs</a></li></ul></li><li><a class="tocitem" href="../typed_containers/">Typed containers</a></li><li><span class="tocitem">Examples</span><ul><li><a class="tocitem" href="../examples_abw_cycle/">ABW cycle</a></li><li><a class="tocitem" href="../examples_abw_two_node/">ABW two node cycle</a></li><li><a class="tocitem" href="../examples_settings_query/">Querying settings</a></li><li class="is-active"><a class="tocitem" href>Working a table in place</a><ul class="internal"><li><a class="tocitem" href="#Working-a-table-in-place"><span>Working a table in place</span></a></li></ul></li><li><a class="tocitem" href="../examples_bubble_sort/">Bubble sort as a graph</a></li><li><a class="tocitem" href="../examples_insertion_sort/">Insertion sort: nested loops</a></li><li><a class="tocitem" href="../examples_gradient_descent/">Gradient descent on a graph</a></li><li><a class="tocitem" href="../examples_newton/">Newton&#39;s method and :error ports</a></li><li><a class="tocitem" href="../examples_horner/">Horner&#39;s scheme on DAW</a></li><li><a class="tocitem" href="../examples_edit_distance/">Edit distance: dynamic programming</a></li><li><a class="tocitem" href="../examples_intervals/">Interval arithmetic: metadata</a></li><li><a class="tocitem" href="../examples_power/">Modular exponentiation: skipping work</a></li></ul></li><li><span class="tocitem">API</span><ul><li><a class="tocitem" href="../api/">Overview</a></li><li><a class="tocitem" href="../api_types/">Types</a></li><li><a class="tocitem" href="../api_core/">Graph and nodes</a></li><li><a class="tocitem" href="../api_access/">Reading and writing a node</a></li><li><a class="tocitem" href="../api_execution/">Execution</a></li><li><a class="tocitem" href="../api_meta/">Port metadata</a></li><li><a class="tocitem" href="../api_serialization/">Serialization and schemas</a></li><li><a class="tocitem" href="../api_internals/">Internals</a></li></ul></li></ul><div class="docs-version-selector field has-addons"><div class="control"><span class="docs-label button is-static is-size-7">Version</span></div><div class="docs-selector control is-expanded"><div class="select is-fullwidth is-size-7"><select id="documenter-version-selector"></select></div></div></div></nav><div class="docs-main"><header class="docs-navbar"><a class="docs-sidebar-button docs-navbar-link fa-solid fa-bars is-hidden-desktop" id="documenter-sidebar-button" href="#"></a><nav class="breadcrumb"><ul class="is-hidden-mobile"><li><a class="is-disabled">Examples</a></li><li class="is-active"><a href>Working a table in place</a></li></ul><ul class="is-hidden-tablet"><li class="is-active"><a href>Working a table in place</a></li></ul></nav><div class="docs-right"><a class="docs-navbar-link" href="https://github.com/PharmCat/MetidaFlows.jl" title="View the repository on GitHub"><span class="docs-icon fa-brands"></span><span class="docs-label is-hidden-touch">GitHub</span></a><a class="docs-navbar-link" href="https://github.com/PharmCat/MetidaFlows.jl/blob/main/docs/src/examples_handover.md" title="Edit source on GitHub"><span class="docs-icon fa-solid"></span></a><a class="docs-settings-button docs-navbar-link fa-solid fa-gear" id="documenter-settings-button" href="#" title="Settings"></a><a class="docs-article-toggle-button fa-solid fa-chevron-up" id="documenter-article-toggle-button" href="javascript:;" title="Collapse all docstrings"></a></div></header><article class="content" id="documenter-page"><h2 id="Working-a-table-in-place"><a class="docs-heading-anchor" href="#Working-a-table-in-place">Working a table in place</a><a id="Working-a-table-in-place-1"></a><a class="docs-heading-anchor-permalink" href="#Working-a-table-in-place" title="Permalink"></a></h2><p>A concentration table is loaded, cleaned of below-limit rows, converted from ng/mL to pg/mL, and summarised. Three of those four steps only need to change the table they were given, and the table is the biggest thing in the graph - copying it at every step is the obvious waste, and modifying it without copying is the obvious bug.</p><pre><code class="nohighlight hljs">Load ──:table──▶ Trim BLQ ──:table──▶ ng/mL→pg/mL ──:table──▶ Summary
+      handover            handover                  ordinary</code></pre><p>This page builds that pipeline twice: once the way that corrupts its own inputs, and once with ownership declared and taken. Everything below is run when the documentation is built, so the numbers are the real ones.</p><h3 id="The-bug,-first"><a class="docs-heading-anchor" href="#The-bug,-first">The bug, first</a><a id="The-bug,-first-1"></a><a class="docs-heading-anchor-permalink" href="#The-bug,-first" title="Permalink"></a></h3><p>Nothing is copied on a connection: the value a node publishes, the value in its own cache and the value in its consumer&#39;s buffer are <strong>one object</strong>. A node that scales a column in place therefore edits what its producer believes it published.</p><pre><code class="language-julia hljs">using MetidaFlows, DataFrames
+import MetidaFlows: setreadyports!, getexecn
+
+struct Load    &lt;: AbstractNodeType end
+struct Convert &lt;: AbstractNodeType end
+struct Summary &lt;: AbstractNodeType end
+
+#  Детерминированная таблица: никакого rand, чтобы числа в документации не
+#  зависели от версии Julia. 24 точки на субъекта, моноэкспоненциальный спад.
+function conctable(nsubj::Int)
+    times   = 0.5:0.5:12.0
+    subject = repeat(1:nsubj, inner = length(times))
+    time    = repeat(collect(times), outer = nsubj)
+    conc    = @. exp(-0.45 * time) * (1 + 0.1 * (subject % 7))
+    DataFrame(subject = subject, time = time, conc = conc)
+end
+
+load_spec = NodeSpec(&quot;Load&quot;, PortSpec[],
+    [PortSpec(&quot;Table&quot;, DataFrame, :table)], [:subjects])
+
+conv_spec = NodeSpec(&quot;ng/mL to pg/mL&quot;,
+    [PortSpec(&quot;Table&quot;, DataFrame, :table)],
+    [PortSpec(&quot;Table&quot;, DataFrame, :table)], [:factor])
+
+summ_spec = NodeSpec(&quot;Summary&quot;,
+    [PortSpec(&quot;Table&quot;, DataFrame, :table)],
+    [PortSpec(&quot;Rows&quot;, Int,     :rows; kind = :terminal),
+     PortSpec(&quot;Cmax&quot;, Float64, :cmax; kind = :terminal)])
+
+MetidaFlows.execute_unsafe!(n::DataNode{Load}) =
+    (setdata!(n, :table, conctable(n.settings[:subjects])); setreadyports!(n, :table))
+
+function MetidaFlows.execute_unsafe!(n::DataNode{Convert})
+    t = getinputdata(n, :table)        # прочитал чужое...
+    t.conc .*= n.settings[:factor]     # ...и правит на месте
+    setdata!(n, :table, t)
+    return setreadyports!(n, :table)
+end
+
+function MetidaFlows.execute_unsafe!(n::DataNode{Summary})
+    t = getinputdata(n, :table)
+    setdata!(n, :rows, nrow(t))
+    setdata!(n, :cmax, maximum(t.conc))
+    return setreadyports!(n, :rows, :cmax)
+end</code></pre><p>Three nodes, and an analyst who re-enters the same conversion factor between runs - which marks the converter <code>:dirty</code> and leaves the loader <code>:clean</code>:</p><pre><code class="language-julia hljs">w  = Workflow(1)
+ld = add_node!(w, DataNode(Load,    load_spec))
+cv = add_node!(w, DataNode(Convert, conv_spec))
+sm = add_node!(w, DataNode(Summary, summ_spec))
+add_connection!(w, ld, :table, cv, :table)
+add_connection!(w, cv, :table, sm, :table)
+setsettings!(w, ld, Dict(:subjects =&gt; 50))
+setsettings!(w, cv, Dict(:factor   =&gt; 1000))
+
+scheduler!(w)
+cmax = [getdata(w, sm, :cmax)]
+for _ in 1:2
+    setsettings!(w, cv, Dict(:factor =&gt; 1000))   # тот же множитель
+    scheduler!(w; reset_mode = :none)
+    push!(cmax, getdata(w, sm, :cmax))
+end
+cmax</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi">3-element Vector{Float64}:
+ 1277.6259500150034
+    1.2776259500150033e6
+    1.2776259500150034e9</code></pre><p>Cmax grows by a factor of a thousand per run. The loader never reran - it is <code>:clean</code>, so it republished a cache the converter had already multiplied, and multiplied it again:</p><pre><code class="language-julia hljs">getstatus(w, ld), getexecn(w, ld)</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi">(:clean, 1)</code></pre><p><code>reset_mode = :full</code>, the default, hides this by marking every node <code>:dirty</code>, so the loader rebuilds the table each time. It bites exactly in the two paths whose purpose is not to recompute everything: <code>reset_mode = :none</code>, and an <a href="../api_execution/#MetidaFlows.execute!"><code>execute!</code></a> that pulls a <code>:clean</code> parent.</p><h3 id="Declaring-the-chain"><a class="docs-heading-anchor" href="#Declaring-the-chain">Declaring the chain</a><a id="Declaring-the-chain-1"></a><a class="docs-heading-anchor-permalink" href="#Declaring-the-chain" title="Permalink"></a></h3><p>Two ports change. The loader&#39;s output is declared <code>handover = true</code>, and so is the input that takes it; the body uses <a href="../api_access/#Base.take!-Tuple{MetidaFlows.AbstractDataNode, Symbol}"><code>take!</code></a> instead of <a href="../api_access/#MetidaFlows.getinputdata"><code>getinputdata</code></a>. Nothing else about the node changes.</p><pre><code class="language-julia hljs">struct LoadH &lt;: AbstractNodeType end
+struct TrimH &lt;: AbstractNodeType end
+struct ConvH &lt;: AbstractNodeType end
+
+load_h = NodeSpec(&quot;Load&quot;, PortSpec[],
+    [PortSpec(&quot;Table&quot;, DataFrame, :table; handover = true)], [:subjects])
+
+trim_h = NodeSpec(&quot;Trim BLQ&quot;,
+    [PortSpec(&quot;Table&quot;, DataFrame, :table; handover = true)],
+    [PortSpec(&quot;Table&quot;, DataFrame, :table; handover = true)], [:lloq])
+
+#  Выход обычный: дальше стоит сводка, она только читает. Объявлять то,
+#  из чего никто не забирает, значит задаром получить ограничение
+#  «ровно один потребитель».
+conv_h = NodeSpec(&quot;ng/mL to pg/mL&quot;,
+    [PortSpec(&quot;Table&quot;, DataFrame, :table; handover = true)],
+    [PortSpec(&quot;Table&quot;, DataFrame, :table)], [:factor])
+
+MetidaFlows.execute_unsafe!(n::DataNode{LoadH}) =
+    (setdata!(n, :table, conctable(n.settings[:subjects])); setreadyports!(n, :table))
+
+function MetidaFlows.execute_unsafe!(n::DataNode{TrimH})
+    t = take!(n, :table)                              # теперь таблица наша
+    filter!(:conc =&gt; &gt;(n.settings[:lloq]), t)
+    setdata!(n, :table, t)
+    return setreadyports!(n, :table)
+end
+
+function MetidaFlows.execute_unsafe!(n::DataNode{ConvH})
+    t = take!(n, :table)
+    t.conc .*= n.settings[:factor]
+    setdata!(n, :table, t)
+    return setreadyports!(n, :table)
+end
+
+function pipeline(; subjects = 2000)
+    w  = Workflow(1)
+    ld = add_node!(w, DataNode(LoadH, load_h))
+    tr = add_node!(w, DataNode(TrimH, trim_h))
+    cv = add_node!(w, DataNode(ConvH, conv_h))
+    sm = add_node!(w, DataNode(Summary, summ_spec))
+    add_connection!(w, ld, :table, tr, :table)
+    add_connection!(w, tr, :table, cv, :table)
+    add_connection!(w, cv, :table, sm, :table)
+    setsettings!(w, ld, Dict(:subjects =&gt; subjects))
+    setsettings!(w, tr, Dict(:lloq     =&gt; 0.01))
+    setsettings!(w, cv, Dict(:factor   =&gt; 1000))
+    (w = w, ld = ld, tr = tr, cv = cv, sm = sm)
+end</code></pre><p>The same sequence of runs now answers the same thing every time:</p><pre><code class="language-julia hljs">g = pipeline()
+scheduler!(g.w)
+answers = [(getdata(g.w, g.sm, :rows), getdata(g.w, g.sm, :cmax))]
+for _ in 1:2
+    setsettings!(g.w, g.cv, Dict(:factor =&gt; 1000))
+    scheduler!(g.w; reset_mode = :none)
+    push!(answers, (getdata(g.w, g.sm, :rows), getdata(g.w, g.sm, :cmax)))
+end
+answers</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi">3-element Vector{Tuple{Int64, Float64}}:
+ (42000, 1277.6259500150034)
+ (42000, 1277.6259500150034)
+ (42000, 1277.6259500150034)</code></pre><h3 id="Reading-the-statuses"><a class="docs-heading-anchor" href="#Reading-the-statuses">Reading the statuses</a><a id="Reading-the-statuses-1"></a><a class="docs-heading-anchor-permalink" href="#Reading-the-statuses" title="Permalink"></a></h3><pre><code class="language-julia hljs">[getstatus(g.w, i) for i in (g.ld, g.tr, g.cv, g.sm)]</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi">4-element Vector{Symbol}:
+ :released
+ :released
+ :clean
+ :clean</code></pre><p>Three different things are being said here, and the order matters:</p><ul><li><p>the loader and the trimmer are <strong><code>:released</code></strong> - somebody took what they produced. They have no cache for that port any more, so the next run recomputes them instead of republishing a table they no longer hold:</p><pre><code class="language-julia hljs">getdata(g.w, g.ld, :table)</code></pre></li><li><p>the converter is <strong><code>:clean</code></strong>, although its input is declared <code>handover</code> and it did call <code>take!</code>. The status describes what happened to <em>its</em> output, and nobody took that: the summary reads it the ordinary way. A <code>handover</code> output whose value nobody takes keeps its cache like any other;</p></li><li><p>the summary is <code>:clean</code> because it ran and published.</p></li></ul><p>So the status is set by the <strong>consumer&#39;s</strong> execution, not the producer&#39;s. Declaring the ports is permission; <code>take!</code> is the transfer.</p><h3 id="What-it-saves"><a class="docs-heading-anchor" href="#What-it-saves">What it saves</a><a id="What-it-saves-1"></a><a class="docs-heading-anchor-permalink" href="#What-it-saves" title="Permalink"></a></h3><p>The honest comparison is against the version that does not corrupt anything - that is, one that copies defensively at each step:</p><pre><code class="language-julia hljs">struct TrimC &lt;: AbstractNodeType end
+struct ConvC &lt;: AbstractNodeType end
+
+trim_c = NodeSpec(&quot;Trim BLQ&quot;, [PortSpec(&quot;Table&quot;, DataFrame, :table)],
+                              [PortSpec(&quot;Table&quot;, DataFrame, :table)], [:lloq])
+
+function MetidaFlows.execute_unsafe!(n::DataNode{TrimC})
+    t = copy(getinputdata(n, :table))          # защитная копия
+    filter!(:conc =&gt; &gt;(n.settings[:lloq]), t)
+    setdata!(n, :table, t); return setreadyports!(n, :table)
+end
+function MetidaFlows.execute_unsafe!(n::DataNode{ConvC})
+    t = copy(getinputdata(n, :table))          # и ещё одна
+    t.conc .*= n.settings[:factor]
+    setdata!(n, :table, t); return setreadyports!(n, :table)
+end
+
+function pipeline_copy(; subjects = 2000)
+    w  = Workflow(1)
+    ld = add_node!(w, DataNode(Load,    load_spec))
+    tr = add_node!(w, DataNode(TrimC,   trim_c))
+    cv = add_node!(w, DataNode(ConvC,   conv_spec))
+    sm = add_node!(w, DataNode(Summary, summ_spec))
+    add_connection!(w, ld, :table, tr, :table)
+    add_connection!(w, tr, :table, cv, :table)
+    add_connection!(w, cv, :table, sm, :table)
+    setsettings!(w, ld, Dict(:subjects =&gt; subjects))
+    setsettings!(w, tr, Dict(:lloq     =&gt; 0.01))
+    setsettings!(w, cv, Dict(:factor   =&gt; 1000))
+    (w = w, sm = sm)
+end
+
+mb(x) = round(x / 1024^2; digits = 2)
+a = pipeline();      scheduler!(a.w); GC.gc()
+held = @allocated scheduler!(a.w)
+b = pipeline_copy(); scheduler!(b.w); GC.gc()
+copied = @allocated scheduler!(b.w)
+(handover = mb(held), copies = mb(copied), saved = mb(copied - held))</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi">(handover = 2.57, copies = 4.63, saved = 2.06)</code></pre><p>Both runs build the table from scratch - that is most of what the first figure is - and both produce the same answer. The difference is the two defensive copies, and it grows with every further step that touches the table, while the handover version stays flat.</p><h3 id="Rules-this-example-follows"><a class="docs-heading-anchor" href="#Rules-this-example-follows">Rules this example follows</a><a id="Rules-this-example-follows-1"></a><a class="docs-heading-anchor-permalink" href="#Rules-this-example-follows" title="Permalink"></a></h3><ul><li><strong>Declare <code>handover</code> on both ports of the connection, and only where the consumer really takes.</strong> The engine refuses a taking input fed by an ordinary output; it allows the reverse, so a handover output may feed a node that just reads;</li><li><strong>a handover output takes exactly one connection</strong>, refused at creation - a second consumer would receive a value the first is entitled to overwrite;</li><li><strong>the chain ends where reading begins.</strong> <code>Summary</code> is an ordinary consumer, and the node before it publishes on an ordinary port;</li><li><strong><code>take!</code> once, then own it.</strong> After the call the buffer slot is empty and the node holds the only reference; <code>filter!</code>, <code>sort!</code> and <code>.*=</code> on it are then legal, and that is the whole point.</li></ul><p>See <a href="../guide_execution/#Working-on-data-in-place">Working on data in place</a> in the execution guide for the rules themselves, and <a href="../api_types/#MetidaFlows.PortSpec"><code>PortSpec</code></a> for the keyword.</p></article><nav class="docs-footer"><a class="docs-footer-prevpage" href="../examples_settings_query/">« Querying settings</a><a class="docs-footer-nextpage" href="../examples_bubble_sort/">Bubble sort as a graph »</a><div class="flexbox-break"></div><p class="footer-message">Powered by <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> and the <a href="https://julialang.org/">Julia Programming Language</a>.</p></nav></div><div class="modal" id="documenter-settings"><div class="modal-background"></div><div class="modal-card"><header class="modal-card-head"><p class="modal-card-title">Settings</p><button class="delete"></button></header><section class="modal-card-body"><p><label class="label">Theme</label><div class="select"><select id="documenter-themepicker"><option value="auto">Automatic (OS)</option><option value="documenter-light">documenter-light</option><option value="documenter-dark">documenter-dark</option><option value="catppuccin-latte">catppuccin-latte</option><option value="catppuccin-frappe">catppuccin-frappe</option><option value="catppuccin-macchiato">catppuccin-macchiato</option><option value="catppuccin-mocha">catppuccin-mocha</option></select></div></p><hr/><p>This document was generated with <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> version 1.20.0 on <span class="colophon-date" title="Saturday 21 November 2026 20:05">Saturday 21 November 2026</span>. Using Julia version 1.13.4.</p></section><footer class="modal-card-foot"></footer></div></div></div></body></html>
