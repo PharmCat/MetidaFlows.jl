@@ -201,7 +201,6 @@ inherited the wiring that was already there.
 !!! compat "Added in 0.6.0"
     Snapshots carrying this event are stamped format 3; see
     [`SNAPSHOT_FORMAT_VERSION`](@ref).
-
 """
 struct NodeReplaced <: AbstractAuditEvent
     id::Int
