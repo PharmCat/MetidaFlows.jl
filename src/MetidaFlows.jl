@@ -1,7 +1,7 @@
 """
     MetidaFlows
  
-A lightweight, node-based workflow engine for analytical pipelines.
+A node-based workflow engine for analytical pipelines.
  
 A workflow is a directed graph of [`DataNode`](@ref)s wired through typed
 ports. Every node declares its interface with a [`NodeSpec`](@ref); the engine
@@ -91,14 +91,15 @@ abstract type AbstractNodeType end
 Supertype of the records in `Workflow.audit_log`: a **change log of the graph**
 in the order the edits happened.
 
-Five concrete events, one per model-level mutator:
+Six concrete events, one per model-level mutator:
 [`NodeAdded`](@ref), [`NodeDeleted`](@ref), [`ConnectionAdded`](@ref),
-[`ConnectionDeleted`](@ref) and [`SettingsChanged`](@ref).
+[`ConnectionDeleted`](@ref), [`SettingsChanged`](@ref) and
+[`NodeReplaced`](@ref).
 
-That set is the mutators that take a [`Workflow`](@ref), which is also the
-boundary of what the log can see: [`setid!`](@ref) and [`setposition!`](@ref)
-are given a node and no model, so moving a node in an editor is not an edit
-this log records.
+Every mutator that takes a [`Workflow`](@ref) writes one of the six, and that
+is the boundary of what the log can see. [`setid!`](@ref) and
+[`setposition!`](@ref) are given a node and no model, so moving a node in an
+editor is an edit the log does not record.
 
 # What it is not
 - **Not an undo stack.** [`SettingsChanged`](@ref) records which setting keys
@@ -111,13 +112,14 @@ this log records.
   on every machine; a wall clock would only add something that is not
   reproducible.
 
-Recording is **off by default** - see [`Workflow`](@ref) and the `audit`
-keyword - and when it is on, **nothing is ever dropped**: the log is neither
-capped nor truncated by the engine. A change log with holes in it answers "did
-this happen?" with a maybe, which is worse than having none, so the switch is
-all or nothing. Trimming it, if a long editing session needs that, is the
-caller's business. Cascades fall out of the mutators: [`delete_node!`](@ref) deletes the
-node's connections through [`delete_connection!`](@ref), so the log shows each
+Recording is **off by default**, switched by [`SETTINGS`](@ref)`[:audit]`.
+While it is on, **nothing is ever dropped**: the engine neither caps nor
+truncates the log. A log with gaps answers "did this happen?" with a maybe,
+so the switch is all or nothing. Trimming a log that a long editing session
+made unwieldy is the caller's business.
+
+Cascades fall out of the mutators. [`delete_node!`](@ref) deletes the node's
+connections through [`delete_connection!`](@ref), so the log holds each
 [`ConnectionDeleted`](@ref) and then the [`NodeDeleted`](@ref).
 
 !!! compat "Implemented in 0.3.0"
@@ -131,9 +133,9 @@ abstract type AbstractAuditEvent end
 
 A node with id `id` was added by [`add_node!`](@ref).
 
-`type` is the node type's **registry name** as [`nodetypestr`](@ref) renders it,
-a `String` and not a `Type`: an audit record travels into snapshot files, and
-nothing read out of a file is ever resolved to a type.
+`type` is the node type's **registry name** as [`nodetypestr`](@ref) renders
+it: a `String`, never a `Type`. An audit record travels into snapshot files,
+and nothing read out of a file is ever resolved to a type.
 """
 struct NodeAdded <: AbstractAuditEvent
     id::Int
@@ -189,13 +191,16 @@ every connection. `type` is the node type now at that id, `previous` the one
 it displaced, both as strings - see [`AbstractAuditEvent`](@ref) on why a type
 is never stored as a `Type`.
 
-`previous` is there so one record answers what happened. It could be found by
-scanning back to whatever last claimed this id, and a log that has to be read
-backwards to be understood is a log that gets misread.
+`previous` is recorded so that one record answers what happened. Reading it
+off the log otherwise means scanning back to whatever last claimed this id.
 
-This is not [`NodeAdded`](@ref) twice: the identifier is not new, the
-connections are not new, and the wiring the replacement inherited is exactly
-what was there before.
+The event is distinct from two [`NodeAdded`](@ref) records under one id: the
+identifier is not new, the connections are not new, and the replacement
+inherited the wiring that was already there.
+
+!!! compat "Added in 0.6.0"
+    Snapshots carrying this event are stamped format 3; see
+    [`SNAPSHOT_FORMAT_VERSION`](@ref).
 """
 struct NodeReplaced <: AbstractAuditEvent
     id::Int
@@ -214,10 +219,10 @@ Sorted rather than as given: the caller passes a `Dict`, whose iteration order
 is not the insertion order, so recording them as they came would make the log
 differ between machines on identical edits.
 
-`replace` says the write was a replacement rather than a merge, so `keys` is
-then the node's whole setting list and not just the part that moved. Without
-it the log could not be replayed: the same record would mean two different
-things, and a reader could not tell whether a key missing from it survived.
+`replace` says the write was a replacement rather than a merge. `keys` is
+then the node's whole setting list, not only the part that moved. Without the
+field one record would stand for two different edits, and a reader could not
+tell whether a key absent from it survived.
 """
 struct SettingsChanged <: AbstractAuditEvent
     id::Int
@@ -255,8 +260,9 @@ abstract type WorkFlowType end
     DAW <: WorkFlowType
  
 Data Analysis Workflow: a deterministic acyclic graph. Its scheduler rejects
-cyclic graphs, resets every node and executes the whole graph in topological
-order, each node exactly once per run.
+cyclic graphs and executes the whole graph in topological order, each node
+once per run. What it clears before the run is set by `reset_mode`, which
+defaults to `:full`; see [`RESET_LEVELS`](@ref).
 """
 struct DAW <: WorkFlowType end # Data Analysis Workflow
 """
@@ -275,8 +281,14 @@ struct ABW <: WorkFlowType end # Agent-Based Workflow
 Log record kept in `Workflow.log` and in the node execution state.
  
 The two-argument form generates a random `id` and stamps the current time.
-Records are currently produced in one place only: [`execute!`](@ref) appends
-an `:error` record to `workflow.log` when [`execute_unsafe!`](@ref) raises.
+
+The engine writes `:error` records when [`execute_unsafe!`](@ref) raises, when
+an `on_start` or `on_finish` callback raises, and when a callback is found to
+have edited the graph; it writes `:info` records when a node stops the run and
+when `release_optional` releases nodes held back only by optional inputs.
+A node writes its own records with
+[`log!(node, level, message)`](@ref log!), readable as
+[`getstate`](@ref)`(model, id, :log)`.
 """
 struct LogMsg
     id::UInt64
@@ -326,8 +338,8 @@ empty!(s)               # back to FilterSettings()
 ```
 
 # The protocol
-These five methods are what the engine calls on a container, and all five come
-from this type:
+These seven methods are what the engine calls on a container, and all seven
+come from this type:
 
 | method | meaning | needed by |
 |:---|:---|:---|
@@ -337,10 +349,12 @@ from this type:
 | `haskey(obj, f)` | `hasfield` | [`settings_to_dict`](@ref) |
 | `get(obj, f, default)` | field or `default` | [`getdata`](@ref) |
 | `empty!(obj)` | every field back to what the zero-argument constructor gives | [`mark_dirty!`](@ref), [`reset!`](@ref) |
+| `delete!(obj, f)` | that one field back to the same value | [`replacesettings_unsafe!`](@ref) |
 
-`empty!` is the only one with a condition: a struct has no "empty" state of its
-own, so the generic method rebuilds one with `T()` and copies its fields over.
-**Give the struct a zero-argument constructor**, or define `Base.empty!`
+`empty!` and `delete!` are the two with a condition. A struct has no "empty"
+state of its own and no missing field, so both are defined against a freshly
+constructed instance: the generic methods build one with `T()` and copy from
+it. **Give the struct a zero-argument constructor**, or define `Base.empty!`
 yourself - [`NodeState`](@ref) does the latter. Without either, `empty!` raises
 and names the type, because the engine clears cached output data on every
 invalidation and cannot proceed.
@@ -378,8 +392,9 @@ abstract type AbstractNodeData  <: AbstractNodeFields end
     AbstractNodeState <: AbstractNodeFields
 
 Supertype of node execution state. The package ships [`NodeState`](@ref).
-[`request_stop!`](@ref) needs a `stop` field and so works on `NodeState` only;
-[`isstoprequested`](@ref) reports `false` for any other subtype.
+[`request_stop!`](@ref) is defined on `NodeState` and raises on any other
+subtype; [`isstoprequested`](@ref) reports `false` for them. A node's own log
+needs a `log` field, and [`log!`](@ref) raises on a state without one.
 """
 abstract type AbstractNodeState  <: AbstractNodeFields end
 
@@ -473,7 +488,8 @@ Execution flags consumed by [`execute!`](@ref):
 - `check_cyclic` - detect re-entrant execution of the same node (`Ring detected`);
 - `check_input_buffer` - require data on every `required` input port.
 
-The single-argument form sets all four flags to the same value.
+The single-argument form sets all four flags to the same value and leaves
+both callbacks unset.
 
 # Watching a run
 
@@ -605,10 +621,10 @@ may or may not be there cannot be used to tell what the graph went through.
 See [`AbstractAuditEvent`](@ref).
 
 !!! note "These are process-wide"
-    One table for every workflow in the process. Two graphs open at once cannot
-    differ, and code that changes a setting has to put it back - a test that
-    needs the audit log on, above all, or it changes what every later test
-    sees.
+    One table for every workflow in the process, so two graphs open at once
+    cannot differ in these settings. Code that changes a setting has to put it
+    back. A test that turns the audit log on and leaves it on changes what
+    every later test sees.
 """
 const SETTINGS = Dict{Symbol, Any}(
     :logging   => true,
@@ -659,17 +675,22 @@ Per-node execution state with dict-like field access:
  
 - `exec_n::Int` - number of times [`execute_unsafe!`](@ref) was entered since
   the last full reset. Incremented by [`execute!`](@ref) right before the node
-  body runs, so a node rejected by validation leaves it unchanged while a
-  failed node does not.
+  body runs: validation rejecting a node leaves the counter where it was, while
+  a node that raised has already raised the counter.
  
   Zeroed by [`reset!`](@ref) at `:soft` and above, at either scope, and by
-  `empty!(state)` — but **not** by [`mark_dirty!`](@ref), so invalidating a
+  `empty!(state)`, but **not** by [`mark_dirty!`](@ref), so invalidating a
   subtree does not lose the count. In a cyclic [`ABW`](@ref) run the counter
   therefore holds the number of loop turns, and a node may read its own
   `node.state[:exec_n]` inside [`execute_unsafe!`](@ref) as the current turn
   number;
-- `ready_ports::Vector{Symbol}` - output ports produced by the last successful execution (used by [`push_buffer!`](@ref));
+- `ready_ports::Vector{Symbol}` - output ports produced by the last
+  successful execution, read by [`push_buffer!`](@ref);
 - `execution_id::UInt64` - id of the run that last touched the node;
+- `stop::Bool` - the flag [`request_stop!`](@ref) raises and
+  [`isstoprequested`](@ref) reads. Cleared by [`reset!`](@ref) at `:soft` and
+  above and by `empty!(state)`, so a stop raised under `reset_mode = :none`
+  survives into the next run;
 - `log::Vector{LogMsg}` - the node's own log, written by the node through
   [`log!`](@ref) and by nothing in the engine; cleared by `empty!(state)` and
   by [`reset!`](@ref) at `:all`, and emptied by [`execute!`](@ref) itself when
@@ -725,7 +746,7 @@ struct SinglePort <: AbstractPortType end
 #
 """
     PortSpec(name, datatype, label, ::T = SinglePort(); required::Bool = true,
-             kind::Symbol = :normal) where T <: AbstractPortType
+             kind::Symbol = :normal, handover::Bool = false) where T <: AbstractPortType
  
 Specification of a node port.
  
@@ -793,8 +814,25 @@ Constraints are checked at construction time. `kind = :feedback` on an
 **output** port is rejected by the [`NodeSpec`](@ref) constructor: a delay is a
 property of the consumer, not of the producer.
  
-Only [`isready`](@ref) and [`execution_node_validation`](@ref) read the kind.
-Buffering, invalidation and serialization are identical for all kinds.
+Where the kind is read:
+
+- **construction** - an `:error` port must be optional and carry an
+  `Exception` subtype; `:feedback` on an output is rejected by the
+  [`NodeSpec`](@ref) constructor;
+- **wiring** - a connected `:terminal` output warns;
+- **readiness** - only a `:normal` input is waited for, and only a `:normal`
+  `required` input must hold a value ([`readydeps`](@ref),
+  [`execution_node_validation`](@ref));
+- **invalidation** - only `:normal` input buffers are cleared
+  ([`invalidate_unpublished!`](@ref), [`invalidate_stale_optional!`](@ref));
+- **reset** - [`reset!`](@ref) clears `:feedback` buffers at `:full` and the
+  remaining input buffers at `:inputs`;
+- **snapshots** - only `:feedback` buffers are written and read back, because
+  a normal input is refilled by its producer within the same run;
+- **metadata** - only `:normal` inputs take part in the [`getmeta`](@ref) walk.
+
+Writing a value to a port, reading it and caching it are the same for every
+kind.
  
 # Example
 ```julia
@@ -848,9 +886,28 @@ Fields:
 - `settings::Vector{Symbol}` - settings keys advertised through the node schema.
 - `portmap::Dict{Tuple{Symbol,Symbol}, Int}` - `(direction, label) => port index`, built by the constructor.
 
+# A spec is a shared value, so never edit one in place
+Nodes **share** specs. Building two nodes from one `NodeSpec` object is legal,
+and [`dict_to_workflow`](@ref) does it as a matter of course: every node of a
+type loaded from a snapshot gets the one spec object held in
+[`NODE_REGISTER`](@ref).
+
+`NodeSpec` and [`PortSpec`](@ref) are immutable, so a field cannot be
+assigned. But `input_ports` and `output_ports` are ordinary `Vector`s, and a
+vector inside an immutable struct is still a vector. Assigning into one does
+not change a single node's ports. It changes them for every node sharing that
+spec, for the register, and therefore for every workflow loaded afterwards in
+this process: a graph loaded later can fail to validate because of an edit
+made to an unrelated one. It also leaves `model.ver` untouched, so the readiness map
+cached against it keeps the old `required` and `kind`.
+
+Treat a spec as the immutable value it is meant to be, and change a node's
+ports with [`replaceport!`](@ref) or [`replacespec!`](@ref), which build a new
+spec and re-check every connection first.
+
 # Ports are enforced, settings are not
-The two lists are not symmetric, and it is worth knowing which is which. A
-port label that is not in the spec is **rejected**. A settings key that is not
+The two lists are not symmetric. A port label that is not in the spec is
+**rejected**. A settings key that is not
 in `settings` is **not**: [`setsettings!`](@ref) merges whatever it is given,
 and the list is a declaration for [`settings_schema`](@ref) and for whoever
 builds a user interface over the node. If a setting is mandatory, or has to be
@@ -899,7 +956,8 @@ connection id, **kept in ascending key order**.
 That order is the contract [`getinputdata`](@ref) publishes for a
 [`MultiPort`](@ref), so a container that already holds its keys sorted answers
 with a copy instead of collecting, sorting and hashing - see
-[`buffervalues`](@ref). Two parallel vectors, binary search to place a write.
+[`buffervalues`](@ref). The container is two parallel vectors, and a write is
+placed by binary search.
 
 # Why sorted and not insertion-ordered
 An insertion-ordered container (`OrderedDict` and friends) would record the
@@ -1088,15 +1146,21 @@ end
 # Node
 """
     DataNode(type::Type{T}, properties, spec, settings::SettingsT, data::DataT, state::StateT, input_buffer::BufferT) where T <: AbstractNodeType where SettingsT where DataT where StateT where BufferT
-    DataNode(type::Type, id, status, position, spec; settings = Dict{Symbol, Any}(), data = Dict{Symbol, Any}(), state = NodeState(), input_buffer = Dict{Symbol, PortBuffer{Any}}())
-    DataNode(type::Type, spec; settings = Dict{Symbol, Any}(), data = Dict{Symbol, Any}(), state = NodeState(), input_buffer = Dict{Symbol, PortBuffer{Any}}())
+    DataNode(type::Type, spec; settings = nodesettings(type), data = nodedata(type), state = nodestate(type), input_buffer = nodebuffer(type))
+    DataNode(type::Type, properties, spec; settings = ..., data = ..., state = ..., input_buffer = ...)
+    DataNode(type::Type, id, status, position, spec; settings = ..., data = ..., state = ..., input_buffer = ...)
 
 Concrete workflow node.
 
 The first type parameter is the user-defined behaviour tag
 ([`AbstractNodeType`](@ref)) on which [`execute_unsafe!`](@ref) and the
-validation hooks dispatch; the remaining four are the types of the containers,
-so a node can be backed by plain `Dict`s (the default) or by custom structs.
+validation hooks dispatch. The remaining four are the types of the containers,
+so a node can be backed by plain `Dict`s or by custom structs.
+
+The three keyword forms take their defaults from [`nodesettings`](@ref),
+[`nodedata`](@ref), [`nodestate`](@ref) and [`nodebuffer`](@ref), so one method
+on a node type decides what every node of it is built with. Out of the box
+those hooks give `Dict`s and a [`NodeState`](@ref).
 
 Fields:
 - `properties::NodeProperties` - id, status, position.
@@ -1160,7 +1224,7 @@ end
     nodesettings(::Type) -> container
     nodedata(::Type)     -> container
     nodestate(::Type)    -> container
-    nodebuffer(::Type)   -> Dict{Symbol, PortBuffer{T}}
+    nodebuffer(::Type)   -> container
 
 Fresh containers for a node of the given node type. These are the defaults of
 the [`DataNode`](@ref) keyword constructors and what [`dict_to_node`](@ref)
@@ -1359,16 +1423,18 @@ recomputes its own part when that part is out of date.
   does not pay for a topological sort.
 
 # Staleness
-`Workflow.ver` is raised by the four functions that edit a graph, and only by
+`Workflow.ver` is raised by the five functions that edit a graph, and only by
 them, so a cached value is stale exactly when the structure changed through
-them.
+[`add_node!`](@ref), [`delete_node!`](@ref), [`add_connection!`](@ref),
+[`delete_connection!`](@ref) or
+[`replace!`](@ref replace!(::Workflow, ::AbstractDataNode, ::Int)).
 
-A new workflow starts at version `0` with all four values already set - the
-empty graph, `false`, an empty order and no obligations - which is what an
-empty workflow's answers are, so nothing is computed until the first edit. The cache is
-therefore correct for as long as every edit goes through the editing
-functions, and silently wrong as soon as one does not: see *Editing the graph*
-in [`Workflow`](@ref).
+A new workflow starts at version `0` with all four values already set: the
+empty graph, `false`, an empty order and no obligations, which is what an
+empty workflow's answers are. Nothing is computed until the first edit. The
+cache is therefore correct for as long as every edit goes through the editing
+functions, and silently wrong as soon as one does not - see *Editing the
+graph* in [`Workflow`](@ref).
 """
 mutable struct GraphCache
     ver::Int
@@ -1408,6 +1474,21 @@ Fields:
   and [`log!`](@ref).
 - `audit_log` - the graph change log; empty unless [`SETTINGS`](@ref)`[:audit]`
   is on, see [`AbstractAuditEvent`](@ref).
+- `ver` - the structural version, raised by every edit of the graph.
+- `graph` - the cached graph and what is derived from it
+  ([`GraphCache`](@ref)).
+
+# Editing the graph
+A graph is edited through [`add_node!`](@ref), [`delete_node!`](@ref),
+[`add_connection!`](@ref), [`delete_connection!`](@ref) and
+[`replace!`](@ref replace!(::Workflow, ::AbstractDataNode, ::Int)), and through
+nothing else. Each of the five raises `ver`, which is what tells
+[`GraphCache`](@ref) that its four cached values are out of date.
+
+Writing into `nodes` or `connections` directly leaves `ver` where it was, so
+the cached graph, the cyclicity answer, the topological order and the
+readiness map all stay as they were and are consulted as if nothing had
+changed. The same holds for editing a [`NodeSpec`](@ref) in place.
 """
 mutable struct Workflow{T <: WorkFlowType}
     id::Int                      # model ID
@@ -1454,10 +1535,10 @@ end
 Append `msg` to `model.log` if [`SETTINGS`](@ref)`[:logging]` is on, and return the
 model. The single place the log is written.
 
-The log is bounded by [`SETTINGS`](@ref)`[:log_limit]` and the engine never clears it between
-runs, so what it holds is the most recent `log_limit` messages of this
-workflow's whole life. See [`SETTINGS`](@ref)`[:log_limit]` for the policy and
-[`Workflow`](@ref) for the two knobs.
+The log is bounded by [`SETTINGS`](@ref)`[:log_limit]`, and the engine never
+clears it between runs, so what it holds is the most recent `log_limit`
+messages of this workflow's whole life. Both the switch and the bound live in
+[`SETTINGS`](@ref), not in the workflow.
 
 Unlike this one, the graph change log is never capped - see
 [`AbstractAuditEvent`](@ref) for why an edit history with holes in it is worse
@@ -1496,19 +1577,29 @@ on/off switch where `Workflow.log` has `logging` - the only thing that writes a
 node's log is the node's own code, so declining to call this *is* the switch.
 
 # Bound and lifetime
-The log keeps the most recent [`SETTINGS`](@ref)`[:log_limit]` messages, oldest
-dropped first ([`SETTINGS`](@ref)`[:log_limit]` is 1000, `0` means no limit). That bound is
-what makes logging from inside a cycle safe: a node that writes a line on every
-turn of a 100 000-turn loop still holds that many records, the last ones.
+The log keeps the most recent [`SETTINGS`](@ref)`[:log_limit]` messages,
+oldest dropped first; the default is 1000, and `0` means no limit. That bound
+is what makes logging from inside a cycle safe: a node that writes a line on
+every turn of a 100 000-turn loop ends up holding `log_limit` records, the
+last ones written.
 
-It is cleared when the node's state is, which is [`reset!`](@ref)`(node)`,
-`empty!(node.state)`, and `add_node!` on a node that is neither `:idle` nor
-`:clean`. [`reset!`](@ref)`(model)` does **not** clear it, so messages survive
-a re-run of the workflow; the limit is what keeps that bounded.
+The log belongs to a run. [`execute!`](@ref) empties it whenever the workflow's
+`run_id` is not the one the node last saw, and it does so before anything else
+- before the `:clean` check, so a node the engine takes up and then skips comes
+out with an empty log just the same. After a [`scheduler!`](@ref) call a node
+therefore holds the messages of that run and nothing older; only a node the
+scheduler never called [`execute!`](@ref) on at all, because it was not ready
+or was never enqueued, keeps what it had.
+
+Otherwise it is cleared only by `empty!(node.state)` and by
+[`reset!`](@ref) at `level = :all`, the level that empties a node completely.
+`:full` and below leave it alone, and so does `add_node!`, whose default reset
+is `:full`.
 
 A custom [`AbstractNodeState`](@ref) needs a `log` field to be written to, and
-a node whose state has none raises an error naming the type. A state without a
-`log_limit` field is fine - the default is used.
+a node whose state has none raises an error naming the type. The bound is read
+from [`SETTINGS`](@ref) in either case, so a state container has nothing to
+declare for it.
 """
 function log!(node::AbstractDataNode, msg::LogMsg)
     haskey(node.state, :log) ||
@@ -1570,7 +1661,12 @@ end
 """
     nodetypestr(node::DataNode{T}) where T
 
-Return string representation of node type `T`.
+The node type's **registry name**: the defining module and the type name,
+joined by a dot, as in `"Main.ReadCSV"`.
+
+That string is the key in [`NODE_REGISTER`](@ref), the `"type"` of a node in a
+snapshot and the `type` of [`NodeAdded`](@ref) and [`NodeReplaced`](@ref). It
+is produced from the type and never parsed back into one.
 """
 function nodetypestr(::DataNode{T}) where T
     string(parentmodule(T), ".", nameof(T))
@@ -1621,10 +1717,9 @@ end
 
 Check whether a port exists in node specification.
 
-Direction:
-- `:input`
-- `:output`
-- `:any`
+`direction` is `:input`, `:output` or `:any`; any other value raises. Compare
+[`isportinspec`](@ref), which answers `false` for a direction it does not
+know.
 """
 function isportexist(node::AbstractDataNode, port::Symbol, direction::Symbol = :any)
     if !(direction in (:input, :output, :any)) error("Wrong direction [:input, :output, :any]") end
@@ -1682,8 +1777,10 @@ end
 """
     find_connections(model::Workflow, id::Int)
 
-Return all connection IDs associated with a node
-(both incoming and outgoing).
+Connection identifiers attached to a node, incoming first and then outgoing.
+
+A connection from a node to itself is both, so it appears **twice**: the
+result is what to iterate over, not something to count.
 """
 function find_connections(model::Workflow, id::Int)
     v = Int[]
@@ -1698,15 +1795,22 @@ end
 
 #
 """
-    check_connection_validity(model, c::NodeConnection)
+    check_connection_validity(model, c::NodeConnection; throw_error = true, throw_warn = true)
 
 Validate a connection before it is registered. Raises an error unless:
- 
+
 - both nodes exist in the workflow;
 - both ports exist in the corresponding node specifications;
 - the target input port is free, or declared as a [`MultiPort`](@ref);
-- the output port datatype is a subtype of the input port datatype.
- 
+- the output port datatype is a subtype of the input port datatype;
+- an input declared `handover` is fed by an output declared the same way
+  (see [`PortSpec`](@ref));
+- an output declared `handover` has no consumer yet.
+
+A connected `:terminal` output warns instead of raising. With
+`throw_error = false` the function answers `false` where it would raise, and
+`throw_warn = false` silences the warning.
+
 A rejected connection does not consume a connection identifier.
 """
 function check_connection_validity(model, c::NodeConnection; throw_error::Bool = true, throw_warn::Bool = true)
@@ -1771,9 +1875,12 @@ end
 Add connection to workflow.
 
 Performs:
-- connection validation,
-- connection registration,
-- incoming/outgoing index updates.
+- connection validation ([`check_connection_validity`](@ref)),
+- connection registration under a new or a given identifier,
+- `incoming`/`outgoing` index updates,
+- invalidation of the consumer and everything below it,
+- a [`ConnectionAdded`](@ref) record in the change log,
+- a raise of `model.ver`.
 
 If the source node already has status `:clean`,
 its output data is immediately propagated into
@@ -1825,6 +1932,9 @@ Rebuild the `incoming`/`outgoing` indices from `model.connections`.
 Cheaper than keeping them in a snapshot and safer: the indices cannot disagree
 with the connections they index. Used by [`dict_to_workflow`](@ref) after the
 nodes and connections are in place.
+
+Each index vector comes out **sorted by connection identifier**, which is the
+order a [`MultiPort`](@ref) input publishes for its values.
 """
 function refreshind!(model::Workflow)
     empty!(model.incoming)
@@ -1846,9 +1956,12 @@ end
 Remove connection from workflow.
 
 Performs:
-- deletion of corresponding child input buffer entry,
-- removal from incoming/outgoing indices,
-- deletion from workflow connection storage.
+- invalidation of the consumer and everything below it,
+- deletion of the corresponding child input buffer entry,
+- removal from the `incoming`/`outgoing` indices,
+- deletion from workflow connection storage,
+- a [`ConnectionDeleted`](@ref) record in the change log,
+- a raise of `model.ver`.
 
 # Returns
 - `true` if connection existed and was removed.
@@ -1927,6 +2040,9 @@ Pass `reset = :all` to empty the node on insertion, which is what versions
 before 0.5.0 did unconditionally, or `reset = :none` to insert it exactly as
 it is.
  
+Insertion raises `model.ver` and writes a [`NodeAdded`](@ref) record to the
+change log.
+
 # Returns
 Assigned node identifier (`Int`).
 """
@@ -1951,9 +2067,13 @@ end
 Remove node from workflow.
 
 Performs:
-- deletion of all incoming and outgoing connections,
+- deletion of all incoming and outgoing connections, each through
+  [`delete_connection!`](@ref), so each leaves its own
+  [`ConnectionDeleted`](@ref) record ahead of this node's,
 - cleanup of connection indices,
-- removal of node from workflow storage.
+- removal of node from workflow storage,
+- a [`NodeDeleted`](@ref) record in the change log,
+- a raise of `model.ver`.
 
 # Returns
 - `true` if node existed and was removed.
@@ -2001,8 +2121,8 @@ Each level does what the one before it does and more:
 | `:inputs` | every remaining input buffer | settings |
 | `:all` | settings, the node log, `execution_id`; the status becomes `:idle` | nothing - the node is as new |
 
-The same words name the `reset_mode` of [`scheduler!`](@ref), which uses the
-first four.
+The same words name the `reset_mode` of [`scheduler!`](@ref), which accepts
+three of them - `:none`, `:soft` and `:full` - and raises on the rest.
 
 Clearing the feedback buffers at `:full` is what makes a full reset full for a
 cyclic workflow: those buffers hold the state of the last turn, and a loop head
@@ -2137,16 +2257,16 @@ Performs the following operations:
 - clears `ready_ports`,
 - clears cached output data stored in `node.data`.
  
-With `soft = true` the last two steps are skipped: the status and the counter
-are reset, but `ready_ports` and `node.data` are left in place. That is what
+With `soft = true` the last two steps are skipped: only the status changes,
+and `ready_ports` and `node.data` are left in place. That is what
 `reset_mode = :soft` of [`scheduler!`](@ref) uses to keep results between
 runs.
  
 This function intentionally does **not** clear:
 - node settings,
-- input buffer,
-- execution logs.
-- execution counters/state metadata.
+- input buffers,
+- execution logs,
+- execution counters and the rest of the state.
  
 That last line is why `mark_dirty!` is **not** a level of
 [`RESET_LEVELS`](@ref): `:soft`, which throws away less in every other
@@ -2196,9 +2316,16 @@ they do below a failure - a stop is **not** a failure, so
 appends an `:info` record to `model.log` naming the node that stopped it.
 
 The flag lives in the node's [`NodeState`](@ref) and is cleared by
-[`reset!`](@ref), so the next run starts clean. With `reset_mode = :none`
-nothing is reset, so a stop requested by an earlier run is still there and the
-next one ends on that node again.
+[`reset!`](@ref) at `:soft` or above, so the next run starts clean. With
+`reset_mode = :none` nothing is reset, so a stop requested by an earlier run is
+still there and the next one ends on that node again.
+
+A node whose state is a custom [`AbstractNodeState`](@ref) cannot carry the
+flag: this is defined on [`NodeState`](@ref) and raises for every other state,
+naming the type. A `stop` field of your own does not help, because nothing
+dispatches on a field. Asking
+[`isstoprequested`](@ref) about such a node answers `false` instead, because a
+stop that cannot be requested has not been.
 
 Which node stopped a run is an ordinary query afterwards:
 
@@ -2221,8 +2348,8 @@ Whether the node ran successfully, whatever became of its cached outputs:
 This is the question [`isready`](@ref) asks about a producer. A node whose
 value has been taken is not `:clean` - it has no cache to republish - but the
 consumer already holds what it needs, so for readiness the two statuses mean
-the same thing. The question "can you be republished" is a
-different one, and only `:clean` answers it.
+the same thing. The question "can you be republished" is a different one, and
+only `:clean` answers it.
 
 Not part of the public API.
 """
@@ -2295,9 +2422,9 @@ end
 
 Whether [`request_stop!`](@ref) was called on this node and not yet cleared,
 either by `request_stop!(node, false)` or by [`reset!`](@ref) at `:soft` or
-above. A node whose state type has no `stop` field - a custom
-`AbstractNodeState` - always reports `false`, so a stop can never be requested
-by accident.
+above. A node whose state is a custom `AbstractNodeState` always reports
+`false`: the flag is a field of [`NodeState`](@ref), and nothing else can carry
+it, so a stop can never be requested by accident.
 
 `scheduler!(model; reset_mode = :none)` resets nothing, so a stop raised in an
 earlier run is still raised: that run ends at the same node again. Lower the
@@ -2343,7 +2470,8 @@ end
     invalidate_stale_optional!(model::Workflow, id::Int)
 
 Clear this node's buffer for every `:normal` connection entering an **optional**
-port whose producer is not `:clean`.
+port whose producer has not produced - neither `:clean` nor `:released`, see
+[`hasproduced`](@ref).
 
 The producer has not published in the current turn, so whatever sits in that
 buffer came from an earlier one. [`invalidate_unpublished!`](@ref) covers the
@@ -2374,12 +2502,20 @@ end
 """
     invalidate_downstream!(model::Workflow, id::Int)
 
-Recursively invalidate all downstream nodes.
+Recursively invalidate the node and everything downstream of it.
 
-Marks the specified node and all descendant nodes as `:dirty`
-using [`mark_dirty!`](@ref).
+For the node itself this is [`mark_dirty!`](@ref): the status becomes
+`:dirty`, `ready_ports` and cached output data are dropped. For every outgoing
+connection it then clears the consumer's buffer slot fed by that connection
+and descends into the consumer.
 
-The traversal follows all outgoing connections recursively.
+**A node that is already `:dirty` stops the walk before anything happens**,
+including before its descendants are visited. That is deliberate - a node
+became dirty by this same walk, so its cone has already been handled - but it
+means a caller that has just put a `:dirty` node into the graph has to
+invalidate the children itself rather than call this on the node.
+
+The walk is recursive, where [`mark_dirty_downstream!`](@ref) is iterative.
 """
 function invalidate_downstream!(model::Workflow, id::Int)
     node = getnode(model, id)
@@ -2470,13 +2606,19 @@ end
 Check whether a node is ready for execution.
 
 A node is ready when, for every connection entering a **`:normal`** input
-port, the producer has status `:clean` **and**, if the port is `required`, that
+port, the producer has produced **and**, if the port is `required`, that
 producer actually published to the port this connection leaves. Connections
 entering ports of any other kind are not waited for.
- 
+
+"Has produced" is `:clean` or `:released` - see [`hasproduced`](@ref). A
+producer whose value was taken through a `handover` port has no cache left,
+but the consumer already holds what it needs, so readiness cannot treat it as
+unfinished.
+
 The kind asymmetry is what makes cycles possible: a `:feedback` edge carries
-the value of the previous iteration, so requiring its producer to be `:clean`
-would deadlock - the node would wait for a producer that waits for the node.
+the value of the previous iteration, so requiring its producer to have
+produced would deadlock - the node would wait for a producer that waits for
+the node.
  
 The publication condition is what makes conditional evaluation work. A node
 that publishes only some of its output ports - every gate in the package does
@@ -2494,8 +2636,8 @@ about the value - it is what separates "the producer published nothing" from
 an answer.
 
 With `wait_optional = false` an optional port stops contributing to readiness
-altogether: a producer that is not `:clean` is read as absent instead of being
-waited for. That is only sound where the producer has already had its chance
+altogether: a producer that has not produced is read as absent instead of
+being waited for. That is only sound where the producer has already had its chance
 to run, so this is not something to set by hand - it is what
 `scheduler!(model; release_optional = true)` uses, in the one place each
 scheduler can guarantee it. Required ports are unaffected.
@@ -2637,11 +2779,12 @@ With `check_input_buffer` enabled, checks that:
   `node.input_buffer`,
 - [`validate_node`](@ref) succeeds.
  
-Optional ports and ports of kind `:feedback` or `:error` may be empty: a
-feedback buffer is empty on the first pass of a loop by definition.
- 
+Optional ports may be empty, and so may a port of any other kind (`:feedback`,
+`:error`, `:terminal`) even when it is `required`: a feedback buffer is empty on
+the first pass of a loop by definition.
+
 With `check_input_buffer` disabled only [`validate_node`](@ref) is consulted.
-Both schedulers enable it, so a `required` `:normal` port left without a
+Both schedulers leave it on, so a `required` `:normal` port left without a
 connection makes the node `:invalid_node` in either engine. A port that *has* a
 connection whose producer published nothing is a different case, caught earlier
 by [`isready`](@ref).
@@ -2722,7 +2865,24 @@ end
     push_buffer!(model::Workflow, id::Int, port::Symbol)
     push_buffer!(model::Workflow, id::Int, ready_ports::Vector{Symbol})
 
-Propagate output data from a node to its downstream children.
+Internal function. Copy what node `id` published into the input buffers of its
+consumers.
+
+Only connections leaving a port named in `ready_ports` are served; every other
+buffer slot keeps what it held. The first form takes the list from
+`state[:ready_ports]`, that is what the node published on its last execution;
+the second serves one port.
+
+Each value is stored under the identifier of the connection that carried it, so
+a [`MultiPort`](@ref) input keeps one slot per incoming connection. Nothing is
+copied on the way: the producer's cache, the connection and the consumer's
+buffer are one object - see [`PortSpec`](@ref) for the `handover` keyword that
+makes that transfer explicit.
+
+A node without outgoing connections is a no-op.
+
+# Returns
+The workflow.
 """
 function push_buffer!(model::Workflow, id::Int)
     node = getnode(model, id)
@@ -2758,6 +2918,12 @@ end
 # --------------------------------------------------------
 """
     isnodeexist(model::Workflow, id::Int)
+
+Whether the workflow holds a node with identifier `id`.
+
+# Returns
+- `true` if a node with this identifier exists.
+- `false` otherwise.
 """
 function isnodeexist(model::Workflow, id::Int)
     return haskey(model.nodes, id)
@@ -2769,7 +2935,7 @@ end
     makegraph(model::Workflow)
  
 Directed graph representation of workflow: node identifiers become vertex
-names and every connection becomes an edge.
+names and each connection adds an edge from its producer to its consumer.
  
 Built once per structural change and kept in `model.graph`; a call that finds
 the cache current does no work at all. See [`GraphCache`](@ref).
@@ -2784,6 +2950,11 @@ All connections are included regardless of the `kind` of the ports they
 attach to. A `:feedback` edge is therefore an ordinary edge here, so a graph
 with a feedback loop is cyclic and [`scheduler!`](@ref) for a [`DAW`](@ref)
 workflow rejects it. That is by design: cycles are an [`ABW`](@ref) feature.
+
+The graph is simple and carries no port labels, so two connections between the
+same pair of nodes give one edge and the edge count is not the connection
+count. Reach for [`find_connections`](@ref) when the connections themselves are
+needed.
  
 A graph edited around the editing functions is not seen here - see *Editing the
 graph* in [`Workflow`](@ref).
@@ -2850,7 +3021,7 @@ the same for as long as the structure is unchanged.
  
 A cyclic graph has no topological order and this raises, as it does on a bare
 graph - ask [`is_cyclic`](@ref is_cyclic(::Workflow)) first. Unlike the other
-two cached values, a failure caches nothing, so every call on a cyclic graph
+three cached values, a failure caches nothing, so every call on a cyclic graph
 raises again.
  
 # Example

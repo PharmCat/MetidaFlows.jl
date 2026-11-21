@@ -32,6 +32,12 @@ pair `handover = true` lets the consumer `take!` the value and modify it; the
 engine then drops the producer's cached copy, so nothing silently mutates
 somebody else's cache.
 
+**Editing a graph that is already running.** A node can be swapped for another
+under the same identifier with every connection - and every connection
+identifier, which is what orders a `MultiPort` - left in place: `replace!`, or
+`replacespec!` and `replaceport!` when only its ports change. Everything the
+swap could break is re-checked first, so a refusal leaves the graph as it was.
+
 **An audit log.** Every structural edit and every settings change is appended as
 an explicit event, so a graph's history is replayable rather than reconstructed.
 

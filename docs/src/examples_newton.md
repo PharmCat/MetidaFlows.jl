@@ -4,7 +4,7 @@ CurrentModule = MetidaFlows
 
 ## Newton's method and `:error` ports
 
-Newton's method for `f(x) = x² - c` — that is, for `√c`:
+Newton's method for `f(x) = x² - c` - that is, for `√c`:
 
 ```math
 x' = x - \frac{f(x)}{f'(x)} = x - \frac{x^2 - c}{2x}
@@ -70,7 +70,7 @@ nothing # hide
 
 `NStep` is the only node with an `:error` output. The context of the failure
 (`x`, `iter`) is an input to it, because the exception has to carry that
-context to the handler — the handler has no other inputs, and that is on
+context to the handler - the handler has no other inputs, and that is on
 purpose:
 
 ```@example newton
@@ -347,8 +347,8 @@ r = newton(x0 = 1.0, c = 2.0, tol = 1e-12)
 ```
 
 Note that the caller reads the outcome from one of two places. Which one fired
-is itself the answer, so a wrapper that normalises both into the same shape —
-as `newton` does above — is worth writing once.
+is itself the answer, so a wrapper that normalises both into the same shape -
+as `newton` does above - is worth writing once.
 
 ### A failure that is routed, not raised
 
@@ -362,7 +362,7 @@ r = newton(x0 = 1.0, c = -1.0)
 ```
 
 Nothing failed in the engine's sense. No node has the status `:failed` and the
-log is empty — the failure travelled as data:
+log is empty - the failure travelled as data:
 
 ```@example newton
 (failed_nodes = [id for (id, n) in r.g.w.nodes if getstatus(n) === :failed],
@@ -420,7 +420,7 @@ tight = newton(x0 = 1.0, c = 0.0, tol = 1e-30)
  tight = (tight.reason, tight.x, residual = tight.x^2))
 ```
 
-At the moment of the diagnosis the answer was already good — just not good
+At the moment of the diagnosis the answer was already good - just not good
 enough for the tolerance that was asked for. That is the price of "stop with a
 diagnosis": the graph cannot weigh "close enough" against "cannot continue",
 because the gate that knows about the tolerance never ran. The caller can,
@@ -437,7 +437,7 @@ which is exactly why the handler reports `x` and not only a reason.
   ```
 
 * **A raised exception is not routed anywhere.** It gives the node `:failed`,
-  adds one record to the log and stops the dependent subtree — which here is
+  adds one record to the log and stops the dependent subtree - which here is
   the whole graph, since every node descends from the source that failed. See
   [what a failure does to the rest of the run](guide_ports.md#What-a-failure-does-to-the-rest-of-the-run);
   `scheduler!(w; strict = true)` is the way to have it reported rather than

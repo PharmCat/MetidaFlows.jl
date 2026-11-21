@@ -3,6 +3,11 @@
     setid!(node::AbstractDataNode, id::Int) -> DataNode
 
 Set node identifier. Mutates node in-place.
+
+Pure mutation: a workflow keys its `nodes` dictionary separately, so this does
+not move a node that is already in a graph, it only makes the node disagree
+with the key it is stored under. Changing a node under an existing identifier
+is [`replace!`](@ref replace!(::Workflow, ::AbstractDataNode, ::Int)).
 """
 function setid!(node::AbstractDataNode, id::Int)
     node.properties.id = id
@@ -36,6 +41,10 @@ end
     setstate!(node::AbstractDataNode, s::Symbol, v) -> DataNode
 
 Store value in node execution state.
+
+`s` is a field name of the node's state object - with the default
+[`NodeState`](@ref) one of `:exec_n`, `:ready_ports`, `:execution_id`, `:log`,
+`:stop`. Any other name raises, and so does a value the field cannot hold.
 """
 function setstate!(node::AbstractDataNode, s::Symbol, v)
     node.state[s] = v
@@ -135,9 +144,12 @@ end
 """
     setinputbuffer!(node::AbstractDataNode, label::Symbol, connection_id::Int, value)
 
-Write value into node input buffer.
+Write value into node input buffer, under the identifier of the connection that
+carried it.
 
-Used by workflow engine to propagate outputs between nodes.
+Used by workflow engine to propagate outputs between nodes, from
+[`push_buffer!`](@ref). The label is not checked against the specification: a
+label the node does not have raises from the buffer container itself.
 """
 function setinputbuffer!(node::AbstractDataNode, l::Symbol, con::Int, d)
     # input_buffer[port_label][connection_id] = data

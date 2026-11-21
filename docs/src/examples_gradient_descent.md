@@ -8,7 +8,7 @@ The second algorithm of the zoo, after [bubble sort](examples_bubble_sort.md).
 It adds four things that example did not have:
 
 * the loop stops on a **floating-point criterion** rather than a counter, and
-  there are **two** stop conditions — converged or out of iterations — so the
+  there are **two** stop conditions - converged or out of iterations - so the
   gate chooses between three outcomes and reports which one fired;
 * the loop is **post-tested**: you need a step to have a gradient, so the body
   always runs at least once;
@@ -18,7 +18,7 @@ It adds four things that example did not have:
 * the central difference is a real **diamond inside the cycle**: two branches
   compute `f(x+h)` and `f(x-h)` and meet at the gradient.
 
-The arithmetic nodes are generic — `SubFloat` appears five times in the graph,
+The arithmetic nodes are generic - `SubFloat` appears five times in the graph,
 `MulFloat` three times. The algorithm lives in the wiring.
 
 ### The state that travels around the loop
@@ -30,7 +30,7 @@ The arithmetic nodes are generic — `SubFloat` appears five times in the graph,
 
 One turn computes the gradient at `x` by a central difference, steps to
 `x - rate * grad`, increments `iter`, and then tests both stop conditions. The
-objective is `f(y) = (y - c)²`, so the gradient is exactly `2(x - c)` — the
+objective is `f(y) = (y - c)²`, so the gradient is exactly `2(x - c)` - the
 central difference of a quadratic is its derivative, with no truncation error.
 
 ### The graph
@@ -61,7 +61,7 @@ central difference of a quadratic is its derivative, with no truncation error.
 Twenty-six nodes of thirteen types. Every node takes exactly the inputs it
 needs, from whatever depth: there are no pass-through rails, because
 [`isready`](@ref) holds a node back until all of its `:normal` ancestors have
-been recomputed during the turn — see *Rule 3* in the guide.
+been recomputed during the turn - see *Rule 3* in the guide.
 
 !!! note "This graph needs that guarantee"
     `SubFloat(x, step)` has one input straight from the loop head and the
@@ -94,8 +94,10 @@ nothing # hide
 
 The loop head is the only node with `:feedback` ports. Its normal inputs are
 the starting point and the starting counter; the feedback inputs carry the
-state of the previous iteration and are not `required`, because their buffers
-are empty on the first one.
+state of the previous iteration and are declared `required = false`, because
+their buffers are empty on the first one. That is a statement of intent rather
+than a necessity - a `:feedback` port is exempt from the required-buffer check
+whatever the flag says.
 
 ```@example descent
 state_spec = NodeSpec("Descent state",
@@ -108,7 +110,7 @@ state_spec = NodeSpec("Descent state",
 ```
 
 The gate publishes the state onward while the loop runs, and three terminal
-ports when it stops — the point, the iteration count, and the reason:
+ports when it stops - the point, the iteration count, and the reason:
 
 ```@example descent
 gate_spec = NodeSpec("Descent gate",
@@ -123,7 +125,7 @@ gate_spec = NodeSpec("Descent gate",
      PortSpec("Reason",     Symbol,  :reason;     kind = :terminal)])
 ```
 
-The arithmetic is generic — two inputs, one output:
+The arithmetic is generic - two inputs, one output:
 
 ```@example descent
 binary(name, out) = NodeSpec(name,
@@ -153,7 +155,7 @@ nothing # hide
 
 ### Behaviour
 
-The generic nodes are one line each, so they are written in a loop — which is
+The generic nodes are one line each, so they are written in a loop - which is
 the point: none of them knows anything about gradient descent.
 
 ```@example descent
@@ -336,7 +338,7 @@ scheduler!(g3.w; maxiter = 200_000)
 getdata(g3.w, g3.gate, :minimum)
 ```
 
-The *shape* of the objective is wiring. Scaling it by two — `f(y) = 2(y-c)²` —
+The *shape* of the objective is wiring. Scaling it by two - `f(y) = 2(y-c)²` -
 is two more nodes and a rewiring of the gradient's difference, after which the
 same learning rate converges in thirty-three iterations instead of
 seventy-one:
@@ -368,7 +370,7 @@ like the rest of the graph.
 
 ### Things to watch
 
-* **A step that is too large does not just fail to converge — it reports
+* **A step that is too large does not just fail to converge - it reports
   success.** With `rate = 1.5` the error doubles every iteration, and after
   thirty-seven of them the point is at about `-3.8e11`. There
   `eps(x) ≈ 6.1e-5` is larger than `h = 1e-5`, so `x + h == x` bit for bit,
@@ -385,15 +387,15 @@ like the rest of the graph.
 
   A criterion built on `|grad|` alone cannot tell "flat because we are at the
   optimum" from "flat because the difference underflowed". A real
-  implementation scales the step with the point — `h = h₀ * max(1, |x|)` — or
+  implementation scales the step with the point - `h = h₀ * max(1, |x|)` - or
   also requires that `f` decreased. This is a property of the numerical
   derivative, not of the engine, and the plain Julia version of the same
   arithmetic reproduces it exactly.
 
 * **`maxiter` of the scheduler is not `maxiter` of the algorithm.** The
   algorithm's limit is the `ConstInt` feeding `NotLessInt`; the scheduler's
-  limit counts queue operations and needs to be large enough for all of them
-  — roughly twenty per iteration here.
+  limit counts queue operations and needs to be large enough for all of
+  them - roughly twenty per iteration here.
 
 * **The loop is post-tested.** Starting exactly at the minimum still costs one
   iteration, of zero length, because the gradient is only known after a step.

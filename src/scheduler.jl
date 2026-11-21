@@ -60,7 +60,8 @@ end
 """
     scheduler!(model::Workflow{DAW}; reset_mode::Symbol = :full,
                throw_error::Bool = false, strict::Bool = false,
-               release_optional::Bool = false)
+               release_optional::Bool = false,
+               on_start = nothing, on_finish = nothing)
  
 Execute entire data analysis workflow (DAW) using topological ordering.
  
@@ -74,10 +75,12 @@ This scheduler is designed for deterministic acyclic data-analysis workflows.
 5. Execute nodes in topological order.
  
 # Arguments
-- `reset_mode`: `:full` (default) invalidates every node via [`reset!`](@ref)
-  and drops cached output data; `:soft` only marks nodes `:dirty` and keeps
-  the cache; `:none` leaves statuses untouched, so nodes that are already
-  `:clean` are not recomputed. Any other value raises an error.
+- `reset_mode`: one of `:full`, `:soft` and `:none`; any other value raises.
+  `:full` (default) invalidates every node via [`reset!`](@ref) and drops
+  cached output data. `:soft` marks nodes `:dirty` and zeroes `exec_n` and the
+  stop flag, but keeps the cache and every buffer. `:none` leaves statuses
+  untouched, so nodes that are already `:clean` are not recomputed. See
+  [`RESET_LEVELS`](@ref).
 - `throw_error`: forwarded to [`execute!`](@ref); aborts the run on the first
   node that raises instead of recording the failure, which also leaves every
   node after it in the order unexecuted.
@@ -88,7 +91,7 @@ This scheduler is designed for deterministic acyclic data-analysis workflows.
   this check is never reached.
 - `release_optional`: run a node that is held back **only** by a `required =
   false` port, reading `nothing` there instead of skipping it. Off by default.
-  In topological order a producer that is not `:clean` when its consumer comes
+  In topological order a producer that has not produced when its consumer comes
   up has already had its turn - it failed, or a gate above it did not take its
   branch - so there is nothing left to wait for, and this is what makes
   `required = false` mean on a run what it says on the port. Any earlier run's
@@ -106,7 +109,8 @@ This scheduler is designed for deterministic acyclic data-analysis workflows.
   still ahead in the order is left `:dirty`. A stop is not a failure, so
   `strict` does not raise on it.
 - A node is skipped when [`isready`](@ref) reports that a producer connected
-  through a `:normal` port is not `:clean`. In an acyclic graph traversed in
+  through a `:normal` port has not produced - see [`hasproduced`](@ref). In an
+  acyclic graph traversed in
   topological order that happens only below a node that failed, and skipping
   is what keeps such a node from reading an input buffer still holding a value
   from an earlier run - which `check_input_buffer` would accept. A skipped
@@ -172,7 +176,7 @@ an optional port, and return how many were released.
 Called by [`scheduler!`](@ref) on an [`ABW`](@ref) workflow with
 `release_optional = true`, and only when the queue has run dry. That moment is
 the guarantee the relaxation needs: an empty queue means nothing will execute
-again by itself, so a producer that is not `:clean` now will never be, and its
+again by itself, so a producer that has not produced by now never will, and its
 optional consumers can be told so instead of waiting for it forever.
 
 An id is recorded in `released`, which is what tells the queue loop to serve
@@ -208,7 +212,8 @@ end
 """
     scheduler!(model::Workflow{ABW}; reset_mode::Symbol = :full, maxiter = 1000,
                throw_error::Bool = false, throw_warn::Bool = true,
-               strict::Bool = false, release_optional::Bool = false)
+               strict::Bool = false, release_optional::Bool = false,
+               on_start = nothing, on_finish = nothing)
  
 Execute workflow using queue-based agent/event scheduling.
  
@@ -221,7 +226,7 @@ several times during one call.
 2. Seed the queue with every node that has no input ports, in ascending id
    order, so a run does not depend on `model.nodes` iteration order.
 3. Pop a node and execute it when [`isready`](@ref) reports that every
-   producer connected through a `:normal` port is `:clean`; otherwise drop it -
+   producer connected through a `:normal` port has produced; otherwise drop it -
    a producer finishing later re-queues it. Stop serving the queue if the node
    called [`request_stop!`](@ref).
 4. For every port the execution produced, mark the child **and everything
@@ -239,13 +244,14 @@ Required input ports are enforced, as in [`DAW`](@ref): a node whose
 instead of being run on nothing. See [`execution_node_validation`](@ref).
  
 # Arguments
-- `reset_mode`: `:full` (default) invalidates every node via [`reset!`](@ref),
-  drops cached output data and **clears the buffers of `:feedback` ports**, so
-  a cyclic workflow starts a new run instead of resuming the previous one;
-  `:soft` only marks nodes `:dirty` and keeps both the cache and the loop
-  state, which is how state is carried between runs; `:none` leaves statuses
-  untouched, so `:clean` nodes are not recomputed. Any other value raises an
-  error.
+- `reset_mode`: one of `:full`, `:soft` and `:none`; any other value raises.
+  `:full` (default) invalidates every node via [`reset!`](@ref), drops cached
+  output data and **clears the buffers of `:feedback` ports**, so a cyclic
+  workflow starts a new run instead of resuming the previous one. `:soft`
+  marks nodes `:dirty` and zeroes `exec_n` and the stop flag, but keeps both
+  the cache and the loop state, which is how state is carried between runs.
+  `:none` leaves statuses untouched, so `:clean` nodes are not recomputed. See
+  [`RESET_LEVELS`](@ref).
 
   `:none` is not a no-op on a cyclic workflow. [`execute!`](@ref) returns the
   stored `ready_ports` of a `:clean` node, step 4 propagates from them, and the
@@ -268,7 +274,7 @@ instead of being run on nothing. See [`execution_node_validation`](@ref).
   [`isready`](@ref) holds back **only** because of a `required = false` port -
   see [`release_optional_blocked!`](@ref) - and go on serving the queue. Off by
   default. The empty queue is what makes it sound: until then a producer that
-  is not `:clean` may still be about to run, and reading `nothing` from its
+  has not produced may still be about to run, and reading `nothing` from its
   port would be wrong rather than conditional. This is what lets a whole
   branch be skipped and the result merged back afterwards: without it a
   consumer waits for a producer that was itself never executed, and the run
@@ -309,8 +315,10 @@ Every cyclic workflow needs at least one node with **no input ports**: a
 and never starts. See [`haveinputs`](@ref).
  
 # Notes
-- Nodes are executed with `ExecuteSettings(false)`, so required input ports
-  are **not** enforced here, unlike the [`DAW`](@ref) path.
+- Nodes are executed with `execute_upstream`, `invalidate_downstream` and
+  `check_cyclic` switched off: order and invalidation are the scheduler's own
+  business here. Required input ports are enforced (`check_input_buffer` stays
+  on), as on the [`DAW`](@ref) path.
 - A node with input ports but without incoming connections never becomes
   ready and stays `:dirty`.
  

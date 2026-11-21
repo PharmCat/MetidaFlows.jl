@@ -34,9 +34,15 @@ follow.
 7. call [`execute_unsafe!`](@ref);
 8. validate the result;
 9. store `ready_ports` and push outputs into the child buffers;
-10. invalidate children (`invalidate_downstream`);
-11. mark `:clean`;
-12. release the producer of every `handover` input the node actually took.
+10. clear the child buffers of the output ports this execution did *not*
+    publish, so nothing is read as this turn's answer when it is the previous
+    turn's;
+11. invalidate children (`invalidate_downstream`);
+12. mark `:clean`;
+13. release the producer of every `handover` input the node actually took.
+
+Steps 1 and 13 are bracketed by the `on_start` and `on_finish` callbacks when
+they are set - see *Watching a run* below.
 
 The four flags in parentheses come from [`ExecuteSettings`](@ref):
 
@@ -149,7 +155,9 @@ entry belonging to each outgoing connection and recurses. Traversal stops at
 nodes that are already `:dirty`, since their subtree was invalidated earlier.
 
 It is triggered by [`setsettings!`](@ref), [`add_connection!`](@ref),
-[`delete_connection!`](@ref) and by [`execute!`](@ref) itself.
+[`delete_connection!`](@ref),
+[`replace!`](@ref replace!(::Workflow, ::AbstractDataNode, ::Int)) and by
+[`execute!`](@ref) itself.
 
 [`reset!`](@ref) is the other direction: what *you* throw away between runs.
 It takes a `level` from [`RESET_LEVELS`](@ref), and the levels are a ladder -
@@ -174,8 +182,9 @@ reset!(node; level = :all)     # узел как новый
 ```
 
 [`mark_dirty!`](@ref) is **not** a level of that ladder. It is the primitive
-above, and it keeps `exec_n` and the stop flag that even `:soft` clears,
-because a subtree that was merely invalidated has not stopped counting.
+[`invalidate_downstream!`](@ref) is built from, and it keeps `exec_n` and the
+stop flag that even `:soft` clears, because a subtree that was merely
+invalidated has not stopped counting.
 
 Two things on the ladder are worth saying out loud. `:full` clears the
 `:feedback` buffers and `:inputs` clears the rest, so `:inputs` is the level
@@ -192,21 +201,21 @@ invalidation.
 
 A node need not publish every output port, and every gate in this package
 relies on that. The question is what the consumer of a port that was *not*
-published to sees — and the answer has to be "nothing", not "whatever was
+published to sees - and the answer has to be "nothing", not "whatever was
 there last turn". [`execute!`](@ref) therefore calls
 [`invalidate_unpublished!`](@ref) right after [`push_buffer!`](@ref): the
 consumer buffers of `:normal` connections leaving an unpublished port are
 cleared.
 
 `:feedback` connections are left alone, because their buffers *are* the state
-of a loop — a gate that ends a run publishes only its `:terminal` ports, and
+of a loop - a gate that ends a run publishes only its `:terminal` ports, and
 the loop head's feedback buffers have to survive that. `:error` connections
 are left alone too: they latch a diagnosis until a handler reads it.
 
 ### Conditional evaluation
 
 A graph has no short-circuit *inside* a turn: both operands of a condition are
-nodes, and both are computed — [insertion
+nodes, and both are computed - [insertion
 sort](examples_insertion_sort.md) shows what that costs. But a computation can
 be made conditional, in two ways, and both rest on a producer publishing
 nothing:
@@ -240,11 +249,11 @@ MetidaFlows.execute_unsafe!(n::DataNode{Guard}) =
 
 Then the guarded node has no fed input at all: in `ABW` nothing enqueues it
 and in `DAW` it is not ready, so in both it ends the run `:dirty`, never
-executed. This is the form that actually *saves* the work — at the price of
+executed. This is the form that actually *saves* the work - at the price of
 relaying, and on two conditions: the guarded node must have no other producer
 that keeps publishing, and **nothing may consume its output** unless the run
 is told to release such a consumer. By default a consumer of a node that never
-runs waits for a producer that stays `:dirty`, and waits forever — even
+runs waits for a producer that stays `:dirty`, and waits forever - even
 through an optional port, because waiting is about the producer's *status*, not
 about the value. So the guard form suits a dead end: a `:terminal` port, a side
 effect, a branch whose result is read out of band. To merge a guarded branch
@@ -252,8 +261,8 @@ back in, see
 [`release_optional`](@ref Releasing-a-node-blocked-only-by-an-optional-port)
 below.
 
-When the result has to come back into the computation — into a loop state, or
-a merge — the other way is to put the conditional *inside* the node that does
+When the result has to come back into the computation - into a loop state, or
+a merge - the other way is to put the conditional *inside* the node that does
 the expensive work:
 
 ```julia
@@ -264,7 +273,7 @@ function MetidaFlows.execute_unsafe!(n::DataNode{MulIf})
 end
 ```
 
-The node runs — which costs a flag check — and the operation does not. Its
+The node runs - which costs a flag check - and the operation does not. Its
 consumer reads `nothing` and knows the work was skipped.
 [Modular exponentiation](examples_power.md) is built this way and measures what
 it saves.
@@ -285,8 +294,8 @@ answer them the same way:
 
 | the port | what happens |
 |:---|:---|
-| `required`, producer published nothing | not ready — the node does not run, stays `:dirty` |
-| `required`, **no connection at all** | a structural error — `:invalid_node`, see [`execution_node_validation`](@ref) |
+| `required`, producer published nothing | not ready - the node does not run, stays `:dirty` |
+| `required`, **no connection at all** | a structural error - `:invalid_node`, see [`execution_node_validation`](@ref) |
 | `required = false`, no value for any reason | the node runs and reads `nothing` |
 
 The middle row used to differ: `ABW` did not consult `required` at all, so it
@@ -295,7 +304,7 @@ ran the node and handed its body `nothing`.
 ### Releasing a node blocked only by an optional port
 
 The last row of that table is about a port with no value. It says nothing about
-*when* a run may conclude there is none — and by default a run concludes it
+*when* a run may conclude there is none - and by default a run concludes it
 only when the producer ran and stayed silent. A producer that was never
 executed at all leaves its consumer waiting, which is what confines the guard
 form to dead ends.
@@ -314,8 +323,8 @@ guarantees that:
 
 | scheduler | the guarantee |
 |:---|:---|
-| `DAW` | topological order — when the traversal reaches the consumer, its producer has already run, failed, or been skipped |
-| `ABW` | an empty queue — nothing will execute again by itself, so a producer that is not `:clean` now never will be |
+| `DAW` | topological order - when the traversal reaches the consumer, its producer has already run, failed, or been skipped |
+| `ABW` | an empty queue - nothing will execute again by itself, so a producer that has not produced by now never will |
 
 So in `ABW` the ordinary turn still waits, and the release happens only when
 the queue has run dry, after which the queue is served again; see
@@ -324,7 +333,7 @@ the queue has run dry, after which the queue is served again; see
 Releasing is half of it. The other half is that the consumer's buffer may still
 hold an earlier turn's value: [`invalidate_unpublished!`](@ref) covers a
 producer that ran and published nothing, but nothing clears the buffer of a
-producer that did not run — [`mark_dirty_downstream!`](@ref) deliberately
+producer that did not run - [`mark_dirty_downstream!`](@ref) deliberately
 leaves input buffers alone, because in a cycle they are the loop state. So a
 released node has its stale optional buffers dropped first, by
 [`invalidate_stale_optional!`](@ref). Measured on a guarded accumulator loop:
@@ -332,7 +341,7 @@ without that step the sum comes out 26 instead of 18, because the previous
 turn's value is added a second time.
 
 What the flag buys is a conditional **branch** rather than a conditional
-operation — a guarded subgraph whose result merges back in:
+operation - a guarded subgraph whose result merges back in:
 
 ```julia
 scheduler!(w)                              # the consumer waits forever: no result, no error
@@ -359,9 +368,9 @@ scheduler!(w; maxiter = 5000)    # ABW
 |---|---|---|
 | Order | topological, via [`topological_sort`](@ref topological_sort(::Workflow)) | readiness queue |
 | Cycles | rejected before execution | not detected up front |
-| Per run | [`reset!`](@ref): statuses and cached outputs | statuses only |
-| Required inputs | enforced | **not** enforced (`ExecuteSettings(false)`) |
-| Nodes executed | every node, once | only nodes reachable from input-free nodes |
+| Per run | [`reset!`](@ref) at `reset_mode`, `:full` by default | the same, where `:full` also clears the `:feedback` buffers |
+| Required inputs | enforced | enforced |
+| Nodes executed | every node, at most once | only nodes reachable from input-free nodes, any number of times |
 
 Both return `true` when the traversal finishes. That is *not* a success flag:
 individual nodes may still end up `:failed` or `:invalid_*`, so check
@@ -389,11 +398,13 @@ The three readers are [`makegraph`](@ref),
 Copy the graph before modifying one: a vertex added to the cached graph leaves
 the workflow describing a graph it does not have, and nothing reports it.
 
-### Edit a graph through the four editing functions
+### Edit a graph through the five editing functions
 
-[`add_node!`](@ref), [`delete_node!`](@ref), [`add_connection!`](@ref) and
-[`delete_connection!`](@ref) raise `model.ver`, and that is the whole mechanism
-that tells the cache it is out of date. Nothing else raises it - settings,
+[`add_node!`](@ref), [`delete_node!`](@ref), [`add_connection!`](@ref),
+[`delete_connection!`](@ref) and
+[`replace!`](@ref replace!(::Workflow, ::AbstractDataNode, ::Int)) raise
+`model.ver`, and that is the whole mechanism that tells the cache it is out of
+date. Nothing else raises it - settings,
 data, buffers, statuses and a run leave it alone, because none of them can
 change the graph.
 

@@ -11,7 +11,9 @@ identifier as well.
 ## Exported
 
 Available after `using MetidaFlows`. These are the public API in the narrow
-sense: the names you cannot build or run a graph without.
+sense: the names you cannot build or run a graph without. `take!` is here too,
+as a method on a `Base` function: `Base` puts the name in scope, so it needs no
+export.
 
 ```@docs
 getnode

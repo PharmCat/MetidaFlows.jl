@@ -5,8 +5,8 @@
 
 Description of the node settings for a user interface.
 
-The engine fills in `"settingslist"` — a copy of `spec.settings`, that is the
-keys the node understands — and then calls [`settings_schema_usermod!`](@ref),
+The engine fills in `"settingslist"` - a copy of `spec.settings`, that is the
+keys the node understands - and then calls [`settings_schema_usermod!`](@ref),
 where a node type adds types, defaults, labels and allowed values.
 
 # Example
@@ -29,7 +29,7 @@ end
 Describe the settings of a node type, so an interface can render a form for
 them. Specialize it per node type; the default does nothing.
 
-`d` arrives already holding `"settingslist"`. Add to it — by convention under
+`d` arrives already holding `"settingslist"`. Add to it - by convention under
 the key `"schema"`, one entry per setting.
 
 **Mutate `d`: the return value is discarded.** A method that builds a fresh
@@ -61,8 +61,8 @@ end
 ```
 
 The method receives the node, so the description may depend on its current
-settings. For choices that only a producer knows — the columns of a file the
-parent node will read — combine the schema with [`getinputmeta`](@ref) on the
+settings. For choices that only a producer knows - the columns of a file the
+parent node will read - combine the schema with [`getinputmeta`](@ref) on the
 caller's side.
 
 # Notes
@@ -100,7 +100,7 @@ end
 """
     node_schema_usermod!(d, node::AbstractDataNode)
 
-Describe the node itself — where it belongs in a node palette and how it is
+Describe the node itself - where it belongs in a node palette and how it is
 presented. Specialize it per node type; the default does nothing.
 
 `d` arrives already holding `"spec"` and `"settings_schema"`.
@@ -130,16 +130,21 @@ function node_schema_usermod!(d, node::AbstractDataNode)
     return d
 end
 """
-    node_to_dict(node::AbstractDataNode; specs::Bool = true, settings::Bool = true) -> Dict
- 
+    node_to_dict(node::AbstractDataNode; specs::Bool = true, settings::Bool = true,
+                 values::Bool = true, state::Bool = false) -> Dict
+
 Convert node to JSON-serializable dictionary.
- 
-Keys: `"id"`, `"properties"`, `"status"`, plus `"spec"` when `specs` is set
-and `"settings"` when `settings` is set.
- 
+
+Always written: `"id"`, `"type"` - the type tag as a string, see
+[`nodetypestr`](@ref) - `"properties"`
+([`node_properties_to_dict`](@ref)) and `"status"`. Each keyword adds one
+entry: `"spec"` ([`spec_to_dict`](@ref)), `"settings"`,
+`"settings_values"` ([`settings_to_dict`](@ref)) and `"state"`
+([`node_state_to_dict`](@ref)), the last one off by default.
+
 # Notes
 The `"settings"` entry holds the settings *schema* produced by
-[`settings_schema`](@ref), not the current setting values.
+[`settings_schema`](@ref); the current setting values are `"settings_values"`.
 """
 function node_to_dict(node::AbstractDataNode; specs::Bool = true, settings::Bool = true,
                       values::Bool = true, state::Bool = false)
@@ -166,6 +171,8 @@ end
     node_properties_to_dict(np::NodeProperties) -> Dict
 
 Convert node properties to JSON-serializable dictionary.
+
+Keys: `"id"`, `"status"` and `"position"`.
 """
 function node_properties_to_dict(np::NodeProperties)
     d            = Dict{String, Any}()
@@ -178,6 +185,13 @@ end
     spec_to_dict(spec::NodeSpec) -> Dict
 
 Convert NodeSpec to dictionary representation.
+
+Keys: `"name"`, `"input_ports"` and `"output_ports"`
+([`portspec_to_dict`](@ref) each), and `"settings"`, the declared setting keys.
+
+A snapshot carries this for a human reader and for a graph editor. Loading does
+not use it: [`dict_to_node`](@ref) takes the specification from
+[`NODE_REGISTER`](@ref), so a file can never describe a node's ports.
 """
 function spec_to_dict(spec::NodeSpec)
     d                 = Dict{String, Any}()
@@ -233,6 +247,11 @@ end
     connection_to_dict(conn::NodeConnection) -> Dict
 
 Convert connection to dictionary representation.
+
+Keys: `"output_id"` and `"output_port"` for the producing side, `"input_id"`
+and `"input_port"` for the consuming one. The connection's own identifier is
+not here: a snapshot keys the connection by it, see
+[`workflow_to_dict`](@ref).
 """
 function connection_to_dict(nc::NodeConnection)
     d               = Dict{String, Any}()
@@ -406,6 +425,12 @@ they are. Everything else becomes a dictionary with a `"t"` type tag: `Symbol`,
 bare one is either refused by the writer or emitted as text that is not JSON -
 in format 1 that is what happened, and it is the reason the format moved to 2.
 
+Two details of the container tags are worth knowing, because they decide what
+comes back: a `Dict` can only be written with `Symbol` or `String` keys, and
+any other key type raises; a `Vector` whose element type is not in the table is
+tagged `"Any"`, so a `Vector{Union{Int64, String}}` returns as a
+`Vector{Any}`.
+
 A value of any other type raises an error naming the type. Define
 [`settings_to_dict_usermod!`](@ref) for the node type to serialize it
 yourself.
@@ -515,7 +540,7 @@ Only the keys declared in `node.spec.settings` are written; values go through
 [`settings_to_dict_usermod!`](@ref), which a node type can specialize to write
 a value the codec cannot.
 
-This is not the settings *schema* — see [`settings_schema`](@ref) for that.
+This is not the settings *schema* - see [`settings_schema`](@ref) for that.
 
 See also [`dict_to_settings!`](@ref).
 """
@@ -557,7 +582,7 @@ Put settings values from `d` into `node`.
 Only the keys declared in `node.spec.settings` are read, so a file cannot
 inject a setting the node does not know. Values go through
 [`dict_to_value`](@ref), then [`dict_to_settings_usermod!`](@ref) is called,
-and the result is written with `setsettings_unsafe!` — the node is `:dirty`
+and the result is written with `setsettings_unsafe!` - the node is `:dirty`
 right after loading, so there is nothing to invalidate.
 
 See also [`settings_to_dict`](@ref).
@@ -596,11 +621,12 @@ its `:feedback` input buffers, keyed by port label and then by connection id.
 
 Normal input buffers are **not** written. A normal buffer is filled by its
 parent within the same turn, and `isready` does not let a node run until every
-normal parent is `:clean`, so re-running refills it. A feedback buffer is the
+normal parent has produced, so re-running refills it. A feedback buffer is the
 only value that crosses a turn boundary: its producer sits downstream and has
 not run yet when the turn begins.
 
-`exec_n` is not written either, because `reset!` zeroes it on any resumed run.
+`exec_n` is not written either: a loaded node starts at zero, and both reset
+modes a run can be resumed with, `:soft` and `:full`, zero it anyway.
 An algorithm that needs its own iteration counter carries it through a
 feedback port, and that counter is saved here.
 
@@ -660,8 +686,10 @@ end
  
 Convert workflow to dictionary representation, ready to be serialized to JSON.
  
-Keys: `"format_version"`, `"id"`, `"name"`, `"n_iter"`, `"c_iter"`, `"nodes"`,
-`"connections"`, `"incoming"`, `"outgoing"`.
+Keys: `"format_version"`, `"id"`, `"type"` (`"DAW"` or `"ABW"`), `"name"`,
+`"n_iter"`, `"c_iter"`, `"nodes"`, `"connections"`, `"incoming"`, `"outgoing"`
+and `"contents"`. A graph change log is written as `"audit_log"`, and only when
+there is one: a workflow run without `SETTINGS[:audit]` has no such key.
  
 `values` writes the current settings values of every node, so the result is a
 workflow that can be loaded and run. `state` adds the contents of `:feedback`
@@ -801,6 +829,9 @@ an edge computes something else, so prefer the error.
   something the file brought in.
 - A snapshot with a `"format_version"` newer than `SNAPSHOT_FORMAT_VERSION` is
   refused; one without the key is read as version 1.
+- A change log in the file is restored, because it is data and it belongs to
+  the graph. Whether *further* edits are recorded is decided by
+  `SETTINGS[:audit]`, a process-wide setting a snapshot has no say over.
 """
 function dict_to_workflow(d::Dict{String}; usermode::Bool = false,
                           check_connection::Bool = true, check_connection_throw_error::Bool = true)

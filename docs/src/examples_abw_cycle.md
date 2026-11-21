@@ -1,13 +1,17 @@
+```@meta
+CurrentModule = MetidaFlows
+```
+
 ```@setup mfexample
 PKCSV_PATH = joinpath(pwd(), "conc.csv")
 ```
 
-## ABW — a cyclic graph with a feedback port
+## ABW - a cyclic graph with a feedback port
 
 `DAW` rejects cycles: it needs a topological order. `ABW` executes a cycle if
 the edge that closes it enters a port declared with `kind = :feedback`. Such a
 port carries the value of the **previous** iteration, so it is excluded from
-the readiness check — the loop is broken by construction, exactly like a unit
+the readiness check - the loop is broken by construction, exactly like a unit
 delay in a block diagram.
 
 This workflow trims outliers one observation at a time and stops either when
@@ -106,7 +110,7 @@ trim = add_node!(w, DataNode(TrimLoop, trim_spec))
 add_connection!(w, load, :table, trim, :table)
 add_connection!(w, trim, :state, trim, :previous)     # the cycle
 
-setsettings!(w, load, Dict(:file => PKCSV_PATH))      # asume you have file PKCSV_PATH 
+setsettings!(w, load, Dict(:file => PKCSV_PATH))      # assuming PKCSV_PATH exists
 setsettings!(w, trim, Dict(:z => 1.6, :maxiter => 10))
 
 scheduler!(w, throw_error = true)
@@ -134,7 +138,7 @@ One call to [`scheduler!`](@ref) runs the whole loop to completion.
 ### How the scheduler drives it
 
 ```
-queue := [LoadData]                      only nodes without normal inputs are seeded
+queue := [LoadData]                      only nodes with no input ports at all are seeded
 
 pop LoadData → executes → pushes :table  → enqueues TrimLoop
 pop TrimLoop → isready: :table normal, LoadData is :clean → ready
@@ -164,16 +168,18 @@ state.iter >= node.settings[:iterations] && return [:result, :iterations]
 ```
 
 The counter travels inside `TrimState`, so it is part of the loop rather than
-hidden node state — a restarted workflow starts counting from zero.
+hidden node state - a restarted workflow starts counting from zero.
 
-### Restriction: the loop body must be one node
+### A loop body may span several nodes
 
-A cycle spanning two nodes does not iterate yet. Only a node reached through a
-**non-normal** port is marked `:dirty` again by the scheduler; a node reached
-through an ordinary port stays `:clean`, and [`execute!`](@ref) then returns
-its stored `ready_ports` without recomputing. The second node in the loop
-would replay its first decision forever, and the run would end on the
-scheduler's `maxiter`.
+Nothing above is limited to one node. Every node the scheduler enqueues is
+marked `:dirty` first, and along `:normal` edges the whole cone below it is
+marked too ([`mark_dirty_downstream!`](@ref)), so a node reached through an
+ordinary port recomputes on each turn instead of replaying its first decision.
+The state still travels through the one `:feedback` edge that closes the cycle.
 
-Until that is lifted, keep the loop body in a single node and use the
-feedback port to carry its state, as above.
+[A two-node loop](examples_abw_two_node.md) splits this example into a worker
+and a controller, and [bubble sort](examples_bubble_sort.md) runs a body of a
+dozen nodes. The rule to keep is a narrower one: mark as `:feedback` only the
+edges that close a cycle. `isready` waits on `:normal` edges, and that wait is
+what makes a node of the body wait for the rest of it.

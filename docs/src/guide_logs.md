@@ -37,7 +37,7 @@ delete_node!(w, b)
 foreach(println, w.audit_log)
 ```
 
-Five events, one per mutator that takes a `Workflow`:
+Six events, one per mutator that takes a `Workflow`:
 [`NodeAdded`](@ref), [`NodeDeleted`](@ref), [`ConnectionAdded`](@ref),
 [`ConnectionDeleted`](@ref), [`SettingsChanged`](@ref),
 [`NodeReplaced`](@ref). Cascades fall out of
@@ -72,10 +72,12 @@ on costs about 4.5 % more memory, which is modest; the snapshot of it is
 has no use for either.
 
 A snapshot carries the key `"audit_log"` only when the log is non-empty, so a
-default snapshot is byte for byte what it was before 0.3.0 and the format
-version does not move. Loading a snapshot that *does* carry the key restores
-the log and turns recording back on, because such a file came from a workflow
-that was keeping one.
+default snapshot is byte for byte what it was before 0.3.0, and adding the key
+did not move the format version by itself. Loading a snapshot that *does* carry
+the key restores the log, because the log is data and it belongs to the graph.
+It does **not** turn recording on: whether further edits are recorded is
+`SETTINGS[:audit]`, a process-wide setting, and a file has no say over how the
+package runs.
 
 The table is read on every write, so recording can start at any point - what
 happened before that is simply not in the log:
@@ -176,8 +178,14 @@ by the same `:log_limit`, which is what makes logging from inside a cycle safe:
 a node that writes a line on every turn of a 100 000-turn loop still holds the
 last `:log_limit` records.
 
-It is cleared with the rest of the node's state - `reset!(node)`,
-`empty!(node.state)` - and **not** by `reset!(model)`, so a node's messages
-survive a re-run of the workflow.
+The log belongs to a run. [`execute!`](@ref) empties it whenever the workflow's
+`run_id` is not the one the node last saw, before anything else it does - the
+`:clean` check included, so a node that is taken up and then skipped comes out
+with an empty log just the same. After a [`scheduler!`](@ref) call a node holds
+the messages of that run and nothing older; a node the scheduler never called
+[`execute!`](@ref) on, because it was not ready or was never enqueued, keeps
+what it had. Beyond that it is cleared by `empty!(node.state)` and by `reset!` at
+`level = :all`, the level that empties a node completely - `:full` and below,
+on a node or on the whole workflow, leave it standing.
 
 ---

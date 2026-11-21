@@ -10,16 +10,18 @@ node containers and the node register.
 ## Exported
 
 Available after `using MetidaFlows`. These are the public API in the narrow
-sense: the names you cannot build or run a graph without.
+sense: the names you cannot build or run a graph without. `replace!` is here
+too, as a method on a `Base` function: `Base` puts the name in scope, so it
+needs no export.
 
 ```@docs
 isportexist
 add_connection!
 delete_connection!
 add_node!
-replace!(::Workflow, ::AbstractDataNode, ::Int)
 delete_node!
 isnodeexist
+replace!(::Workflow, ::AbstractDataNode, ::Int)
 ```
 
 ## Public, not exported
@@ -32,6 +34,8 @@ because they are needed rarely, or because the name is too general to take
 over.
 
 ```@docs
+replacespec!
+replaceport!
 empty!(::NodeState)
 initbuffer!
 nodebuffer

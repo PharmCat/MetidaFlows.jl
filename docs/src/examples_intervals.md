@@ -9,13 +9,13 @@ computed by [`getmeta`](@ref), and **not one node is executed**.
 
 That is what the metadata mechanism is, named properly: `getmeta` walks up the
 graph, asks the producers, and hands their answers to
-[`getmeta_unsafe`](@ref) as `inmeta`. It is **abstract interpretation** — a
+[`getmeta_unsafe`](@ref) as `inmeta`. It is **abstract interpretation** - a
 second, parallel semantics of the same graph, in which descriptions travel
 where values normally do, and `nothing` is the top of the lattice, "unknown".
 
 Interval arithmetic is the most revealing algorithm to put in that second
 semantics, for one reason: its answer is *checkable by the first one*. An
-estimate is not merely plausible — it must contain the result for every input
+estimate is not merely plausible - it must contain the result for every input
 from the declared ranges, and a run of the graph either confirms that or
 refutes it.
 
@@ -61,14 +61,14 @@ MetidaFlows.execute_unsafe!(n::DataNode{IvOut}) =
 nothing # hide
 ```
 
-The second semantics is one method per node type. A constant describes itself —
+The second semantics is one method per node type. A constant describes itself -
 but only once its range is set, which is what [`ismetasource`](@ref) is for:
 
 ```@example iv
 MetidaFlows.ismetasource(n::DataNode{IvConst}, ::Symbol) =
     haskey(n.settings, :lo) && haskey(n.settings, :hi)
 
-# NOTE: total, not merely consistent with `ismetasource` — see below
+# NOTE: total, not merely consistent with `ismetasource` - see below
 function MetidaFlows.getmeta_unsafe(n::DataNode{IvConst}, ::Symbol, inmeta)
     (haskey(n.settings, :lo) && haskey(n.settings, :hi)) || return nothing
     (lo = Float64(n.settings[:lo]), hi = Float64(n.settings[:hi]))
@@ -109,7 +109,7 @@ nothing # hide
 
 ### The graph
 
-Eight nodes, nine connections. `x` feeds two consumers and so does `y` — two
+Eight nodes, nine connections. `x` feeds two consumers and so does `y` - two
 diamonds, and the second one turns out to matter more than the first:
 
 ```
@@ -174,8 +174,8 @@ Every intermediate port answers the same way, and still nothing runs:
 
 ### Checked by the first semantics
 
-A grid over the declared box — not random points, so the check is the same on
-every machine and every Julia version — and every value must land inside:
+A grid over the declared box - not random points, so the check is the same on
+every machine and every Julia version - and every value must land inside:
 
 ```@example iv
 function sweep!(g, pred, m)
@@ -194,7 +194,7 @@ sweep!(g, pred, 44)
 ### Neither bound is reached, and that is the interesting part
 
 The estimate is `[5/3, 9]`, the truth is `[2, 7.5]`. The gap is not slack in
-the implementation — it is the **dependency problem**, and this graph shows it
+the implementation - it is the **dependency problem**, and this graph shows it
 twice over.
 
 `f(x, y) = x·(y+1)/(y−2)` grows with `x` and falls with `y`, so the real
@@ -208,7 +208,7 @@ extremes sit at the corners `(3, 4)` and `(1, 5)`:
 The predicted maximum of `9` would need `y = 5` in the numerator and `y = 4` in
 the denominator **at the same time**. For the metadata pass those are two
 independent arrivals of `y`: it propagates ranges, not identities. The same
-thing in its purest form — `x − x` can only be zero, and the estimate cannot
+thing in its purest form - `x − x` can only be zero, and the estimate cannot
 know it:
 
 ```@example iv
@@ -233,7 +233,7 @@ why the containment check above is the test that matters.
 ### Refusing before the data is touched
 
 This is the practical payoff. Widen `y` so that `y − 2` can be zero, and the
-metadata pass refuses to produce an answer — with nothing executed:
+metadata pass refuses to produce an answer - with nothing executed:
 
 ```@example iv
 g2 = build(ylo = 1.0, yhi = 5.0)
@@ -255,7 +255,7 @@ evaluate!(g2, 2.0, 2.0)
 ### Unknown propagates, and the rule must be total
 
 Take the range off `y`. It stops being a metadata source, the walk continues
-past it, and — because a constant has no inputs — `getmeta_unsafe` is called
+past it, and - because a constant has no inputs - `getmeta_unsafe` is called
 with an **empty** `inmeta`:
 
 ```@example iv
@@ -271,7 +271,7 @@ delete!(yn.settings, :lo); delete!(yn.settings, :hi)
 
 !!! warning "`getmeta_unsafe` must be total"
     The [`ismetasource`](@ref) docstring warns against reading `inmeta[:label]`
-    in a branch declared a metadata source — the dictionary there is empty. The
+    in a branch declared a metadata source - the dictionary there is empty. The
     mirror half is just as easy to get wrong, and it is what the `|| return
     nothing` above is for: the method is **also** called on the *not a source*
     branch, where the settings it wants may be missing. Reaching for
@@ -285,7 +285,7 @@ delete!(yn.settings, :lo); delete!(yn.settings, :hi)
 
 Nothing about the two semantics is tied to one expression. Build Horner's
 scheme out of the same nodes and the metadata pass answers "what are the bounds
-of `P(x)` on this interval" — again without running:
+of `P(x)` on this interval" - again without running:
 
 ```@example iv
 function build_poly(coeffs; xlo = 0.0, xhi = 4.0)
@@ -340,7 +340,7 @@ d = getmeta(p.w)
 
 The gap is quadratic in the length of the graph: the test suite pins an 8-node
 chain at 8 rule invocations against 36 asked port by port, and a 101-node chain
-at 101 against 5151. The answers are identical to the port-by-port ones — same
+at 101 against 5151. The answers are identical to the port-by-port ones - same
 memo, same rules, asked in one pass.
 
 A rule that raises takes the whole call with it rather than returning a
@@ -357,12 +357,12 @@ half-described graph; see [`MetaRuleError`](@ref) below.
 * **An error from a rule names its node.** The walk is recursive, so a
   `KeyError` from a rule would otherwise surface with nothing to say about where
   it came from. [`MetaRuleError`](@ref) wraps it with the node id and the port
-  and keeps the original in `.cause` — that is what the refusal above printed.
+  and keeps the original in `.cause` - that is what the refusal above printed.
   Errors from the walk itself (an unknown port label, `maxdepth`) are not
   wrapped: they already name their node.
 
 * **A metadata source cuts the walk short.** Everything above a node that
-  returns `true` from [`ismetasource`](@ref) is never visited — which is the
+  returns `true` from [`ismetasource`](@ref) is never visited - which is the
   point when the node *is* the authority on what it produces, and a trap when
   it is not.
 
@@ -371,7 +371,7 @@ half-described graph; see [`MetaRuleError`](@ref) below.
   it: there is no fixed-point iteration here, only one upward pass.
 
 * **Intervals are the cheapest useful abstract domain, not the best one.**
-  Everything above holds for any lattice with a rule per node type — units,
+  Everything above holds for any lattice with a rule per node type - units,
   signs, schemas, shapes. What changes is only what `getmeta_unsafe` returns.
 
 ## The graph

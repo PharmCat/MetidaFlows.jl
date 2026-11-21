@@ -137,6 +137,11 @@ replacement does not reach keep their cached results and their `:clean` status.
 
 # What is checked, and all of it before anything is written
 
+Two things come first: the identifier has to exist, and `node` must not already
+be in the workflow under another identifier - the same object under two keys
+would be one node pretending to be two. Replacing a node with itself is
+allowed, and amounts to the invalidation alone.
+
 Every connection that touches `id` must still be valid with the new node in
 place, by the same rules [`add_connection!`](@ref) applies when a connection is
 created:
@@ -168,13 +173,14 @@ replacement on **both** sides of that connection, which is what it will be.
 3. the replacement takes the identifier and the place in the workflow, and is
    marked `:dirty` - always, whatever it arrived as;
 4. its input buffers are filled from parents that have already published -
-   `:clean` and the port among their `ready_ports` - so the replacement can
-   run without recomputing anything above it;
+   `:clean` and the port among their `ready_ports`, the rule the engine itself
+   uses - so the replacement can run without recomputing anything above it. A
+   `:released` parent is skipped: it no longer holds what it handed over;
 5. the consumers below are invalidated: each child's buffer slot fed from
    `id` is cleared and the invalidation propagates;
 6. `model.ver` is raised and the change is recorded in the change log.
 
-Should anything in steps 3-5 throw, the old node goes back and `model.ver`
+Should anything in steps 3-6 throw, the old node goes back and `model.ver`
 returns to what it was. An invalidation that had already propagated is left
 alone: a node marked `:dirty` only costs a recomputation.
 
@@ -243,4 +249,92 @@ function Base.replace!(model::Workflow, node::AbstractDataNode, id::Int;
         rethrow()
     end
     return old
+end
+
+# =========================================================================
+#  ЗАМЕНА СПЕЦИФИКАЦИИ И ОТДЕЛЬНОГО ПОРТА
+#
+# =========================================================================
+
+"""
+    nodetype(node::DataNode{T}) -> T
+
+The node's type tag as a **type**, where [`nodetypestr`](@ref) gives it as a
+string.
+
+The string form is for the change log and the snapshot, where a type must
+never travel as a type. This one is for the opposite job: building another
+node of the same kind, which is what
+[`replacespec!`](@ref) does.
+
+Not part of the public API.
+"""
+nodetype(::DataNode{T}) where T = T
+
+"""
+    replacespec!(model::Workflow, id::Int, spec::NodeSpec; throw_warn = true) -> AbstractDataNode
+
+Give node `id` a different [`NodeSpec`](@ref), keeping its type and every
+connection, and return the node that was displaced.
+
+A node's spec is an **immutable value that nodes share**: building two nodes
+from one `NodeSpec` object is legal, and
+[`dict_to_workflow`](@ref) does exactly that - every node of a type loaded from
+a snapshot gets the one spec object held in [`NODE_REGISTER`](@ref). So
+assigning into `spec.input_ports` or `spec.output_ports` does not change one
+node's ports: it changes them for every node sharing that spec, for the
+register, and therefore for every workflow loaded afterwards in this process.
+This function is how a node's ports change instead.
+
+It is [`replace!`](@ref replace!(::Workflow, ::AbstractDataNode, ::Int)) with a
+node built for you, so everything that holds there holds here: the connections
+are re-checked against the new spec before anything is written, the old node's
+settings move onto the new one, the input buffers are filled from parents that
+already published, the consumers below are invalidated, `model.ver` is raised
+and the change is recorded.
+
+A side effect worth having on its own: the node comes out holding the spec you
+passed, so a node loaded from a snapshot stops sharing the register's.
+
+See also [`replaceport!`](@ref).
+"""
+replacespec!(model::Workflow, id::Int, spec::NodeSpec; kwargs...) =
+    replace!(model, DataNode(nodetype(getnode(model, id)), spec), id; kwargs...)
+
+"""
+    replaceport!(model::Workflow, id::Int, ps::PortSpec, direction::Symbol; throw_warn = true) -> AbstractDataNode
+
+Change one port of node `id` - `direction` is `:input` or `:output` - and
+return the node that was displaced.
+
+The port is matched by `ps.label`: a label the node already has on that side is
+replaced, a label it does not have is added. The rest of the spec is carried
+over, and a fresh [`NodeSpec`](@ref) is built rather than the old one edited,
+for the reason [`replacespec!`](@ref) explains. To **remove** a port, build the
+spec yourself and call [`replacespec!`](@ref).
+
+Everything a changed port could break is refused before anything is written,
+by [`replace!`](@ref replace!(::Workflow, ::AbstractDataNode, ::Int))'s rules:
+a narrowed datatype that an existing connection no longer satisfies, a
+`MultiPort` input turned `SinglePort` while two connections feed it, a
+`handover` output that has more than one consumer, and either side of a
+`handover` pair left facing an ordinary port.
+
+```julia
+#  Тот же порт, но тип уже: пройдёт, только если связи сходятся
+replaceport!(w, 7, PortSpec("In", Float64, :in), :input)
+```
+"""
+function replaceport!(model::Workflow, id::Int, ps::PortSpec, direction::Symbol;
+                      kwargs...)
+    direction in (:input, :output) ||
+        error("Direction must be :input or :output, got $(direction)")
+    old  = getnode(model, id).spec
+    ins  = copy(old.input_ports)
+    outs = copy(old.output_ports)
+    v    = direction === :input ? ins : outs
+    i    = findfirst(p -> p.label === ps.label, v)
+    isnothing(i) ? push!(v, ps) : (v[i] = ps)
+    return replacespec!(model, id, NodeSpec(old.name, ins, outs, old.settings);
+                        kwargs...)
 end

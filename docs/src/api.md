@@ -44,16 +44,17 @@ case. The same goes for every other hook: `validate_*`, `nodesettings`,
 
 ## Pages
 
-* [Types](api_types.md) — the workflow, the node, ports, specifications,
+* [Types](api_types.md) - the workflow, the node, ports, specifications,
   state, the container supertypes, the audit events
-* [Graph and nodes](api_core.md) — building and editing a graph, the graph
-  cache, invalidation, readiness, containers, the node register
-* [Reading and writing a node](api_access.md) — getters and setters
-* [Execution](api_execution.md) — `execute!`, both schedulers, stopping a run
-* [Port metadata](api_meta.md) — `getmeta`, `getinputmeta` and their hooks
-* [Serialization and schemas](api_serialization.md) — snapshots, the value
+* [Graph and nodes](api_core.md) - building and editing a graph, replacing a
+  node in place, the graph cache, invalidation, readiness, containers, the node
+  register
+* [Reading and writing a node](api_access.md) - getters and setters
+* [Execution](api_execution.md) - `execute!`, both schedulers, stopping a run
+* [Port metadata](api_meta.md) - `getmeta`, `getinputmeta` and their hooks
+* [Serialization and schemas](api_serialization.md) - snapshots, the value
   codec, settings schemas
-* [Internals](api_internals.md) — **not** public; here so the engine's own
+* [Internals](api_internals.md) - **not** public; here so the engine's own
   invariants are written down somewhere
 
 ## Index

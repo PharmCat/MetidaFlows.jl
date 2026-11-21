@@ -21,7 +21,7 @@ end
 
 So conditional evaluation here is not decoration. Compute the product on every
 turn and throw the extra away, and the algorithm stops being cheap in
-multiplications — which is the only thing it was ever cheap in.
+multiplications - which is the only thing it was ever cheap in.
 
 ### Both idioms, and both load-bearing
 
@@ -29,7 +29,7 @@ The [guide](guide_execution.md#Conditional-evaluation) describes two ways to mak
 computation conditional. This graph uses one of each, and the choice between
 them is forced:
 
-* **the operation decides.** `PMulModIf` always runs — it checks a flag — and
+* **the operation decides.** `PMulModIf` always runs - it checks a flag - and
   multiplies and publishes only on an odd turn. That is where the work is
   saved.
 * **an optional port merges the branches.** The gate's `:product` port is
@@ -37,10 +37,10 @@ them is forced:
   `nothing`, and carries the previous `result` forward. That is how two
   branches rejoin one loop state without a second writer into a feedback port.
 
-A full guard — a node that relays everything the multiplication needs, or
-publishes nothing — does *not* work here, and the reason is worth knowing. The
+A full guard - a node that relays everything the multiplication needs, or
+publishes nothing - does *not* work here, and the reason is worth knowing. The
 guard goes silent, so the multiplication is not ready and never runs, so it
-stays `:dirty`, and the gate waits for its `:clean` — optional port or not.
+stays `:dirty`, and the gate waits for it to produce - optional port or not.
 Waiting is about the producer's *status*, not about the value.
 
 That failure is measured, and it is a quiet one: the queue drains, nothing
@@ -49,7 +49,7 @@ result. By default the guard form belongs at a dead end, where nothing
 downstream is waiting; this product has to come back into the loop.
 
 `scheduler!(w; release_optional = true)` lifts that restriction, and then the
-guard is the *better* of the two idioms here — it saves the node execution as
+guard is the *better* of the two idioms here - it saves the node execution as
 well as the multiplication. Both are measured side by side at the end of this
 page.
 
@@ -102,7 +102,7 @@ spec_powstate() = NodeSpec("Pow state",
      PortSpec("Base",     Int, :base),
      PortSpec("Exponent", Int, :exp)])
 
-# :product is the optional port — the whole merge rests on it
+# :product is the optional port - the whole merge rests on it
 spec_powgate() = NodeSpec("Pow gate",
     [PortSpec("Done",      Bool, :done),
      PortSpec("Result",    Int,  :result),
@@ -286,7 +286,7 @@ r = power(3, 5, 7)
 ### The node runs every turn; the multiplication does not
 
 That distinction is the measurement. The conditional node is executed on every
-turn — it only looks at a flag — while the number of multiplications it
+turn - it only looks at a flag - while the number of multiplications it
 performs is exactly the number of one bits in the exponent:
 
 ```@example power
@@ -311,7 +311,7 @@ r = power(3, 2^20, 1_000_003)
 ```
 
 Compare that with the twenty-two multiplications a graph that computed the
-product on every turn would perform — same answer, all of the work:
+product on every turn would perform - same answer, all of the work:
 
 ```@example power
 r = power(3, 2^20, 1_000_003)
@@ -322,7 +322,7 @@ r = power(3, 2^20, 1_000_003)
 ### What the graph looks like on an even turn
 
 With the exponent `2 = 0b10` the first turn is even, the second odd, the third
-the final one. Afterwards the conditional node is `:clean` — it ran — but it
+the final one. Afterwards the conditional node is `:clean` - it ran - but it
 published nothing on that last turn, and the gate's buffer for `:product` is
 empty rather than holding the previous turn's value:
 
@@ -340,7 +340,7 @@ prod = getnode(r.g.w, r.g.prod)
 Everything above routes the condition *into* the multiplication. The guard form
 routes the condition into a node ahead of it, so on an even turn the
 multiplication has no input at all and is never executed. In the cycle that
-deadlocks, and the deadlock is silent — no result, no error:
+deadlocks, and the deadlock is silent - no result, no error:
 
 ```@example power
 r = power(3, 5, 7; guard = true)
@@ -348,7 +348,7 @@ r = power(3, 5, 7; guard = true)
 ```
 
 With `release_optional = true` the scheduler, once its queue has run dry,
-releases the gate — whose `:product` is optional — and the loop continues:
+releases the gate - whose `:product` is optional - and the loop continues:
 
 ```@example power
 function compare(n, m = 1_000_003)
@@ -363,7 +363,7 @@ end
 compare.((1, 5, 16, 100, 1024))
 ```
 
-Same answer, same number of multiplications — and the guarded node is executed
+Same answer, same number of multiplications - and the guarded node is executed
 only on the turns that use it, instead of on every turn. For `n = 1024` that is
 one execution against twelve.
 
@@ -380,8 +380,8 @@ node that did not run. That is why the flag is opt-in rather than the default.
   descent](examples_gradient_descent.md).
 
 * **The modulus comes from a constant node that runs once.** It executes on the
-  first turn and stays `:clean` — nothing marks it dirty, because it is not
-  downstream of the loop head — so its value stays in the multiplications'
+  first turn and stays `:clean` - nothing marks it dirty, because it is not
+  downstream of the loop head - so its value stays in the multiplications'
   buffers. If it were re-executed every turn it would be ordinary work; as it
   is, it is free.
 
