@@ -1605,6 +1605,41 @@ is named by its type, and [`workflow_to_dict`](@ref) says what that costs.
 nodekey(node::DataNode) = something(noderegkey(node), nodetypestr(node))
 
 """
+    noderegkey(node::DataNode) -> String | Nothing
+
+Internal function. The key in [`NODE_REGISTER`](@ref) a node's **specification**
+is registered under, or `nothing` when it is registered under none.
+
+The key is found by identity: an entry matches when it holds this node's type
+and the very same `NodeSpec` object. So nothing on the node has to be kept in
+step with the table - a node given another specification by
+[`replacespec!`](@ref) answers with the new key, or with `nothing` while that
+specification is unregistered.
+
+The node type's own key, [`nodetypestr`](@ref) of it, is tried first, so a node
+of a registered type with the registered specification costs one lookup. A
+variant costs a walk of the table, in sorted key order, so the answer does not
+depend on the machine when one specification is registered twice.
+
+This is what [`node_to_dict`](@ref) writes as the node's `"type"`, and
+`nothing` is what makes [`workflow_to_dict`](@ref) warn: a specification under
+no key cannot be named in a snapshot, so the node would come back with the
+ports of its type.
+"""
+function noderegkey(node::DataNode{T}) where T
+    own = nodetypestr(node)
+    e   = get(NODE_REGISTER, own, nothing)
+    if !isnothing(e) && e[1] === T && e[2] === node.spec
+        return own
+    end
+    #  Порядок обхода словаря машинно-зависим, порядок поиска ключа — нет.
+    for k in sort!(collect(keys(NODE_REGISTER)))
+        t, s = NODE_REGISTER[k]
+        t === T && s === node.spec && return k
+    end
+    return nothing
+end
+"""
     unregister_all!() -> Bool
  
 Empty [`NODE_REGISTER`](@ref). Mostly useful in tests, to start from a known
