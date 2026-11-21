@@ -38,6 +38,7 @@ AbstractDataNode
 AbstractAuditEvent
 NodeAdded
 NodeReplaced
+SpecChanged
 NodeDeleted
 ConnectionAdded
 ConnectionDeleted

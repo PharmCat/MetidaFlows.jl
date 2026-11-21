@@ -19,10 +19,11 @@
 ############################################################################
 
 import MetidaFlows: nodetype, replacespec!, replaceport!,
-                    register_node!, unregister_all!,
-                    workflow_to_dict, dict_to_workflow, getregnodeinfo,
-                    isportexist, getportspec,
-                    NodeAdded, NodeReplaced, SETTINGS, AbstractNodeSettings,
+                    register_node!, unregister_all!, unregister_node!,
+                    noderegkey, workflow_to_dict, dict_to_workflow, getregnodeinfo,
+                    isportexist, getportspec, getposition, setposition!,
+                    NodeAdded, NodeReplaced, SpecChanged, SETTINGS,
+                    AbstractNodeSettings,
                     setreadyports!, getstate, getexecn, getnode, getid,
                     getporttype, reset!, mark_dirty!
 
@@ -45,6 +46,7 @@ struct RpNoIn   <: AbstractNodeType end   # вообще без входов
 struct RpMulti  <: AbstractNodeType end   # MultiPort :in
 struct RpGiver  <: AbstractNodeType end   # отдающий выход
 struct RpTaker  <: AbstractNodeType end   # забирающий вход
+struct RpReader <: AbstractNodeType end   # обычный потребитель вектора
 struct RpTyped  <: AbstractNodeType end   # настройки структурой
 struct RpLoop   <: AbstractNodeType end   # петля через :feedback
 
@@ -75,6 +77,8 @@ function MetidaFlows.execute_unsafe!(n::DataNode{RpTaker})
     setdata!(n, :out, v === nothing ? 0 : sum(v))
     return setreadyports!(n, :out)
 end
+MetidaFlows.execute_unsafe!(n::DataNode{RpReader}) =
+    (setdata!(n, :out, sum(getinputdata(n, :in))); setreadyports!(n, :out))
 MetidaFlows.execute_unsafe!(n::DataNode{RpTyped}) =
     (setdata!(n, :out, n.settings[:value]); setreadyports!(n, :out))
 function MetidaFlows.execute_unsafe!(n::DataNode{RpLoop})
@@ -695,6 +699,7 @@ end
 
 # --------------------------------------------------------------------------
 @testset "S6. журнал и версия как у replace!                " begin
+    unregister_all!()
     rp_withaudit() do
         g = rp_chain()
         v  = g.w.ver
@@ -703,9 +708,197 @@ end
         replacespec!(g.w, g.d, wide)
         @test g.w.ver == v + 1
         @test length(g.w.audit_log) == n0 + 1
-        @test g.w.audit_log[end] == NodeReplaced(g.d, "Main.RpDouble", "Main.RpDouble")
+        #  Тип не менялся, поэтому запись своя: `NodeReplaced` назвал бы
+        #  один и тот же тип дважды. Ключей нет - спеки не зарегистрированы.
+        @test g.w.audit_log[end] == SpecChanged(g.d, "", "")
     end
     @test SETTINGS[:audit] === false
+end
+
+# ======================================================================
+#  ВАРИАНТЫ СПЕКИ, ПОЗИЦИЯ И ЖУРНАЛ (0.8.0)
+# ======================================================================
+
+# --------------------------------------------------------------------------
+@testset "V1. позиция переходит к замене                   " begin
+    g = rp_chain()
+    setposition!(getnode(g.w, g.d), (120, 40))
+
+    #  Узел собран на умолчании (0, 0), но встаёт на место старого.
+    old = replace!(g.w, DataNode(RpTriple, rp_triple()), g.d)
+    @test getposition(old) == (120, 40)
+    @test getposition(getnode(g.w, g.d)) == (120, 40)
+
+    #  И своя позиция замены отбрасывается: место в графе важнее.
+    setposition!(getnode(g.w, g.d), (7, 8))
+    far = DataNode(RpDouble, 0, :idle, (999, 999), rp_double())
+    replace!(g.w, far, g.d)
+    @test getposition(getnode(g.w, g.d)) == (7, 8)
+
+    #  Через спеку и через порт - то же самое: узел собирается внутри.
+    replacespec!(g.w, g.d, rp_double())
+    @test getposition(getnode(g.w, g.d)) == (7, 8)
+    replaceport!(g.w, g.d, PortSpec("In", Any, :in), :input)
+    @test getposition(getnode(g.w, g.d)) == (7, 8)
+end
+
+# --------------------------------------------------------------------------
+@testset "V2. SpecChanged: ключи, кодек, закрытый набор     " begin
+    unregister_all!()
+    rp_withaudit() do
+        g = rp_chain()
+        #  Спека по умолчанию зарегистрирована, вариант - под своим ключом.
+        register_node!(g.w; throw_warn = false)
+        wide = NodeSpec("Double", [PortSpec("In", Any, :in)], [PortSpec("Out", Int, :out)])
+        register_node!(DataNode(RpDouble, wide); key = "Main.RpDouble@any")
+
+        replacespec!(g.w, g.d, wide)
+        ev = g.w.audit_log[end]
+        @test ev == SpecChanged(g.d, "Main.RpDouble@any", "Main.RpDouble")
+
+        #  Смена узла по-прежнему пишет NodeReplaced.
+        replace!(g.w, DataNode(RpTriple, rp_triple()), g.d)
+        @test g.w.audit_log[end] == NodeReplaced(g.d, "Main.RpTriple", "Main.RpDouble")
+
+        #  Кодек в обе стороны, и имя - из закрытого набора.
+        d = MetidaFlows.audit_event_to_dict(ev)
+        @test d["event"] == "SpecChanged"
+        @test MetidaFlows.dict_to_audit_event(d) == ev
+        @test "SpecChanged" in MetidaFlows.AUDIT_EVENT_NAMES
+        @test length(MetidaFlows.AUDIT_EVENT_NAMES) == 7
+        @test_throws ErrorException MetidaFlows.dict_to_audit_event(
+            Dict{String, Any}("event" => "SpecInvented", "id" => 1))
+
+        #  Журнал переживает круг через снимок целиком.
+        register_node!(g.w; skipmode = true, throw_warn = false)   # RpTriple
+        w2 = dict_to_workflow(workflow_to_dict(g.w; throw_warn = false))
+        @test w2.audit_log == g.w.audit_log
+    end
+    unregister_all!()
+end
+
+# --------------------------------------------------------------------------
+@testset "V3. ключ варианта в снимке                       " begin
+    unregister_all!()
+    g = rp_chain()
+    register_node!(g.w; throw_warn = false)
+    wide = NodeSpec("Double", [PortSpec("In", Any, :in)],
+                              [PortSpec("Out", Int, :out), PortSpec("Dbg", Int, :dbg)])
+
+    #  Без регистрации варианта: предупреждение при записи и порты типа
+    #  после круга - то есть правка портов файл не переживает.
+    replacespec!(g.w, g.d, wide)
+    @test isnothing(noderegkey(getnode(g.w, g.d)))
+    d0 = @test_logs (:warn, r"registered under no key") workflow_to_dict(g.w)
+    @test d0["nodes"][string(g.d)]["type"] == "Main.RpDouble"
+    @test [p.label for p in getnode(dict_to_workflow(d0), g.d).spec.output_ports] == [:out]
+
+    #  Зарегистрировали тот же объект спеки - и ключ находится по тождеству.
+    register_node!(getnode(g.w, g.d); key = "Main.RpDouble@dbg")
+    @test noderegkey(getnode(g.w, g.d)) == "Main.RpDouble@dbg"
+    d1 = workflow_to_dict(g.w)
+    @test d1["format_version"] == 4
+    @test d1["nodes"][string(g.d)]["type"] == "Main.RpDouble@dbg"
+
+    w2 = dict_to_workflow(d1)
+    @test [p.label for p in getnode(w2, g.d).spec.output_ports] == [:out, :dbg]
+    @test getnode(w2, g.d).spec === getregnodeinfo("Main.RpDouble@dbg")[2]
+    scheduler!(w2)
+    @test getdata(w2, g.d, :out) == 42
+    unregister_all!()
+end
+
+# --------------------------------------------------------------------------
+@testset "V4. отдающий порт: снимок собирается только с ключом" begin
+    #  Случай владельца: спека по умолчанию отдаёт значение, вариант - нет,
+    #  и потребителей двое. Без ключа снимок не загружается вообще.
+    for registered in (false, true)
+        unregister_all!()
+        plain = rp_plain()
+        w = Workflow(1)
+        s  = add_node!(w, DataNode(RpGiver, rp_giver()))
+        register_node!(w; throw_warn = false)
+        replacespec!(w, s, plain)
+        r1 = add_node!(w, DataNode(RpReader, rp_reader()))
+        r2 = add_node!(w, DataNode(RpReader, rp_reader()))
+        add_connection!(w, s, :out, r1, :in)
+        add_connection!(w, s, :out, r2, :in)
+        register_node!(w; skipmode = true, throw_warn = false)
+        registered && register_node!(getnode(w, s); key = "Main.RpGiver@plain")
+
+        d = workflow_to_dict(w; throw_warn = false)
+        if registered
+            w2 = dict_to_workflow(d)
+            scheduler!(w2)
+            @test getdata(w2, r1, :out) == 6
+            @test getdata(w2, r2, :out) == 6
+        else
+            @test_throws ErrorException dict_to_workflow(d)
+        end
+    end
+    unregister_all!()
+end
+
+# --------------------------------------------------------------------------
+@testset "V5. register_node!(w): по возрастанию id          " begin
+    unregister_all!()
+    w = Workflow(1)
+    n1 = add_node!(w, DataNode(RpDouble, rp_double()))
+    wide = NodeSpec("Double", [PortSpec("In", Any, :in)], [PortSpec("Out", Int, :out)])
+    n2 = add_node!(w, DataNode(RpDouble, wide))
+    n3 = add_node!(w, DataNode(RpDouble, wide))
+
+    #  Регистрируется спека узла с наименьшим id, а не первого по словарю;
+    #  про остальные сказано, и сказано с их номерами.
+    #  Regex собирается строкой: в r"..." интерполяции нет.
+    names = @test_logs (:warn,
+        Regex("registered from node $(n1).*\\[$(n2), $(n3)\\]")) register_node!(w)
+    @test names == ["Main.RpDouble"]
+    @test getregnodeinfo("Main.RpDouble")[2] === getnode(w, n1).spec
+    @test getregnodeinfo("Main.RpDouble")[2].input_ports[1].datatype === Int
+
+    #  Предупреждение глушится, и это не меняет того, что регистрируется.
+    unregister_all!()
+    @test register_node!(w; throw_warn = false) == ["Main.RpDouble"]
+    @test getregnodeinfo("Main.RpDouble")[2] === getnode(w, n1).spec
+
+    #  Узлы, у которых спека совпадает по содержимому, не ссорятся: фабрика
+    #  на каждый узел - обычное дело, и предупреждения здесь быть не должно.
+    unregister_all!()
+    w2 = Workflow(1)
+    add_node!(w2, DataNode(RpDouble, rp_double()))
+    add_node!(w2, DataNode(RpDouble, rp_double()))   # разные объекты, одни порты
+    @test @test_logs(register_node!(w2)) == ["Main.RpDouble"]
+    unregister_all!()
+end
+
+# --------------------------------------------------------------------------
+@testset "V6. noderegkey и ключи регистра                  " begin
+    unregister_all!()
+    own, var = rp_double(), NodeSpec("Double", [PortSpec("In", Any, :in)],
+                                               [PortSpec("Out", Int, :out)])
+    @test register_node!(DataNode(RpDouble, own)) == "Main.RpDouble"
+    @test register_node!(DataNode(RpDouble, var); key = "Main.RpDouble@any") ==
+          "Main.RpDouble@any"
+
+    @test noderegkey(DataNode(RpDouble, own)) == "Main.RpDouble"
+    @test noderegkey(DataNode(RpDouble, var)) == "Main.RpDouble@any"
+    #  Та же форма портов, но другой объект - ключа нет: тождество, не равенство.
+    @test isnothing(noderegkey(DataNode(RpDouble, rp_double())))
+    #  Чужой тип с той же спекой - тоже нет.
+    @test isnothing(noderegkey(DataNode(RpTriple, own)))
+
+    #  Занятый ключ и пустой ключ - отказ.
+    @test_throws ErrorException register_node!(DataNode(RpDouble, var); key = "Main.RpDouble")
+    @test_throws ErrorException register_node!(DataNode(RpDouble, var); key = "")
+    @test isnothing(register_node!(DataNode(RpDouble, var); key = "Main.RpDouble",
+                                   skipmode = true))
+    #  Один объект под двумя ключами: ответ не зависит от обхода словаря.
+    register_node!(DataNode(RpDouble, own); key = "Aaa.First")
+    @test noderegkey(DataNode(RpDouble, own)) == "Main.RpDouble"   # свой ключ первым
+    unregister_node!("Main.RpDouble")
+    @test noderegkey(DataNode(RpDouble, own)) == "Aaa.First"
+    unregister_all!()
 end
 
 end # @testset "ЗАМЕНА УЗЛА НА МЕСТЕ"
