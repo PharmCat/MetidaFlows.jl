@@ -18,6 +18,8 @@ add_connection!
 delete_connection!
 add_node!
 replace!(::Workflow, ::AbstractDataNode, ::Int)
+replacespec!
+replaceport!
 delete_node!
 isnodeexist
 ```

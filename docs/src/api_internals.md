@@ -17,6 +17,7 @@ means the public API is missing something.
 ## Graph, invalidation, readiness
 
 ```@docs
+nodetype
 pickid
 readydeps
 hasproduced

@@ -207,6 +207,19 @@ takes the place, is marked `:dirty`, has its input buffers filled from parents
 that already published, and the consumers below are invalidated. The displaced
 node is returned, so putting it back is the same call again.
 
+[`replacespec!`](@ref) and [`replaceport!`](@ref) are the same thing for a
+node whose *ports* change rather than its type - they build a new
+[`NodeSpec`](@ref) and hand it to `replace!`. Use them rather than assigning
+into `spec.input_ports`: nodes share specs, and a snapshot gives every node of
+a type the one spec object from [`NODE_REGISTER`](@ref), so an in-place edit
+reaches every node of that type, the register, and every workflow loaded after
+it in the same process.
+
+```julia
+replaceport!(w, 7, PortSpec("In", Float64, :in), :input)   # сузить тип входа
+replacespec!(w, 7, newspec)                                 # или спек целиком
+```
+
 Two consequences worth stating:
 
 * **the replacement always recomputes.** It is marked `:dirty` whatever it

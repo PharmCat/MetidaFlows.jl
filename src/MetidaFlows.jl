@@ -848,6 +848,25 @@ Fields:
 - `settings::Vector{Symbol}` - settings keys advertised through the node schema.
 - `portmap::Dict{Tuple{Symbol,Symbol}, Int}` - `(direction, label) => port index`, built by the constructor.
 
+# A spec is a shared value, so never edit one in place
+Nodes **share** specs. Building two nodes from one `NodeSpec` object is legal,
+and [`dict_to_workflow`](@ref) does it as a matter of course: every node of a
+type loaded from a snapshot gets the one spec object held in
+[`NODE_REGISTER`](@ref).
+
+`NodeSpec` and [`PortSpec`](@ref) are immutable, so a field cannot be assigned
+- but `input_ports` and `output_ports` are ordinary `Vector`s, and a vector
+inside an immutable struct is still a vector. Assigning into one does not
+change a single node's ports. It changes them for every node sharing that spec,
+for the register, and therefore for every workflow loaded afterwards in this
+process - a graph loaded later can fail to validate because of an edit made to
+an unrelated one. It also leaves `model.ver` untouched, so the readiness map
+cached against it keeps the old `required` and `kind`.
+
+Treat a spec as the immutable value it is meant to be, and change a node's
+ports with [`replaceport!`](@ref) or [`replacespec!`](@ref), which build a new
+spec and re-check every connection first.
+
 # Ports are enforced, settings are not
 The two lists are not symmetric, and it is worth knowing which is which. A
 port label that is not in the spec is **rejected**. A settings key that is not

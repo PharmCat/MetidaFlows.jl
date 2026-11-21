@@ -2,23 +2,27 @@
 #
 #  КАТЕГОРИЯ: ЗАМЕНА УЗЛА НА МЕСТЕ
 #
-#  `replace!(w, node, id)` — поставить другой узел под тем же
+#  `replace!(w, node, id)` - поставить другой узел под тем же
 #  идентификатором, сохранив связи. Через `delete_node!` + `add_node!` так
-#  нельзя: удаление узла уносит его связи, а вместе с ними порядок на
+#  нельзя: удаление узла уносит его связи, вместе с ними порядок на
 #  мультипорте (он задаётся идентификаторами связей).
 #
-#  Назначение этого набора — закрепить два обещания:
+#  Назначение этого набора:
 #
 #    1. всё, что может отказать, проверяется ДО первой записи, поэтому отказ
 #       оставляет граф в точности прежним. Поэтому тесты отказов идут первыми
 #       и каждый из них проверяет неизменность: узел на месте, `ver` прежний,
 #       число связей прежнее;
 #    2. при успехе узлы, которых замена не касается, сохраняют посчитанное:
-#       `exec_n` родителя не растёт, а потомки инвалидируются.
+#       `exec_n` родителя не растёт,  потомки инвалидируются.
 #
 ############################################################################
 
-import MetidaFlows: NodeAdded, NodeReplaced, SETTINGS, AbstractNodeSettings,
+import MetidaFlows: nodetype, replacespec!, replaceport!,
+                    register_node!, unregister_all!,
+                    workflow_to_dict, dict_to_workflow, getregnodeinfo,
+                    isportexist, getportspec,
+                    NodeAdded, NodeReplaced, SETTINGS, AbstractNodeSettings,
                     setreadyports!, getstate, getexecn, getnode, getid,
                     getporttype, reset!, mark_dirty!
 
@@ -536,6 +540,172 @@ end
     scheduler!(g.w; reset_mode = :none)
     @test getdata(g.w, g.d, :out) == 20
     @test getexecn(g.w, g.c) == 1
+end
+
+# ======================================================================
+#  ЗАМЕНА СПЕЦИФИКАЦИИ И ОТДЕЛЬНОГО ПОРТА
+#
+#  Спецификация узла — РАЗДЕЛЯЕМОЕ неизменяемое значение, и загрузка снимка
+#  отдаёт всем узлам одного типа один объект из NODE_REGISTER. Поэтому порты
+#  правятся этими двумя функциями, а не присваиванием в spec.input_ports:
+#  правка на месте ушла бы в соседние узлы, в регистр и в каждый следующий
+#  загруженный граф того же процесса.
+# ======================================================================
+
+# --------------------------------------------------------------------------
+@testset "S1. nodetype отдаёт параметр типа                 " begin
+    @test nodetype(DataNode(RpConst, rp_const())) === RpConst
+    @test nodetype(DataNode(RpMulti, rp_multi())) === RpMulti
+end
+
+# --------------------------------------------------------------------------
+@testset "S2. replacespec! меняет спек, связи целы          " begin
+    g = rp_chain(value = 5)
+    scheduler!(g.w)
+    @test getdata(g.w, g.d, :out) == 10
+    cids = sort!(collect(keys(g.w.connections)))
+
+    #  Тот же тип узла, другой спек: вход принимает Any вместо Int.
+    wide = NodeSpec("Double", [PortSpec("In", Any, :in)],
+                              [PortSpec("Out", Int, :out)])
+    old = replacespec!(g.w, g.d, wide)
+    @test old isa DataNode{RpDouble}
+    @test getnode(g.w, g.d) isa DataNode{RpDouble}          # тип сохранён
+    @test getnode(g.w, g.d).spec === wide                   # спек тот, что дали
+    @test sort!(collect(keys(g.w.connections))) == cids     # связи те же
+    @test getid(getnode(g.w, g.d)) == g.d
+
+    scheduler!(g.w; reset_mode = :none)
+    @test getdata(g.w, g.d, :out) == 10
+    @test getexecn(g.w, g.c) == 1                           # родитель не считался
+end
+
+# --------------------------------------------------------------------------
+@testset "S3. replaceport! по метке: замена и добавление    " begin
+    g = rp_chain()
+    scheduler!(g.w)
+
+    #  Метка есть — порт заменяется, остальные на месте.
+    old = replaceport!(g.w, g.d, PortSpec("In", Any, :in), :input)
+    @test old isa DataNode{RpDouble}
+    node = getnode(g.w, g.d)
+    @test length(node.spec.input_ports) == 1
+    @test getportspec(node, :in, :input).datatype === Any
+    @test isportexist(node, :out, :output)
+
+    #  Метки нет — порт добавляется, и portmap пересобран: именно это
+    #  потерялось бы, если копировать спек целиком вместе со старым portmap.
+    replaceport!(g.w, g.d, PortSpec("Extra", Int, :extra), :output)
+    node = getnode(g.w, g.d)
+    @test length(node.spec.output_ports) == 2
+    @test isportexist(node, :extra, :output)
+    @test getportspec(node, :extra, :output).datatype === Int
+    @test isportexist(node, :out, :output)                  # прежний не потерян
+
+    #  Порт ищется ПО МЕТКЕ, а не по первому попавшемуся: у узла с двумя
+    #  входами меняется именно названный, второй цел.
+    w2 = Workflow(1)
+    two = add_node!(w2, DataNode(RpConst, NodeSpec("Two",
+        [PortSpec("A", Int, :a), PortSpec("B", Int, :b)],
+        [PortSpec("Out", Int, :out)], [:value])))
+    replaceport!(w2, two, PortSpec("B", Float64, :b), :input)
+    n2 = getnode(w2, two)
+    @test getportspec(n2, :b, :input).datatype === Float64
+    @test getportspec(n2, :a, :input).datatype === Int        # первый не тронут
+    @test length(n2.spec.input_ports) == 2
+
+    #  Сторона проверяется.
+    @test_throws ErrorException replaceport!(g.w, g.d, PortSpec("X", Int, :x), :sideways)
+    msg = try; replaceport!(g.w, g.d, PortSpec("X", Int, :x), :sideways); catch e; sprint(showerror, e); end
+    @test occursin(":input or :output", msg)
+end
+
+# --------------------------------------------------------------------------
+@testset "S4. проверки replace! наследуются                 " begin
+    #  Сужение типа входа, которому связь больше не отвечает: родитель
+    #  отдаёт Int, а Int <: Float64 ложно.
+    g = rp_chain()
+    scheduler!(g.w)
+    old  = getnode(g.w, g.d)
+    snap = rp_snapshot(g.w)
+    @test_throws ErrorException replaceport!(g.w, g.d, PortSpec("In", Float64, :in), :input)
+    msg = try; replaceport!(g.w, g.d, PortSpec("In", Float64, :in), :input); catch e; sprint(showerror, e); end
+    @test occursin("Type mismatch", msg)
+    @test getnode(g.w, g.d) === old
+    @test rp_snapshot(g.w) == snap
+
+    #  MultiPort с двумя связями нельзя сузить до SinglePort.
+    w = Workflow(1)
+    a = add_node!(w, DataNode(RpConst, rp_const())); setsettings!(w, a, Dict(:value => 1))
+    b = add_node!(w, DataNode(RpConst, rp_const())); setsettings!(w, b, Dict(:value => 2))
+    m = add_node!(w, DataNode(RpMulti, rp_multi()))
+    add_connection!(w, a, :out, m, :in)
+    add_connection!(w, b, :out, m, :in)
+    oldm = getnode(w, m)
+    snapm = rp_snapshot(w)
+    @test_throws ErrorException replaceport!(w, m, PortSpec("In", Int, :in), :input)
+    @test occursin("SinglePort", try; replaceport!(w, m, PortSpec("In", Int, :in), :input); catch e; sprint(showerror, e); end)
+    @test getnode(w, m) === oldm
+    @test rp_snapshot(w) == snapm
+    #  А на мультипорт — можно.
+    @test replaceport!(w, m, PortSpec("In", Any, :in, MultiPort()), :input) === oldm
+end
+
+# --------------------------------------------------------------------------
+@testset "S5. узлы снимка разделяют спек, replacespec! отцепляет" begin
+    #  Здесь ничего не правится на месте намеренно: порча объекта из
+    #  NODE_REGISTER вышла бы за пределы этого файла.
+    unregister_all!()
+    w = Workflow(1)
+    s = add_node!(w, DataNode(RpNoIn,   rp_noin()))
+    e1 = add_node!(w, DataNode(RpDouble, rp_double()))
+    e2 = add_node!(w, DataNode(RpDouble, rp_double()))
+    add_connection!(w, s, :out, e1, :in)
+    #  Фабрика на каждый вызов — спеки разные.
+    @test !(getnode(w, e1).spec === getnode(w, e2).spec)
+
+    register_node!(w)
+    w2 = dict_to_workflow(workflow_to_dict(w))
+    #  А после загрузки — один объект, и он же в регистре.
+    @test getnode(w2, e1).spec === getnode(w2, e2).spec
+    @test getnode(w2, e1).spec === getregnodeinfo("Main.RpDouble")[2]
+
+    #  replacespec! даёт узлу собственный спек: больше ничего не разделяется.
+    own = NodeSpec("Double", [PortSpec("In", Any, :in)], [PortSpec("Out", Int, :out)])
+    replacespec!(w2, e1, own)
+    @test getnode(w2, e1).spec === own
+    @test !(getnode(w2, e1).spec === getnode(w2, e2).spec)
+    #  Сосед и регистр не тронуты.
+    @test getportspec(getnode(w2, e2), :in, :input).datatype === Int
+    @test getregnodeinfo("Main.RpDouble")[2].input_ports[1].datatype === Int
+
+    #  То же для replaceport! — и это главная гарантия всей затеи: правка
+    #  порта у узла, который делит спек с соседом и с регистром, не должна
+    #  уйти ни в соседа, ни в регистр. Правка на месте ушла бы в оба.
+    w3 = dict_to_workflow(workflow_to_dict(w))
+    shared = getnode(w3, e1).spec
+    @test shared === getnode(w3, e2).spec                    # делят объект
+    replaceport!(w3, e1, PortSpec("In", Any, :in), :input)
+    @test getportspec(getnode(w3, e1), :in, :input).datatype === Any
+    @test getportspec(getnode(w3, e2), :in, :input).datatype === Int
+    @test shared.input_ports[1].datatype === Int             # общий объект цел
+    @test getregnodeinfo("Main.RpDouble")[2].input_ports[1].datatype === Int
+    unregister_all!()
+end
+
+# --------------------------------------------------------------------------
+@testset "S6. журнал и версия как у replace!                " begin
+    rp_withaudit() do
+        g = rp_chain()
+        v  = g.w.ver
+        n0 = length(g.w.audit_log)
+        wide = NodeSpec("Double", [PortSpec("In", Any, :in)], [PortSpec("Out", Int, :out)])
+        replacespec!(g.w, g.d, wide)
+        @test g.w.ver == v + 1
+        @test length(g.w.audit_log) == n0 + 1
+        @test g.w.audit_log[end] == NodeReplaced(g.d, "Main.RpDouble", "Main.RpDouble")
+    end
+    @test SETTINGS[:audit] === false
 end
 
 end # @testset "ЗАМЕНА УЗЛА НА МЕСТЕ"
