@@ -4,8 +4,8 @@ CurrentModule = MetidaFlows
 
 # Typed node containers
 
-A node keeps three things of its own — its settings, its output data and its
-execution state — and by default each is a `Dict{Symbol, Any}`. That is
+A node keeps three things of its own - its settings, its output data and its
+execution state - and by default each is a `Dict{Symbol, Any}`. That is
 convenient and it is what every example in the guide uses. It is also untyped:
 a settings key is whatever was put there, a typo is a missing key rather than a
 compile-time error, and every read goes through a dictionary lookup returning
@@ -33,9 +33,9 @@ nothing # hide
 
 ## What a container has to provide
 
-Subtyping [`AbstractNodeFields`](@ref) — which is what
+Subtyping [`AbstractNodeFields`](@ref) - which is what
 [`AbstractNodeSettings`](@ref), [`AbstractNodeData`](@ref) and
-[`AbstractNodeState`](@ref) do — gives the struct the whole interface the
+[`AbstractNodeState`](@ref) do - gives the struct the whole interface the
 engine uses, mapped onto its fields:
 
 ```@example typed
@@ -52,17 +52,20 @@ s = ScaleSettings()
 | `haskey(obj, f)` | `hasfield` | [`settings_to_dict`](@ref) |
 | `get(obj, f, default)` | field or `default` | [`getdata`](@ref) |
 | `empty!(obj)` | reset, see below | [`mark_dirty!`](@ref), [`reset!`](@ref) |
+| `delete!(obj, f)` | one field reset, see below | [`replacesettings_unsafe!`](@ref) |
 
 You write none of these. The container must be a `mutable struct`, because the
 engine writes to it.
 
 ## Resetting
 
-`empty!` is the one method with a condition. A `Dict` can be emptied; a struct
-with fixed fields has no empty state, so the generic method builds a fresh
-instance with `T()` and copies its fields over. **Give the struct a
-zero-argument constructor** — that is what the two above are for — or define
-`Base.empty!` yourself, the way [`NodeState`](@ref) does.
+`empty!` and `delete!` are the two methods with a condition. A `Dict` can be
+emptied and a key of it removed; a struct with fixed fields has neither an empty
+state nor a missing field, so both are defined against a freshly constructed
+instance: the generic methods build one with `T()` and copy from it, all fields
+or the one named. **Give the struct a zero-argument constructor** - that is what
+the two above are for - or define `Base.empty!` yourself, the way
+[`NodeState`](@ref) does.
 
 ```@example typed
 s[:factor] = 12.5
@@ -72,9 +75,10 @@ s[:factor]        # back to what ScaleSettings() gives
 
 This matters more than it looks: the engine clears a node's cached output data
 on every invalidation, which happens on `add_connection!`, on `setsettings!`
-and at the start of every run. A data container that cannot be reset stops the
-graph before it is even wired up. If neither a constructor nor an `empty!`
-exists, the error says so and names the type:
+and at the start of any run that resets at `:full` - the default. A data
+container that cannot be reset stops the graph before it is even wired up. If
+neither a constructor nor an `empty!` exists, the error says so and names the
+type:
 
 ```julia
 julia> empty!(NoDefault(5))
@@ -116,7 +120,7 @@ node a `Dict` for settings and keeps the typed data container.
 
 ## In a graph
 
-Everything else is unchanged — the same `setsettings!`, the same scheduler, the
+Everything else is unchanged - the same `setsettings!`, the same scheduler, the
 same statuses:
 
 ```@example typed
@@ -152,7 +156,7 @@ end
 
 [`dict_to_node`](@ref) builds a loaded node from the same four functions, so a
 typed graph comes back typed. Nothing about the containers is read from the
-file — like the node type and the spec, they are decided by the running code,
+file - like the node type and the spec, they are decided by the running code,
 which is what keeps loading a snapshot from being able to construct anything
 your code did not declare.
 
@@ -247,12 +251,14 @@ node execution over a whole graph that is 10 to 17 percent fewer bytes. The
 Two things worth knowing before building on this:
 
 * **state is typeable but not fully supported.** `nodestate` accepts any
-  subtype of [`AbstractNodeState`](@ref), but [`request_stop!`](@ref) needs a
-  `stop` field and so works on [`NodeState`](@ref) only;
-  [`isstoprequested`](@ref) reports `false` for anything else. Unless you need
-  a custom state, leave `nodestate` alone.
+  subtype of [`AbstractNodeState`](@ref), but [`request_stop!`](@ref) is
+  defined on [`NodeState`](@ref) and raises on any other state - a `stop` field
+  of your own does not help, because nothing dispatches on a field - and
+  [`isstoprequested`](@ref) reports `false` for them. A node's own log needs a
+  `log` field, and [`log!`](@ref) raises without one. Unless you need a custom
+  state, leave `nodestate` alone.
 * **settings arrive as a `Dict` and are merged field by field.**
   [`setsettings!`](@ref) and the snapshot loader both write through
   `setindex!`, one key at a time, so a value whose type does not match the
   field raises a `convert` error naming the field. A key the struct does not
-  have is an error too — with a `Dict` it would have been silently accepted.
+  have is an error too - with a `Dict` it would have been silently accepted.

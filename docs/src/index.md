@@ -9,14 +9,18 @@ PKCSV_PATH = joinpath(pwd(), "conc.csv")
 
 # MetidaFlows
 
-A lightweight, node-based workflow engine for scientific and analytical pipelines in Julia.
+A dataflow engine for Julia: a computation described as a graph of typed nodes
+and recomputed incrementally.
 
 ---
 
 **MetidaFlows.jl** is an early-stage project for building typed, graph-based execution workflows in Julia.
 It is currently under active development and **not yet stable for production use**.
 
-The goal of the project is to explore how workflow systems can be expressed naturally using Julia’s type system and multiple dispatch, while keeping the core execution model explicit and minimal.
+The goal of the project is to explore how a workflow system can be expressed
+through Julia's type system and multiple dispatch. The execution model stays
+explicit and minimal: what runs, when, and what is dropped between runs are all
+things the caller can name.
 
 ---
 
@@ -37,12 +41,14 @@ You should expect breaking changes while the architecture stabilizes.
 
 ```julia
 using Pkg
-Pkg.add(url = "https://github.com/PharmCat/MetidaFlows.jl")
+Pkg.add("MetidaFlows")
 ```
+
+Or straight from the repository, for the development version:
 
 ```julia
 using Pkg
-Pkg.add("MetidaFlows")
+Pkg.add(url = "https://github.com/PharmCat/MetidaFlows.jl")
 ```
 
 ---
@@ -73,12 +79,23 @@ Instead of hidden execution magic, everything is explicit:
 * typed node system built on multiple dispatch
 * directed graph model with strict connection validation, including type checking
 * two execution models: [`DAW`](@ref) (topological) and [`ABW`](@ref) (queue based, experimental)
-* incremental execution: a `:clean` node is never recomputed
+* incremental execution: a node whose result still stands republishes instead
+  of running, and what is dropped between runs is one keyword - see
+  [`RESET_LEVELS`](@ref)
 * invalidation propagated downstream on every settings or topology change
-* node status tracking (`:idle`, `:dirty`, `:clean`, `:executing`, `:failed`, `:invalid_*`)
+* node status tracking (`:idle`, `:dirty`, `:clean`, `:released`, `:executing`,
+  `:failed`, `:invalid_*`)
 * per-connection input buffering, including many-to-one [`MultiPort`](@ref) inputs
+* ownership transfer on a declared port pair: a consumer may
+  [`take!`](@ref take!(::AbstractDataNode, ::Symbol)) a value and work on it in
+  place, with no defensive copying
+* a node can be swapped for another under the same identifier, wiring intact -
+  [`replace!`](@ref replace!(::Workflow, ::AbstractDataNode, ::Int)),
+  [`replacespec!`](@ref), [`replaceport!`](@ref)
 * validation hooks: [`validate_node`](@ref), [`validate_settings`](@ref), [`validate_result`](@ref)
-* dictionary serialization of workflows, nodes and schemas
+* port metadata worked out without executing anything: [`getmeta`](@ref)
+* dictionary serialization of workflows, nodes and schemas, with a versioned
+  snapshot format that executes nothing on load, and a graph change log
 
 ---
 
@@ -106,13 +123,13 @@ df_spec = NodeSpec(
     [PortSpec("CSV File", CSV.File, :csv)],
     [PortSpec("DataFrame", DataFrame, :dataframe)]
 )
-# What CSV node do: load CSV File
+# What the CSV node does: load a CSV file
 function MetidaFlows.execute_unsafe!(node::DataNode{CSVNode})
     csv = CSV.File(node.settings[:file])
     setdata!(node, :csv, csv)
     return [:csv]
 end
-# What DataFrame node do: make DataFrame from CSV
+# What the DataFrame node does: make a DataFrame from the CSV
 function MetidaFlows.execute_unsafe!(node::DataNode{DataFrameNode})
     csv = getinputdata(node, :csv)
     setdata!(node, :dataframe, DataFrame(csv))
@@ -127,7 +144,7 @@ id1 = add_node!(workflow, DataNode(CSVNode, csv_spec))
 id2 = add_node!(workflow, DataNode(DataFrameNode, df_spec))
 # Add connection 
 add_connection!(workflow, id1, :csv, id2, :csv)
-# Set settinf for CSV node (file path), asume file `CSV_PATH` exists
+# Set the setting of the CSV node (file path), assuming `CSV_PATH` exists
 setsettings!(workflow, id1, Dict(:file => CSV_PATH))
 # Run workflow
 scheduler!(workflow, throw_error = true)
@@ -150,17 +167,16 @@ This project is guided by a few principles:
 
   * structure (graph)
   * execution (scheduler)
-  * behavior (nodes)
+  * behaviour (nodes)
 * support for both deterministic and dynamic workflows
 
 ---
 
 ## Planned direction
 
-The architecture is still evolving. Current exploration areas include:
-
-* improved logging and audit system
-* caching and checkpointing strategies
+The architecture is still evolving, and the package is pre-1.0: exported names
+are still moving, and each minor release notes what broke. Where it goes next
+is driven by the feedback below.
 
 ---
 

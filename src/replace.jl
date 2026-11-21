@@ -137,6 +137,11 @@ replacement does not reach keep their cached results and their `:clean` status.
 
 # What is checked, and all of it before anything is written
 
+Two things come first: the identifier has to exist, and `node` must not already
+be in the workflow under another identifier - the same object under two keys
+would be one node pretending to be two. Replacing a node with itself is
+allowed, and amounts to the invalidation alone.
+
 Every connection that touches `id` must still be valid with the new node in
 place, by the same rules [`add_connection!`](@ref) applies when a connection is
 created:
@@ -168,13 +173,14 @@ replacement on **both** sides of that connection, which is what it will be.
 3. the replacement takes the identifier and the place in the workflow, and is
    marked `:dirty` - always, whatever it arrived as;
 4. its input buffers are filled from parents that have already published -
-   `:clean` and the port among their `ready_ports` - so the replacement can
-   run without recomputing anything above it;
+   `:clean` and the port among their `ready_ports`, the rule the engine itself
+   uses - so the replacement can run without recomputing anything above it. A
+   `:released` parent is skipped: it no longer holds what it handed over;
 5. the consumers below are invalidated: each child's buffer slot fed from
    `id` is cleared and the invalidation propagates;
 6. `model.ver` is raised and the change is recorded in the change log.
 
-Should anything in steps 3-5 throw, the old node goes back and `model.ver`
+Should anything in steps 3-6 throw, the old node goes back and `model.ver`
 returns to what it was. An invalidation that had already propagated is left
 alone: a node marked `:dirty` only costs a recomputation.
 

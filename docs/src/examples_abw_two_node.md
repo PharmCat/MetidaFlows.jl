@@ -1,13 +1,18 @@
+```@meta
+CurrentModule = MetidaFlows
+```
+
 ```@setup mfexample
 PKCSV_PATH = joinpath(pwd(), "conc.csv")
 ```
 
-## ABW — a two-node loop: worker and controller
+## ABW - a two-node loop: worker and controller
 
-Example 3 kept the whole loop inside one node. That is compact, but the
+[The cyclic graph](examples_abw_cycle.md) kept the whole loop inside one node.
+That is compact, but the
 stopping policy is hard-wired into the algorithm. Splitting the loop in two
 separates them: one node does the work, the other decides whether to continue.
-The policy then becomes a replaceable node — swap the controller and the same
+The policy then becomes a replaceable node - swap the controller and the same
 worker runs under a different criterion.
 
 ```
@@ -180,7 +185,7 @@ It is tempting to mark both edges of the loop as `:feedback`. Do not.
 `isready` checks only `:normal` edges, and that check is what makes a
 node with several producers wait for all of them. Mark `Trim → Control` as
 feedback and `Control` becomes eligible to run before `Trim` has produced
-anything — harmless in this two-node chain, wrong as soon as a third node
+anything - harmless in this two-node chain, wrong as soon as a third node
 joins the loop.
 
 The rule is one line long: **an edge is either a barrier or a delay.** Mark as

@@ -22,10 +22,10 @@ to make that happen.
 
 Three things follow that a hand-written DP table does not give you for free:
 
-* **memoization you can measure** — every node's `exec_n` is exactly `1`;
-* **laziness** — [`execute!`](@ref) on a cell computes exactly the
+* **memoization you can measure** - every node's `exec_n` is exactly `1`;
+* **laziness** - [`execute!`](@ref) on a cell computes exactly the
   sub-rectangle it depends on;
-* **incrementality** — a character of the input is a node setting, so changing
+* **incrementality** - a character of the input is a node setting, so changing
   one character dirties exactly its dependency cone and leaves the rest of the
   table `:clean`.
 
@@ -95,8 +95,8 @@ nothing # hide
  EdConst(1) ───┘
 ```
 
-Five nodes per interior cell. The borders — `dp[0][j] = j` and
-`dp[i][0] = i` — are constants, which is also why they do not depend on any
+Five nodes per interior cell. The borders - `dp[0][j] = j` and
+`dp[i][0] = i` - are constants, which is also why they do not depend on any
 character.
 
 ```@example edit
@@ -181,7 +181,7 @@ r.table
 ### The size of the graph is the size of the table
 
 For strings of length `m` and `n` the graph has `5mn + 2m + 2n + 2` nodes and
-`11mn` connections — and `(m+1)(n+1)` of those nodes are the cells of the
+`11mn` connections - and `(m+1)(n+1)` of those nodes are the cells of the
 table. Compare that with what the same recurrence costs as a plain recursion:
 
 ```@example edit
@@ -294,14 +294,14 @@ reverse(edit_traceback(r3.g))
 
 Read left to right: substitute `k`→`s`, keep `i`, `t`, `t`, substitute
 `e`→`i`, keep `n`, then insert `g`. Three operations that cost something, which
-is the distance. The division of labour is honest — the graph computes the
+is the distance. The division of labour is honest - the graph computes the
 table, the caller walks it.
 
 ### Named ports, or `MultiPort`
 
 A cell has three predecessors and a `MultiPort` input accepts all of them with
 one port. [`getinputdata`](@ref) hands them over as a `Vector` in the order the
-connections were made, so `:choice` is recoverable from the position — wire
+connections were made, so `:choice` is recoverable from the position - wire
 diagonal, up and left in that order and position 2 *is* "up":
 
 ```@example edit
@@ -340,7 +340,7 @@ to the wrong one is rejected at `add_connection!`. A `MultiPort` declares only
 table is wired by one function, so either would do; the named version is the
 one that would survive someone else wiring a cell by hand.
 
-`MultiPort` earns its keep where the *count* is genuinely variable — a sum, a
+`MultiPort` earns its keep where the *count* is genuinely variable - a sum, a
 minimum or a concatenation over however many producers are attached.
 
 ### Things to watch
@@ -351,13 +351,14 @@ minimum or a concatenation over however many producers are attached.
   wrong shape for a one-shot computation on large strings.
 
 * **The border does not depend on the characters.** `dp[0][j] = j` is a
-  constant node, so no character change ever dirties it — visible in the map
+  constant node, so no character change ever dirties it - visible in the map
   above as the untouched first row and column.
 
 * **`:choice` is `:terminal` on every cell**, so nothing is connected to it.
-  A port kind lives in the spec and a spec is shared by all nodes of its type —
+  A port kind lives in the spec and a spec is shared by all nodes of its type -
   see [Horner's scheme](examples_horner.md) for what that costs when only one
-  instance should have a terminal output.
+  instance should have a terminal output, and [`replaceport!`](@ref) for giving
+  a single node a spec of its own.
 
 ## The graph
 

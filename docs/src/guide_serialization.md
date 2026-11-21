@@ -16,10 +16,10 @@ not, and the schemas a graph editor reads to render a node.
 
 Two different jobs share this part of the API:
 
-* **saving and loading a workflow** — turning the graph into plain
+* **saving and loading a workflow** - turning the graph into plain
   dictionaries and back, so it can be written to JSON, inspected and read
   again;
-* **describing a node** — telling a user interface which settings the node
+* **describing a node** - telling a user interface which settings the node
   accepts, how to render them and how to present the node itself.
 
 The first is fixed: the engine knows what a graph is made of. The second is
@@ -37,28 +37,34 @@ d = workflow_to_dict(w; state = true)        # ... and the state of a running lo
 d = workflow_to_dict(w; values = false)      # structure only
 ```
 
-The default — structure plus the current setting *values* — is a workflow
+The default - structure plus the current setting *values* - is a workflow
 someone else can load and run. Add `state = true` and it is a checkpoint of a
 run in progress.
 
 ```julia
 keys(workflow_to_dict(w))
-# "format_version", "id", "name", "n_iter", "c_iter", "nodes", "connections",
-# "incoming", "outgoing"
+# "format_version", "id", "type", "name", "n_iter", "c_iter", "nodes",
+# "connections", "incoming", "outgoing", "contents"
 ```
 
-Three details are easy to trip over:
+Four details are easy to trip over:
 
 * `"nodes"` and `"connections"` are keyed by *stringified* ids, while
   `"incoming"` and `"outgoing"` keep integer node ids;
 * inside a node, `"settings"` holds the settings **schema** and
   `"settings_values"` holds the **values**. The names are close and the
   contents are not related;
-* `run_id`, the audit log and cached output *data* are never included. Cached
-  data is not needed: a loaded workflow is `:dirty` and recomputes;
+* `run_id`, the engine log, a node's own log and cached output *data* are never
+  included. Cached data is not needed: a loaded workflow is `:dirty` and
+  recomputes. The graph change log *is* written, as `"audit_log"`, whenever
+  there is one;
 * `"incoming"` and `"outgoing"` are written for a reader and **ignored on
-  load** — [`dict_to_workflow`](@ref) rebuilds both from `"connections"` with
+  load** - [`dict_to_workflow`](@ref) rebuilds both from `"connections"` with
   [`refreshind!`](@ref). Editing them in a file changes nothing.
+
+`"contents"` says what this snapshot was asked to carry, so a reader can tell a
+snapshot written without state from one whose state was empty:
+[`snapshot_contents`](@ref) answers it without loading the graph.
 
 Building blocks, usable on their own: [`node_to_dict`](@ref),
 [`node_properties_to_dict`](@ref), [`spec_to_dict`](@ref),
@@ -73,7 +79,7 @@ Building blocks, usable on their own: [`node_to_dict`](@ref),
 w = dict_to_workflow(d)
 ```
 
-**Loading never executes anything.** A node type is not stored in the file —
+**Loading never executes anything.** A node type is not stored in the file -
 the file only *names* it, and the name is looked up in
 [`NODE_REGISTER`](@ref). The register is the list of what may be built, so
 every node type in the snapshot has to be registered first:
@@ -102,7 +108,7 @@ What the file does **not** get to decide:
 * every loaded node is `:dirty`, whatever status the file carries.
 
 The last point has a consequence worth stating: if the spec in your code has
-changed since the snapshot was taken — a port renamed, a port removed — the
+changed since the snapshot was taken - a port renamed, a port removed - the
 *connections* that mention the old port no longer validate. By default that is
 an error naming the port. With `check_connection_throw_error = false` those
 connections are dropped instead, and a graph that silently lost an edge is a
@@ -126,7 +132,7 @@ state instead of from the seed nodes.
 Only the buffers of `:feedback` ports are saved, and that is sufficient rather
 than an approximation. A normal input buffer is filled by its parent within
 the same turn, and `isready` does not let a node run until all of its normal
-parents are `:clean` — so re-running refills it. A feedback buffer is the only
+parents have produced - so re-running refills it. A feedback buffer is the only
 value that crosses a turn boundary, because its producer sits downstream and
 has not run yet when the turn begins. On the gradient-descent example, 2 of
 the 39 non-empty buffer entries are feedback ones, and a run resumed from those
@@ -137,9 +143,10 @@ Two things to expect when you resume:
 * **the last turn is replayed.** A loop usually ends at a gate that publishes
   its terminal ports and does not write to the feedback port, so the buffer
   holds the state of the turn before. Resuming recomputes that turn;
-* **`exec_n` starts from zero.** `reset!` zeroes the counter on any run, so it
-  is not saved. An algorithm that needs to know its own iteration number
-  carries that number through a feedback port, and that is saved.
+* **`exec_n` starts from zero.** `reset!` zeroes the counter at `:soft` and
+  above, which covers both modes a run can be resumed with, so it is not
+  saved. An algorithm that needs to know its own iteration number carries that
+  number through a feedback port, and that is saved.
 
 ### Restoring onto a live graph
 
@@ -159,9 +166,11 @@ setsettings!(w, 13, saved_settings; replace = true)   # the whole configuration
 replace!(w, node, 7)                             # another node under the same identifier
 ```
 
-The first three refuse an identifier already in use, raise the counter so later
-automatic insertions keep clear of it, write their own change-log record, and
-invalidate downstream. A node the difference does not mention is not touched at
+The two insertions refuse an identifier that is already in use and raise the
+counter, so a later automatic insertion keeps clear of it. All four write their
+own change-log record, and all but `add_node!` invalidate downstream - a node
+that has only just arrived has nothing below it yet. A node the difference does
+not mention is not touched at
 all: it keeps its identifier, its cached result and its `:clean` status, and
 the next run does not recompute it.
 
@@ -265,7 +274,8 @@ as a tagged dictionary by [`value_to_dict`](@ref) and read back by
 
 | Julia                              | in the snapshot                           |
 |:-----------------------------------|:------------------------------------------|
-| `nothing`, `Bool`, `Int64`, `Float64`, `String` | as they are                  |
+| `nothing`, `Bool`, `Int64`, a **finite** `Float64`, `String` | as they are     |
+| `NaN`, `Inf`, `-Inf`               | `{"t": "Float64", "v": "NaN"}` - tagged, and the value as text, because JSON has no notation for them |
 | `Symbol`, `Char`                   | `{"t": "Symbol", "v": "…"}`               |
 | other `Integer`, `AbstractFloat`   | `{"t": "Int32", "v": 7}`                  |
 | `Tuple`                            | `{"t": "Tuple", "v": [...]}`              |
@@ -313,7 +323,7 @@ filter_spec = NodeSpec("Filter rows",
 settings_schema(DataNode(FilterRows, filter_spec))
 ```
 
-`"settingslist"` is a copy of `spec.settings` — the keys the node understands,
+`"settingslist"` is a copy of `spec.settings` - the keys the node understands,
 and nothing more. It is enough to know *that* there are two settings, but not
 enough to render a form: no types, no defaults, no labels.
 
@@ -353,7 +363,7 @@ The contract is short:
 
 * `d` arrives already holding `"settingslist"`; add to it, don't rebuild it;
 * the hook receives the node, so the schema may depend on its current state;
-* **mutate `d`** — the return value is discarded (see *Things to watch*).
+* **mutate `d`** - the return value is discarded (see *Things to watch*).
 
 ### Conventional keys
 
@@ -375,13 +385,13 @@ keeping to, because the rest of the ecosystem expects them:
 
 Validation is a separate matter: a schema tells the interface what to *offer*,
 while [`validate_settings`](@ref) decides whether the node may run. Keep the
-real check there — a value can always arrive without passing through a form.
+real check there - a value can always arrive without passing through a form.
 
 ### Options that come from upstream
 
 The useful case is a setting whose choices are only known from the producer: a
 column name that exists in the file the parent node will read. The engine
-supplies the fact — [`getinputmeta`](@ref) — and the caller composes the form.
+supplies the fact - [`getinputmeta`](@ref) - and the caller composes the form.
 
 The producer describes its output through [`getmeta_unsafe`](@ref), reading
 only the header:
@@ -442,7 +452,7 @@ list of options is an honest signal that the producer is not configured yet.
 
 ### Describing the node: `node_schema_usermod!`
 
-The same pattern, one level up — everything about the node itself rather than
+The same pattern, one level up - everything about the node itself rather than
 its settings. `d` arrives holding `"settings_schema"` and `"spec"`:
 
 ```@example mfexample
@@ -492,7 +502,7 @@ Use this hook for presentation and grouping; use
   Write into `d` and return it, as in the examples above.
 
 * **Functions do not survive JSON.** A `"validator" => x -> x >= 0` entry
-  encodes as the string `"#2"` — no error, just a useless value. Express
+  encodes as the string `"#2"` - no error, just a useless value. Express
   constraints declaratively (`"min"`, `"max"`, `"options"`) and keep the
   executable check in [`validate_settings`](@ref). Types are safer written as
   strings: `"type" => "Float64"` rather than `"type" => Float64`.

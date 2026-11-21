@@ -22,11 +22,18 @@ Main workflow execution entry point.
 9. Validate execution result.
 10. Store execution state (`ready_ports`).
 11. Propagate outputs downstream through input buffers.
-12. Optionally invalidate downstream nodes.
-13. Mark node as `:clean`.
-14. Report the finish through `settings.on_finish`, if there is one. This one
-    happens on every way out of the call, stages 2, 3, 6, 7, 9 and a raising
-    node included, and also when `throw_error` lets the exception through.
+12. Clear the consumers' buffers of the output ports this execution did *not*
+    publish, so "nothing was produced" cannot be read as the value of the
+    previous turn. See [`invalidate_unpublished!`](@ref).
+13. Optionally invalidate downstream nodes.
+14. Mark node as `:clean`.
+15. Release the producer of every `handover` input the body actually took, so
+    the value lives in one place only. See [`release_taken!`](@ref).
+16. Report the finish through `settings.on_finish`, if there is one.
+
+The last two stages are reached on every way out of the call, stages 2, 3, 6,
+7, 9 and a raising node included, and also when `throw_error` lets the
+exception through.
  
 # Arguments
 - `settings`: per-call execution flags, see [`ExecuteSettings`](@ref).
@@ -191,8 +198,10 @@ This function contains node-specific execution logic. The default
 implementation throws an error and must be specialized for every executable
 node type.
  
-Read inputs with [`getinputdata`](@ref), write results with
-[`setdata!`](@ref) and return the vector of output port labels that were
+Read inputs with [`getinputdata`](@ref) - or with
+[`take!`](@ref take!(::AbstractDataNode, ::Symbol)) on an input declared
+`handover`, which also hands the node ownership of what it reads - write
+results with [`setdata!`](@ref) and return the vector of output port labels that were
 produced. That vector is the contract with the engine: it is stored as the
 `ready_ports` state and only connections leaving these ports are refreshed by
 [`push_buffer!`](@ref). Returning a subset of the output ports is allowed.

@@ -56,8 +56,8 @@ Two consequences worth knowing:
 * [`getinputmeta`](@ref) describes a `MultiPort` as a `Vector` in that same
   order, so a metadata rule lines up with the node body position for position.
 
-When the node needs the connection itself rather than its position -- to look
-up a meaning recorded at build time, say -- [`getinputconnections`](@ref)
+When the node needs the connection itself rather than its position - to look
+up a meaning recorded at build time, say - [`getinputconnections`](@ref)
 returns the ids in the same order, and needs no [`Workflow`](@ref):
 
 ```julia
@@ -106,20 +106,27 @@ a[1] += 100
 setdata!(node, :out, a)
 ```
 
-Mutating in place is safe only when the producer's port has exactly one
-consumer and the producer's own cache is of no further interest - and the
-engine has no way to tell you that is the case, so the rule is stated rather
-than enforced. `get_children(model, id)` answers it from outside a node, if
-you want to assert it in a test.
+Working in place is correct in exactly one case: the producer's port has a
+single consumer and the producer's own cache is of no further interest. That
+case is declarable rather than merely hoped for. Mark both ports of the
+connection `handover = true` and take the value with
+[`take!`](@ref take!(::AbstractDataNode, ::Symbol)): the engine then refuses a
+second consumer at creation, drops the producer's cache when the value is taken,
+and turns the producer `:released` so it recomputes instead of republishing
+something it no longer holds. See
+[Working on data in place](guide_execution.md#Working-on-data-in-place) for the
+rules and [the handover example](examples_handover.md) for what it saves.
 
----
+Without that declaration nothing is enforced, and nothing reports a breach:
+`get_children(model, id)` is the way to assert the single consumer from outside
+a node, in a test.
 
 ---
 
 ## Port kinds
 
 Every [`PortSpec`](@ref) carries a `kind`, defaulting to `:normal`. The kind
-does not change how data is stored or read — it changes how the schedulers
+does not change how data is stored or read - it changes how the schedulers
 treat the connections attached to the port.
 
 | `kind` | Applies to | Effect |
@@ -133,31 +140,42 @@ Declaring `kind = :feedback` on an output port is rejected by the
 [`NodeSpec`](@ref) constructor: a delay is a property of the consumer, not of
 the producer.
 
-Four places in the engine read the kind:
+Where the engine reads the kind:
 
-* [`isready`](@ref) waits only for producers connected through `:normal`
-  ports — and, for a `required` one, also for that producer to have actually
-  published to the port in question. Anything else is not waited for.
-* [`execution_node_validation`](@ref) requires a filled input buffer only for
-  `:normal` ports, so a feedback port may be empty on the first pass.
-* cycle detection ([`makegraph`](@ref)) does not follow `:feedback` or
-  `:error` edges, which is what lets a cyclic `ABW` graph exist at all — and
+* **readiness.** [`isready`](@ref) waits only for producers connected through
+  `:normal` ports - and, for a `required` one, also for that producer to have
+  actually published to the port in question. Anything else is not waited for,
+  and [`execution_node_validation`](@ref) requires a filled buffer only on a
+  `:normal` port, so a feedback port may be empty on the first pass.
+* **cycle detection.** [`makegraph`](@ref) does not follow `:feedback` or
+  `:error` edges, which is what lets a cyclic `ABW` graph exist at all - and
   also means an `:error` edge can close a cycle in a `DAW` graph without being
   rejected.
-* [`getinputmeta`](@ref) and [`getmeta`](@ref) skip the same two kinds when
-  walking upstream.
+* **metadata.** [`getinputmeta`](@ref) and [`getmeta`](@ref) walk `:normal`
+  inputs only.
+* **invalidation.** The `ABW` scheduler marks the whole downstream cone
+  `:dirty` along `:normal` edges and stops at `:feedback` ones, and only
+  `:normal` input buffers are ever cleared by
+  [`invalidate_unpublished!`](@ref) - a feedback buffer *is* the loop state and
+  an error buffer latches a diagnosis.
+* **reset.** [`reset!`](@ref) clears `:feedback` buffers at `:full` and the
+  remaining input buffers only at `:inputs`.
+* **snapshots.** Only `:feedback` buffers are written and read back, because a
+  normal input is refilled by its producer within the same run.
+* **wiring and construction.** A connected `:terminal` output warns; an
+  `:error` port must be optional and carry an `Exception` subtype; `:feedback`
+  on an output is rejected outright.
 
-The `ABW` scheduler marks the whole downstream cone `:dirty` along `:normal`
-edges and stops at `:feedback` ones. Buffering and serialization are identical
-for all kinds.
+Writing a value to a port, reading it and caching it are the same for every
+kind.
 
 ### What a failure does to the rest of the run
 
 When [`execute_unsafe!`](@ref) raises, [`execute!`](@ref) gives the node the
 status `:failed`, appends an `:error` record to `workflow.log` and returns an
 empty list of ready ports. **A failure stops exactly the dependent subtree.**
-Nothing below the failed node executes — in either scheduler such a node is
-skipped and ends the run `:dirty` — while branches that do not depend on it run
+Nothing below the failed node executes - in either scheduler such a node is
+skipped and ends the run `:dirty` - while branches that do not depend on it run
 to completion as usual.
 
 Skipping matters for more than tidiness. Input buffers are not cleared between
@@ -176,12 +194,12 @@ scheduler!(w; strict = true)        # finish everything that can, then raise wit
 ```
 
 `throw_error` aborts the traversal where the failure happened, so whatever had
-not run yet is lost — and *which* branches those are depends on the traversal
+not run yet is lost - and *which* branches those are depends on the traversal
 order, not on the dependency structure. `strict` has no such dependence: every
 branch that can finish does, and the error then names every failed node at
 once, with the workflow left in its post-run state for inspection.
 
-To decide without raising, ask [`failed_nodes`](@ref) — it knows which statuses
+To decide without raising, ask [`failed_nodes`](@ref) - it knows which statuses
 count as a failure (`:failed` and the three `:invalid_*`) and which do not.
 `:dirty` is not one of them: a node ends a run `:dirty` whenever it was not
 recomputed, whether because an ancestor failed, because a gate took the other
@@ -190,7 +208,7 @@ branch, or because a cyclic workflow finished its last turn.
 ### Stopping a run early
 
 A node can end the run itself, with [`request_stop!`](@ref), when it knows
-there is nothing left worth computing — a search that found its answer, a
+there is nothing left worth computing - a search that found its answer, a
 check that failed a precondition:
 
 ```julia
@@ -201,7 +219,7 @@ function MetidaFlows.execute_unsafe!(n::DataNode{Found})
 end
 ```
 
-What the node publishes is published as usual — the answer travels out through
+What the node publishes is published as usual - the answer travels out through
 a `:terminal` port in the same execution, and its children's buffers are
 filled. What changes is that nothing more is executed: `ABW` stops serving the
 queue, `DAW` leaves the traversal, and everything not reached ends the run
@@ -214,15 +232,15 @@ isstoprequested(n)]` says who stopped it.
 **How much work this saves differs between the schedulers**, and the
 difference is worth knowing before relying on it:
 
-* in `ABW` the queue is served in the order producers finish, so a node that
-  is reached early stops a great deal — on a stand of five independent
-  branches, four of them ten nodes deep, stopping on the short branch leaves
-  the overwhelming majority of the work undone;
+* in `ABW` the queue is served in the order producers finish, so a node
+  reached early stops the rest. On a stand of five independent branches, four
+  of them ten nodes deep, stopping on the short branch leaves the four deep
+  branches unexecuted;
 * in `DAW` the order is topological and **not yours to choose**, so how much
   is saved is *unspecified*. An independent branch may sit entirely before the
   node that stops the run, in which case its work is already done. On the same
   five-branch stand one Julia version executed one of the forty-one work nodes
-  before stopping and another executed all forty-one — the traversal order
+  before stopping and another executed all forty-one - the traversal order
   follows `makegraph`, which walks dictionaries. The only saving guaranteed by
   the graph is what lies **downstream** of the stopping node. For a search,
   use `ABW`.
@@ -230,13 +248,14 @@ difference is worth knowing before relying on it:
 The flag lives in the node's [`NodeState`](@ref) and [`reset!`](@ref) clears
 it, so `:full` and `:soft` both start clean. `reset_mode = :none` does not call
 `reset!` at all, so a stop requested by an earlier run is still set and the
-next run ends on that node again — clear it with `empty!(node.state)` if that
-is not what you want.
+next run ends on that node again. Clear it with `reset!(node; level = :soft)`,
+which touches nothing else, or with `empty!(node.state)` to wipe the execution
+state entirely.
 
 ### Error routing with `:error` ports
 
 All of the above is what happens to a failure the node did **not** anticipate.
-An `:error` port is for one it did — and it is a **convention, not a
+An `:error` port is for one it did - and it is a **convention, not a
 mechanism**: the engine never writes to such a port, and a raised exception is
 not routed anywhere.
 
@@ -258,22 +277,22 @@ end
 Routing is then the ordinary selective publishing every gate uses: the
 scheduler enqueues only the children of the ports the node returned. A handler
 whose **only** input is an `:error` port therefore runs when, and only when,
-the error fires — `isready` does not hold it back, but nothing enqueues it on a
+the error fires - `isready` does not hold it back, but nothing enqueues it on a
 normal turn either, so it stays `:dirty` and is never executed.
 
 **An error path cannot rejoin the normal path.** Suppose the handler should
 repair the step and let the turn continue. It would have to hand a value to the
-gate through a normal input, and a normal input requires a `:clean` producer —
-but on the failing turn the normal branch never ran, so its nodes are still
-`:dirty` and the gate can never become ready. A feedback port on the loop head
+gate through a normal input, and a normal input waits for a producer that has
+produced - but on the failing turn the normal branch never ran, so its nodes
+are still `:dirty` and the gate can never become ready. A feedback port on the loop head
 is no way around it either: with `SinglePort` arity it is already taken by the
 gate, and a `MultiPort` would accumulate values from both producers with
 nothing to say which is fresher.
 
 Error routing in MetidaFlows is therefore **stop with a diagnosis**, not
 *recover and continue*. Recovery belongs to the caller: the handler publishes
-what it knows — where it failed, at which iteration, and a point worth
-restarting from — into `:terminal` ports, and whoever ran the graph decides.
+what it knows - where it failed, at which iteration, and a point worth
+restarting from - into `:terminal` ports, and whoever ran the graph decides.
 
 Two things follow for a graph with an error path:
 
@@ -303,7 +322,7 @@ This is deliberate. `DAW` guarantees that every node executes exactly once per
 run in dependency order, and that guarantee has no meaning in a graph with a
 cycle. A feedback edge does not change it: in a `DAW` workflow a
 `:feedback` port is simply an input that is exempt from the required-buffer
-check, and nothing more — there is no delay, no iteration, no second pass.
+check, and nothing more - there is no delay, no iteration, no second pass.
 
 Use [`ABW`](@ref) for anything that has to iterate.
 
@@ -335,8 +354,8 @@ initial value, so that the first pass has something to compute with. The
 graph consisting only of a loop has neither a beginning nor initial data, and
 there is nothing sensible for the scheduler to do with it.
 
-In practice the seed node is the one that loads or generates the data — as
-`LoadData` in the examples — and the loop body starts from its normal input on
+In practice the seed node is the one that loads or generates the data - as
+`LoadData` in the examples - and the loop body starts from its normal input on
 the first pass:
 
 ```julia
@@ -374,7 +393,7 @@ workflow a finished run legitimately leaves part of the graph `:dirty` - see
 ## Rule 3. Inside a turn, a node waits for all of its normal ancestors
 
 The `ABW` scheduler serves a FIFO queue, and [`isready`](@ref) lets a node run
-once every producer on a `:normal` port is `:clean`. On its own that is not
+once every producer on a `:normal` port has produced. On its own that is not
 enough for a loop: at the start of a turn the whole body is still `:clean`
 **from the previous turn**, so a node could run on values that are one turn old.
 
@@ -402,12 +421,12 @@ so marking through it would restart the body from the middle of a turn.
 
 **A finished cyclic run leaves part of the graph `:dirty`.** On the last pass
 the loop head marks the body dirty as usual, the gate then publishes only a
-terminal port, and the body is never recomputed — correctly, because there was
+terminal port, and the body is never recomputed - correctly, because there was
 nothing left to compute. So for a cyclic workflow "every node is `:clean`" is
 not a completion signal; use `exec_n`, or the data on the terminal port.
 
-**A full reset clears the loop state.** [`reset!`](@ref) with `soft = false`
-— which is what `reset_mode = :full` uses — empties the buffers of `:feedback`
+**A full reset clears the loop state.** [`reset!`](@ref) at level `:full`,
+which is what `reset_mode = :full` uses, empties the buffers of `:feedback`
 ports along with the cached output data. Without that a second
 [`scheduler!`](@ref) call would find the last turn's state in the feedback
 buffer and resume the previous run instead of starting a new one. `:soft` keeps

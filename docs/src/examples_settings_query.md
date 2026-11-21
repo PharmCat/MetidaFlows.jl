@@ -15,12 +15,12 @@ file that has not been read yet.
 
 Two functions answer that without executing anything:
 
-* [`getmeta`](@ref) — what a node **will produce** on one of its output ports;
-* [`getinputmeta`](@ref) — what **will arrive** at every input port of a node.
+* [`getmeta`](@ref) - what a node **will produce** on one of its output ports;
+* [`getinputmeta`](@ref) - what **will arrive** at every input port of a node.
 
 Both walk up the graph, asking each node to describe itself. What is done with
-the answer — a dropdown in a graph editor, a validation message, a printed
-summary — is left to the caller: the engine reports facts about the graph and
+the answer - a dropdown in a graph editor, a validation message, a printed
+summary - is left to the caller: the engine reports facts about the graph and
 does not define how settings are presented.
 
 ```
@@ -29,7 +29,7 @@ ReadCSV ──:table──▶
 ```
 
 Two sources are joined, and the node at the end has to be told which column to
-average — a column that only exists after the join.
+average - a column that only exists after the join.
 
 ### Node types and interfaces
 
@@ -99,7 +99,7 @@ nothing # hide
 ```
 
 `JoinOn` changes the schema, so it describes the result instead of passing an
-input description through — the key column appears once, not twice:
+input description through - the key column appears once, not twice:
 
 ```@example mfmeta
 function MetidaFlows.getmeta_unsafe(node::DataNode{JoinOn}, ::Symbol, inmeta)
@@ -113,7 +113,7 @@ nothing # hide
 ```
 
 Before `:on` is chosen the node reports the columns the two tables have in
-common — exactly the candidates for a join key. Once it is chosen, it reports
+common - exactly the candidates for a join key. Once it is chosen, it reports
 the real result schema.
 
 `MeanColumn` produces a scalar, so there is nothing to describe and the default
@@ -139,7 +139,7 @@ nothing # hide
 ```
 
 Nothing has been executed and no source has been configured yet, so nothing is
-known — `nothing` propagates instead of an error:
+known - `nothing` propagates instead of an error:
 
 ```@example mfmeta
 getinputmeta(w, join)
@@ -151,7 +151,7 @@ label.
 
 ### Querying settings, step by step
 
-Configure the sources — still without executing anything:
+Configure the sources - still without executing anything:
 
 ```@example mfmeta
 setsettings!(w, left,  Dict(:file => DATA_PATH))
@@ -161,7 +161,7 @@ getmeta(w, left, :table)
 ```
 
 A source has no input ports, so [`getinputmeta`](@ref) would return an empty
-dictionary for it — [`getmeta`](@ref) is the way to ask what a node emits.
+dictionary for it - [`getmeta`](@ref) is the way to ask what a node emits.
 
 Now the join can be offered a list of usable keys. Deriving it is the caller's
 job, and it is a one-liner over the input descriptions:
@@ -221,21 +221,21 @@ getdata(w, avg, :mean)
 | On a node without input ports | works | returns an empty dictionary |
 
 `getinputmeta` is [`getmeta`](@ref) applied to every incoming connection,
-arranged by input port label — so a producer never learns which port of which
+arranged by input port label - so a producer never learns which port of which
 consumer it feeds, and two producers of the same type cannot be confused.
 
 ### Notes
 
-* Metadata is computed on request and never stored, so it cannot go stale — if
+* Metadata is computed on request and never stored, so it cannot go stale - if
   a file changes on disk, the next query sees it. Within a single call each
   node is described once, so a diamond does not describe a shared ancestor
   twice.
 * [`ismetasource`](@ref) stops the upward walk at a node that can answer on its
   own; without it the walk continues to the top of the graph. `maxdepth`
   (1000 by default) bounds it in any case.
-* Ports of kind `:feedback` are never followed, so metadata queries terminate
-  on cyclic `ABW` workflows as well.
-* The shape of a description — here a `NamedTuple` with a `columns` field — is
+* Only `:normal` inputs are followed - a `:feedback` edge above all, so
+  metadata queries terminate on cyclic `ABW` workflows as well.
+* The shape of a description - here a `NamedTuple` with a `columns` field - is
   a contract between nodes sharing a port datatype. The engine does not define
   it, and neither does it define how the result is turned into a settings form.
 

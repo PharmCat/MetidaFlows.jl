@@ -37,7 +37,7 @@ while i <= n
 end
 ```
 
-An **epoch** is one iteration of the outer loop — the insertion of one
+An **epoch** is one iteration of the outer loop - the insertion of one
 element. Within an epoch `j` walks down; at the end of an epoch `i` grows.
 There are no two loops in the graph. There is one flat loop and a gate that
 decides, on every turn, whether the current epoch continues or the next one
@@ -46,15 +46,15 @@ shape of the graph.
 
 That gives something you can measure from outside: **the number of epochs does
 not depend on the data** (it is always `n - 1`), while **the number of turns
-does** — from `n - 1` on sorted input to `n - 1 + n(n-1)/2` on reversed input.
+does** - from `n - 1` on sorted input to `n - 1 + n(n-1)/2` on reversed input.
 This is how you can tell the nesting is real.
 
 ### A graph has no short-circuit
 
 In `j >= 1 && a[j] > a[j + 1]` Julia does not evaluate the right-hand side
 when `j == 0`. A graph evaluates everything: `isready` lets a node run only
-once all of its normal parents are `:clean`, so both operands are computed on
-every turn — including turns whose result will be thrown away.
+once all of its normal parents have produced, so both operands are computed on
+every turn - including turns whose result will be thrown away.
 
 So `ReadAt` and `SwapAt` here are **total**: a read past the end returns
 `typemin(Int)` and a swap past the end does nothing. The gate discards such a
@@ -64,7 +64,7 @@ turn anyway.
 with a **pre-tested** loop: its gate sits right after the head, and a
 degenerate turn never enters the body at all. Both are valid, and the
 difference shows in the shape of the graph. With two indices a pre-test would
-need a three-way gate *before* the body and two paths back into the head — and
+need a three-way gate *before* the body and two paths back into the head - and
 a `:feedback` port with `SinglePort` arity accepts only one connection.
 
 ### The nodes
@@ -92,8 +92,9 @@ nothing # hide
 
 The head of the loop carries all of the state and nothing else. Its normal
 inputs are the initial values; its `:feedback` inputs are the state of the
-previous turn, and they are not `required`, because on the first turn their
-buffers are empty.
+previous turn, and they are declared `required = false` because on the first
+turn their buffers are empty - a statement of intent, since a `:feedback` port
+is exempt from the required-buffer check in any case.
 
 ```@example insertion
 spec_insconstarray() = NodeSpec("Ins const array", PortSpec[],
@@ -417,7 +418,7 @@ r = insertion_sort(collect(6:-1:1))
 epoch_lengths(INS_BRANCH)
 ```
 
-And `turns == epochs + swaps`, always — a turn is either one or the other:
+And `turns == epochs + swaps`, always - a turn is either one or the other:
 
 ```@example insertion
 r = insertion_sort([3, 1, 4, 1, 5, 9, 2, 6])
@@ -430,7 +431,7 @@ r = insertion_sort([3, 1, 4, 1, 5, 9, 2, 6])
 
 An array of zero or one element never enters the outer loop, so there are no
 turns at all. The body of the graph still runs once, and the read past the end
-happens — which is why `ReadAt` is total:
+happens - which is why `ReadAt` is total:
 
 ```@example insertion
 r = insertion_sort(Int[])
@@ -451,7 +452,7 @@ r = insertion_sort(Int[])
 
 * **The branch is taken after both sides are computed.** This costs a swap and
   three additions per turn that may be discarded. A pre-tested loop avoids
-  that at the price of a more complex gate placement — see
+  that at the price of a more complex gate placement - see
   [bubble sort](examples_bubble_sort.md).
 
 * **`maxiter` of the scheduler is not the length of the sort.** It counts queue

@@ -24,7 +24,7 @@ something the engine defines.
 - Never pass a description through unchanged unless the node really preserves
   it. A node that renames or drops columns must describe its own result;
   returning the input description would propagate a lie downstream.
-- This is not validation. `nothing` means "cannot tell", not "misconfigured" —
+- This is not validation. `nothing` means "cannot tell", not "misconfigured":
   checking that a configured column actually exists belongs in
   [`validate_settings`](@ref) and in the node body.
 - Reading a little is fine, computing is not: parse a header, not a file.
@@ -46,12 +46,12 @@ getmeta_unsafe(::AbstractDataNode, ::Symbol, inmeta) = nothing
 
 
 """
-    getinputmeta(model::Workflow, id::Int) -> Dict{Symbol, Any}
+    getinputmeta(model::Workflow, id::Int; maxdepth::Int = 1000) -> Dict{Symbol, Any}
 
 Collect descriptions of every input port of node `id`, asking its producers
 recursively.
 
-Keys are the **input port labels of node `id`** — taken from the connections,
+Keys are the **input port labels of node `id`** - taken from the connections,
 so a producer never needs to know which port of which consumer it feeds. Every
 `:normal` input port is present in the result: an unconnected
 [`SinglePort`](@ref) maps to `nothing`, an unconnected [`MultiPort`](@ref) to
@@ -62,12 +62,14 @@ by ascending connection id - the same order in which [`getinputdata`](@ref)
 returns that port's values, so a metadata rule can be written to match the node
 body position for position.
 
-Ports of kind `:feedback` and `:error` are skipped: a feedback edge closes a
-cycle, and following it would not terminate.
+Only `:normal` ports are described; a port of any other kind (`:feedback`,
+`:error`, `:terminal`) is skipped, and a `:feedback` one has to be, because
+following the edge that closes a cycle would not terminate.
 
-`done` and `maxdepth` are threaded through to [`getmeta`](@ref): the first
-keeps a common ancestor from being described twice within one call, the second
-bounds the depth of the walk.
+`visited`, `done` and `maxdepth` belong to the walk and are threaded through to
+[`getmeta`](@ref): the first holds the current path, the second keeps a common
+ancestor from being described twice within one call, the third bounds the depth
+of the walk.
 
 # Example
 ```julia
@@ -130,7 +132,7 @@ often a source of metadata only once it has been configured.
 # Consistency
 `ismetasource` and [`getmeta_unsafe`](@ref) are written together and must
 agree. Reaching for `inmeta[:label]` in a branch declared as a metadata source
-raises a `KeyError`, because the dictionary passed there is empty — the
+raises a `KeyError`, because the dictionary passed there is empty - the
 mismatch is loud on purpose, as with [`validate_settings`](@ref) and
 [`execute_unsafe!`](@ref).
 
@@ -216,7 +218,7 @@ end
 Describe **every output port of every node** in one walk, keyed by
 `(node id, port label)`.
 
-The point is the shared memo. [`getmeta`](@ref) memoizes only within a single
+The point is the shared memo. The single-port form memoizes only within one
 call, so describing a graph port by port re-walks it from the top every time: a
 chain of `n` nodes costs `n` walks of `O(n)` where one walk of `O(n)` would do,
 and a node sitting under a diamond is described once per question instead of
@@ -232,7 +234,8 @@ m[(csv_id, :table)]          # (columns = [:Subject, :Time, :Concentration],)
 length(m)                    # one entry per output port in the graph
 ```
 
-See also [`getmeta`](@ref), [`getinputmeta`](@ref).
+See also the single-port form, [`getmeta(model, id, port)`](@ref getmeta), and
+[`getinputmeta`](@ref).
 """
 function getmeta(model::Workflow; maxdepth::Int = 1000)
     done = Dict{Tuple{Int, Symbol}, Any}()
@@ -260,7 +263,7 @@ handed to [`getmeta_unsafe`](@ref) as `inmeta`. The walk stops at nodes
 without incoming connections, and at any node for which
 [`ismetasource`](@ref) returns `true`.
 
-Returns `nothing` when the answer is unknown — because the node did not
+Returns `nothing` when the answer is unknown - because the node did not
 implement [`getmeta_unsafe`](@ref), because a producer up the chain did not,
 or because the required settings are not filled in yet. Unknown is only
 reported as `nothing` if the rule *checks*: a rule that reads a setting which
@@ -275,7 +278,7 @@ port are named. See the *Consistency* section of [`ismetasource`](@ref).
 # Notes
 - Within one call each `(node, output port)` pair is described **once**: a
   diamond does not compute its common ancestor twice. The memo lives for the
-  duration of the call only, so nothing can go stale between calls — a file
+  duration of the call only, so nothing can go stale between calls - a file
   may change on disk, and the next call sees it.
 - Nothing is cached **between** calls. Memoize inside the node if a source is
   expensive to inspect. To describe many ports at once, use the whole-graph
@@ -283,14 +286,12 @@ port are named. See the *Consistency* section of [`ismetasource`](@ref).
   it shares a single memo, which turns `O(n²)` rule invocations into `O(n)`.
 - A node declaring [`ismetasource`](@ref) cuts the walk short, so the branches
   above it are never visited.
-- In a graph containing a cycle built from `:normal` edges the answer for a
-  node inside the cycle depends on where the walk started. Such a graph is
-  rejected by the [`DAW`](@ref) scheduler and never produced by [`ABW`](@ref),
-  where cycles are closed by `:feedback` edges that this walk does not follow.
-- `:feedback` and `:error` edges are not followed, so cyclic [`ABW`](@ref)
-  workflows are safe. A cycle built from `:normal` edges only is detected as a
-  back edge and yields `nothing` for the repeated node instead of recursing
-  forever.
+- `:feedback` and `:error` edges are not followed, so a cyclic [`ABW`](@ref)
+  workflow is safe: its loop is closed by a `:feedback` edge. A cycle built
+  from `:normal` edges only is recognised as a back edge and yields `nothing`
+  for the repeated node instead of recursing forever, but the answer for a node
+  inside such a cycle then depends on where the walk started. The [`DAW`](@ref)
+  scheduler rejects that graph anyway.
 
 # Example
 ```julia

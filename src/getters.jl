@@ -6,7 +6,10 @@
 """
     getnode(model::Workflow, id::Int)
 
- Return node by identifier `id`.
+Return node by identifier `id`.
+
+Raises a `KeyError` when the workflow holds no node with this identifier; ask
+[`isnodeexist`](@ref) first when the identifier comes from outside.
 """
 function getnode(model::Workflow, id::Int)
     return model.nodes[id]
@@ -15,6 +18,8 @@ end
     getconnection(model::Workflow, id::Int)
 
 Return connection by identifier `id`.
+
+Raises a `KeyError` when the workflow holds no connection with this identifier.
 """
 function getconnection(model::Workflow, id::Int)
     return model.connections[id]
@@ -54,9 +59,11 @@ Possible values:
   readiness, though, it counts as having produced: the consumer already has
   what it needs. The status is set during the consumer's execution, not the
   producer's. See [`PortSpec`](@ref);
-- `:executing`;
-- `:failed`;
-- `:invalid_node`, `:invalid_settings`, `:invalid_result`.
+- `:executing` - set by [`execute!`](@ref) for the duration of the call;
+- `:failed` - the node's own code raised;
+- `:invalid_node`, `:invalid_settings`, `:invalid_result` - a validation step
+  refused it: [`execution_node_validation`](@ref) and
+  [`validate_settings`](@ref) before the run, [`validate_result`](@ref) after.
 
 A node that an invalidation reaches becomes `:dirty` whatever it was, so
 `:released` lives only until something downstream of it changes.
@@ -72,10 +79,13 @@ end
 
 """
     getstate(node::AbstractDataNode, s::Symbol)
-
     getstate(model::Workflow, id::Int, s::Symbol)
 
 Get value from node execution state.
+
+`s` is a field name of the node's state object - with the default
+[`NodeState`](@ref) one of `:exec_n`, `:ready_ports`, `:execution_id`, `:log`,
+`:stop`. Any other name raises.
 """
 function getstate(node::AbstractDataNode, s::Symbol)
     return node.state[s]
@@ -92,8 +102,10 @@ cleared.
 
 The counter lives in [`NodeState`](@ref) and is raised by [`execute!`](@ref)
 just before the node's own code runs, so a node that raised still counts as
-having executed. [`reset!`](@ref) zeroes it; `reset!(model; soft = true)`
-zeroes it too, since both forms reset the counter.
+having executed. It is zeroed at reset level `:soft` and above, which covers
+[`reset!`](@ref) as called by default and `reset_mode = :soft` of
+[`scheduler!`](@ref); `:status` and `:none` leave it standing, so
+[`reset_status!`](@ref) keeps the count.
 
 This is the cheapest way to ask what a run actually did: a node left `:dirty`
 below a failure has the same status as a node that was never reached, but a
@@ -113,18 +125,30 @@ end
 
 
 """
-    getportnumber(node::AbstractDataNode, l::Symbol, direction::Symbol) 
+    getportnumber(node::AbstractDataNode, l::Symbol, direction::Symbol)
 
 Return index of port by label and direction (`:input` or `:output`).
+
+The index is the position in `spec.input_ports` or `spec.output_ports`. An
+unknown label, or any direction other than those two, raises a `KeyError`: the
+specification's port map holds `(:input, label)` and `(:output, label)` keys
+and nothing else.
 """
 function getportnumber(node::AbstractDataNode, l::Symbol, direction::Symbol) 
     return node.spec.portmap[(direction, l)]
 end
 
 """
-    getporttype(node::AbstractDataNode, i::Int, direction::Symbol) 
+    getporttype(node::AbstractDataNode, i::Int, direction::Symbol) -> Type
 
 Return Julia datatype of port by index and direction.
+
+This is the type **declared** in the [`PortSpec`](@ref), the one
+[`check_connection_validity`](@ref) compares when a connection is created. It
+says nothing about what the port currently holds.
+
+An index outside the port vector, or a direction other than `:input` or
+`:output`, raises.
 """
 function getporttype(node::AbstractDataNode, i::Int, direction::Symbol) 
     if direction == :input
@@ -138,9 +162,10 @@ function getporttype(node::AbstractDataNode, i::Int, direction::Symbol)
 end
 
 """
-    getporttype(node, label, direction) -> Type
+    getporttype(node::AbstractDataNode, l::Symbol, direction::Symbol) -> Type
 
-Return Julia datatype of port by label.
+Return Julia datatype of port by label. The label is resolved by
+[`getportnumber`](@ref), so an unknown label raises a `KeyError`.
 """
 function getporttype(node::AbstractDataNode, l::Symbol, direction::Symbol) 
     i = getportnumber(node, l, direction) 
@@ -403,12 +428,21 @@ end
 """
     getportconnections(model::Workflow, id::Int, label::Symbol; direction = :both)
 
-Return all connections attached to a specific port.
+Return all connections attached to a specific port, as a
+`Vector{NodeConnection}`.
 
-Direction:
-- `:input`
-- `:output`
-- `:both`
+`direction` selects the side the label is read on:
+- `:input` - incoming connections whose `input_port` is `label`;
+- `:output` - outgoing connections whose `output_port` is `label`;
+- `:both` - the incoming ones first, then the outgoing ones. A node may carry
+  the same label on an input and on an output port, and then `:both` returns
+  both sets in one vector; [`getinputconnections`](@ref) is the narrower
+  question when only the input side matters.
+
+Within each side the order follows the node's connection index, which
+[`refreshind!`](@ref) keeps ascending.
+
+An unknown node id raises a `KeyError`, any other `direction` an error.
 """
 function getportconnections(model::Workflow, id::Int, label::Symbol; direction = :both)
     # ADD MULTIPLE OUTPUT CONNECTION SUPPORT
@@ -464,7 +498,13 @@ end
 """
     get_children(model::Workflow, id::Int)
 
-Get children. Returns Vector of Tuple (output_port, child_id, input_port) for each child connection.
+Get children (outgoing connections of the node). Returns Vector of Tuple
+(output_port, child_id, input_port) for each outgoing connection - one entry
+per connection, so a child reached through several ports appears several times.
+
+An unknown `id` gives an empty vector.
+
+See also [`get_parents`](@ref), which returns pairs (input_port, parent_id).
 """
 function get_children(model::Workflow, id::Int) 
     v = Tuple{Symbol, Int, Symbol}[]

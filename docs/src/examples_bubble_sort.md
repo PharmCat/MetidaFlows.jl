@@ -5,9 +5,9 @@ CurrentModule = MetidaFlows
 ## Bubble sort as a graph
 
 This example builds an algorithm out of the graph itself. Nothing is hidden
-inside a node that does the real work: every elementary operation — read an
+inside a node that does the real work: every elementary operation - read an
 element, compare two numbers, assign an element, advance an index, close the
-loop — is a node of its own, and the sorting happens because of how they are
+loop - is a node of its own, and the sorting happens because of how they are
 wired.
 
 It is also the smallest complete example of an iterative `ABW` workflow with a
@@ -27,7 +27,7 @@ Bubble sort needs three values between steps:
 | `limit` | the end of the current pass; everything above it is already sorted |
 
 A turn compares `array[index]` with `array[index + 1]`, swaps them if they are
-out of order, and then either advances `index` or — at the end of a pass —
+out of order, and then either advances `index` or - at the end of a pass -
 resets it to `1` and lowers `limit` by one. The loop stops when `limit`
 reaches `1`.
 
@@ -109,7 +109,7 @@ list of steps of the algorithm, and each node does exactly one operation.
 The engine guarantees the consistency of a turn on its own. When a node
 publishes, the scheduler marks `:dirty` everything downstream of its children
 along `:normal` edges, so [`isready`](@ref) holds a node back until every one
-of its `:normal` ancestors has been recomputed during this turn — see *Rule 3*
+of its `:normal` ancestors has been recomputed during this turn - see *Rule 3*
 in the guide. A node may therefore take its inputs from any depth, and the
 same graph behaves the same whatever order its connections were created in.
 
@@ -151,7 +151,10 @@ nothing # hide
 
 The loop head is the only node with `:feedback` ports. Its normal inputs are
 the initial values; the feedback inputs carry the state of the previous turn,
-and they are not `required`, because on the first turn their buffers are empty.
+and they are declared `required = false` to say that the first turn finds them
+empty. The engine does not need telling: a `:feedback` port is exempt from the
+required-buffer check whatever its `required` flag says. The declaration is for
+whoever reads the spec.
 
 ```@example bubble
 state_spec = NodeSpec("Loop state",
@@ -497,7 +500,7 @@ using MetidaFlows: getstate, getnode
  head_runs = getstate(getnode(w, head), :exec_n))
 ```
 
-Five elements give `5 * 4 / 2 = 10` turns, and the head runs eleven times — the
+Five elements give `5 * 4 / 2 = 10` turns, and the head runs eleven times - the
 eleventh closes the loop. Every node of the body runs exactly once per turn:
 that is the synchronous layout paying off.
 
@@ -516,7 +519,7 @@ getdata(w1, gate1, :sorted)
   iterations. The default `maxiter = 1000` covers five elements; twenty need
   about four thousand. The run aborts with an error rather than hanging.
 
-* **A full reset starts the loop over.** `reset_mode = :full` — the default —
+* **A full reset starts the loop over.** `reset_mode = :full` - the default -
   calls [`reset!`](@ref), which drops the cached data and clears the buffers of
   `:feedback` ports, so a second [`scheduler!`](@ref) call sorts again from the
   beginning. Pass `reset_mode = :soft` to keep the loop state and continue

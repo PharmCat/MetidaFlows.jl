@@ -23,8 +23,12 @@ A node has two halves: a *declaration* that never changes and a *state* that the
 | `properties` | [`NodeProperties`](@ref) | id, status, editor position |
 | `settings` | `Dict{Symbol,Any}` | configuration values |
 | `data` | `Dict{Symbol,Any}` | cached outputs, keyed by output port label |
-| `state` | [`NodeState`](@ref) | ready ports, run id, per-run log |
-| `input_buffer` | nested `Dict` | `input_buffer[port][connection id] = value` |
+| `state` | [`NodeState`](@ref) | ready ports, run id, stop flag, execution count, per-run log |
+| `input_buffer` | `Dict{Symbol, PortBuffer}` | `input_buffer[port][connection id] = value` |
+
+Those are the default containers. A node type may hand out typed structs
+instead, and then a node holds no `Dict` at all - see
+[Typed containers](typed_containers.md).
 
 The spec is the single source of truth. [`setdata!`](@ref) refuses labels that
 are not output ports, [`getinputdata`](@ref) refuses labels that are not input
@@ -40,7 +44,11 @@ PortSpec("Values", Int, :values, MultiPort())                    # many-to-one
 
 The `datatype` is used for connection type checking, `label` is the symbol you
 use everywhere in code, and `required` controls whether the engine refuses to
-run a node whose buffer is still empty.
+run a node whose buffer is still empty. A port also carries a `kind`
+(`:normal`, `:terminal`, `:feedback`, `:error`) and may declare `handover`,
+which lets its consumer take the value and work on it in place; both are
+keywords of [`PortSpec`](@ref) and have a page of their own,
+[Ports](guide_ports.md).
 
 Introspection helpers: [`haveinputs`](@ref), [`getportnumber`](@ref),
 [`getporttype`](@ref), [`getportspec`](@ref), [`isportexist`](@ref),
@@ -62,7 +70,15 @@ cid = add_connection!(w, parent_id, :out, child_id, :in)
 * both nodes exist,
 * both ports exist in their specs,
 * the target input port is free, or declared as a [`MultiPort`](@ref),
-* the output datatype is a subtype of the input datatype.
+* the output datatype is a subtype of the input datatype,
+* an input declared `handover` is fed by an output that declares it too - a
+  consumer may only take what a producer offers,
+* an output declared `handover` has no connection yet: it gives its value
+  away, so a second consumer would receive what the first may already have
+  modified.
+
+A connection leaving a `:terminal` output is allowed but warns: such a port is
+meant to end a branch. `throw_warn = false` silences it.
 
 A rejected connection consumes nothing. Identifiers come from monotonically
 increasing counters, so **ids of deleted nodes and connections are never
@@ -73,7 +89,9 @@ Two ordering rules are worth remembering:
 * [`add_node!`](@ref) resets a node not in `:idle` or `:clean` state. 
 Configure with [`setsettings!`](@ref) *after* adding.
 * if the parent is already `:clean` when the connection is created, its output
-  is copied into the child buffer immediately - no recomputation needed.
+  goes straight into the child's buffer, so nothing has to be recomputed.
+  Nothing is copied on the way: the parent's cache and the child's buffer hold
+  one object.
 
 Topology queries: [`getnode`](@ref), [`getconnection`](@ref),
 [`isnodeexist`](@ref), [`find_connections`](@ref),
@@ -236,7 +254,8 @@ node, so the node ends `:failed` and the message names the label, instead of
 ending `:clean` while a consumer silently gets nothing. Returning a vector goes
 on working and means exactly the same to the engine.
 
-Four optional hooks specialise validation; all default to `true`:
+Three optional hooks specialise validation, all of them `true` by default, and
+two more are there to be specialised rather than to refuse anything:
 
 | Hook | When | Status on failure |
 |---|---|---|
@@ -248,8 +267,6 @@ Four optional hooks specialise validation; all default to `true`:
 
 Because [`validate_result`](@ref) runs *before* [`push_buffer!`](@ref), a node
 that fails result validation never publishes anything downstream.
-
----
 
 ---
 
@@ -315,8 +332,9 @@ nothing.
 
 ## Things to keep in mind
 
-* Settings are **merged**, not replaced: `setsettings!` only overwrites the
-  keys you pass.
+* Settings are **merged** by default: `setsettings!` only overwrites the keys
+  you pass. `setsettings!(w, id, s; replace = true)` makes `s` the whole
+  configuration instead, which is the only way to remove a setting.
 * Manual `execute!` with `execute_upstream = false` will not refresh stale
   parents; the node is simply rejected with `:invalid_node` if a required
   input is missing.

@@ -4,9 +4,9 @@ CurrentModule = MetidaFlows
 
 ## Horner's scheme: a `DAW` algorithm with the loop unrolled
 
-Every other algorithm in these examples is an `ABW` workflow: one flat loop,
-all state in `:feedback` ports, and a graph whose size says nothing about the
-size of the problem. Horner's scheme is the opposite.
+Every iterative algorithm in these examples is an `ABW` workflow: one flat
+loop, all state in `:feedback` ports, and a graph whose size says nothing about
+the size of the problem. Horner's scheme is the opposite.
 
 ```julia
 value = a[n]
@@ -16,7 +16,7 @@ end
 ```
 
 Here the loop is **unrolled into the structure**. Every iteration is a separate
-pair of nodes — one multiplication, one addition — so the degree of the
+pair of nodes - one multiplication, one addition - so the degree of the
 polynomial is visible in the size of the graph. There are no feedback ports, no
 state, no turns, and every node executes exactly once per run.
 
@@ -42,7 +42,7 @@ end
 
 In the graph that means the output of every `b` stage goes to **two**
 consumers: the next `b` stage and the matching `d` stage. The result is a
-diamond at every stage — a real branching DAG rather than a chain.
+diamond at every stage - a real branching DAG rather than a chain.
 
 ### The nodes
 
@@ -84,12 +84,15 @@ end
 nothing # hide
 ```
 
-`HResult` looks redundant — it only passes two values through. It exists
+`HResult` looks redundant - it only passes two values through. It exists
 because **a port kind lives in the spec, and a spec is shared by every node of
 its type.** The output of the last `HAdd` is connected to nothing, so it is
 terminal by intent; but marking it `kind = :terminal` would mark the output of
 every intermediate stage too, and those *are* connected. A dedicated node type
-is the only way to give a particular place in the graph a terminal port.
+is one way to give a particular place in the graph a terminal port. The other is
+[`replaceport!`](@ref), which hands that one node a spec of its own - it copies
+the spec rather than editing the shared one - and is the tool when the kind has
+to change on a graph that is already built.
 
 ### The graph
 
@@ -124,7 +127,7 @@ exactly one addition, and `a3` is special: it both starts the `b` chain and is
 the `b(k-1)` that the first `d` addition needs.
 
 The diamond is in the last line of each pair. The output of `badd1` has **two**
-consumers — `bmul2.a` in its own chain and `dadd2.b` in the other, which is
+consumers - `bmul2.a` in its own chain and `dadd2.b` in the other, which is
 what makes this a branching acyclic graph rather than two chains. It is
 printed from the finished graph [below](#The-diamond,-read-off-the-graph).
 
@@ -208,7 +211,7 @@ Every node runs exactly once, which is the `DAW` guarantee:
 
 ### The diamond, read off the graph
 
-The claim above — that each `b` stage feeds two consumers, one in each chain —
+The claim above - that each `b` stage feeds two consumers, one in each chain -
 is a property of the connections, so let the graph state it. Every line below
 is read from `w.connections`, not written by hand:
 
@@ -241,7 +244,7 @@ join([ "bmul$k = $(name(src(g.bmul[k], :a))) · $(name(src(g.bmul[k], :b)))\t" *
 ### Pull: only what the question needs
 
 [`scheduler!`](@ref) computes the whole graph. [`execute!`](@ref) computes only
-what the node you asked for depends on — so asking for the value does not touch
+what the node you asked for depends on - so asking for the value does not touch
 the derivative chain at all:
 
 ```@example horner
@@ -255,7 +258,7 @@ execute!(g.w, last(g.badd))
  zero_source  = getnode(g.w, g.czero).state.exec_n)
 ```
 
-Ask for the result afterwards and only the missing part is computed — the value
+Ask for the result afterwards and only the missing part is computed - the value
 chain is already cached:
 
 ```@example horner
@@ -317,15 +320,15 @@ g = horner(copy(coeffs), 0.1)
  fused = fused(coeffs, 0.1), evalpoly = evalpoly(0.1, reverse(coeffs)))
 ```
 
-The divergence is rare — one case in forty-two over a spread of polynomials and
-points — but it is not noise: it is the cost of decomposing an algorithm into
+The divergence is rare - one case in forty-two over a spread of polynomials and
+points - but it is not noise: it is the cost of decomposing an algorithm into
 elementary nodes. Anything a compiler would have fused, a graph cannot.
 
 ### Things to watch
 
 * **The degenerate first stage is a real node.** The derivative chain starts
   from `d = 0`, so its first multiplication computes `0 · x`. Unrolling a loop
-  into structure means even a trivial iteration costs a node — and that node
+  into structure means even a trivial iteration costs a node - and that node
   depends on nothing but `x`, so it stays `:clean` when any coefficient
   changes.
 
